@@ -1,0 +1,10 @@
+{
+  "name": "Dashboard Open Finance Inteligente",
+  "description": "Plataforma completa de gestão financeira pessoal e empresarial integrada ao ecossistema de Open Finance com inteligência artificial para categorização de transações.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
