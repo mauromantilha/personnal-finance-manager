@@ -4,30 +4,26 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Building2, 
-  Shield, 
-  Database, 
-  Network, 
-  Target, 
-  BarChart3, 
-  Bell, 
-  Sparkles, 
-  ArrowUpRight, 
-  ArrowDownRight,
+import {
+  Building2,
+  Shield,
+  Database,
+  Network,
+  Target,
+  BarChart3,
+  Bell,
+  CreditCard as CreditCardIcon,
   RefreshCw,
-  TrendingUp,
-  AlertCircle,
   Clock,
   Menu,
   X,
-  HelpCircle,
   LogOut
 } from 'lucide-react';
 
 // Subcomponents imports
 import AuthModule from './components/AuthModule';
 import CoreFinanceModule from './components/CoreFinanceModule';
+import CreditCardModule from './components/CreditCardModule';
 import OpenFinanceModule from './components/OpenFinanceModule';
 import BudgetsModule from './components/BudgetsModule';
 import AnalyticsModule from './components/AnalyticsModule';
@@ -35,20 +31,24 @@ import NotificationsModule from './components/NotificationsModule';
 import AIAdvisor from './components/AIAdvisor';
 import LoginScreen from './components/LoginScreen';
 
-import { 
-  UserProfile, 
-  FinancialAccount, 
-  Transaction, 
-  BankConnection, 
-  CategoryBudget, 
-  FinancialGoal, 
+import {
+  UserProfile,
+  FinancialAccount,
+  Transaction,
+  BankConnection,
+  CategoryBudget,
+  FinancialGoal,
   NotificationAlert,
-  ChatMessage 
+  ChatMessage,
+  Category,
+  CreditCard,
+  Invoice
 } from './types';
+
+type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS';
 
 export default function App() {
   // Navigation tabs
-  type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS';
   const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -70,6 +70,9 @@ export default function App() {
   const [goals, setGoals] = useState<FinancialGoal[]>([]);
   const [alerts, setAlerts] = useState<NotificationAlert[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -85,6 +88,9 @@ export default function App() {
         setBudgets(data.budgets || []);
         setGoals(data.goals || []);
         setAlerts(data.alerts || []);
+        setCategories(data.categories || []);
+        setCreditCards(data.creditCards || []);
+        setInvoices(data.invoices || []);
         if (data.chatHistory && data.chatHistory.length > 0) {
           setChatHistory(data.chatHistory);
         }
@@ -232,6 +238,38 @@ export default function App() {
     return false;
   };
 
+  const handleAddCreditCard = async (data: any): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/credit-cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleUpdateCreditCard = async (id: string, data: any): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/credit-cards/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleDeleteCreditCard = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/credit-cards/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handlePayInvoice = async (invoiceId: string, accountId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/pay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId }) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
   const handleMarkAlertRead = async (id: string) => {
     try {
       const response = await fetch('/api/alerts/read', {
@@ -349,17 +387,21 @@ export default function App() {
     setGoals([]);
     setAlerts([]);
     setChatHistory([]);
+    setCategories([]);
+    setCreditCards([]);
+    setInvoices([]);
   };
 
   // Nav configuration
-  const sidebarNavItems = [
-    { id: 'DASHBOARD', label: 'Estatísticas Gerais', icon: Building2 },
-    { id: 'AUTH', label: 'Módulo 1: Auth & IAM Security', icon: Shield },
-    { id: 'CORE', label: 'Módulo 2: Contas & Ledger', icon: Database },
-    { id: 'OPEN_FINANCE', label: 'Módulo 3: Open Finance', icon: Network },
-    { id: 'BUDGETS', label: 'Módulo 4: Planejamento', icon: Target },
-    { id: 'ANALYTICS', label: 'Módulo 5: Relatórios', icon: BarChart3 },
-    { id: 'NOTIFICATIONS', label: 'Módulo 6: Notificações', icon: Bell, badge: unreadAlertsCount }
+  const sidebarNavItems: { id: TabType; label: string; icon: React.ElementType; badge?: number }[] = [
+    { id: 'DASHBOARD',    label: 'Estatísticas Gerais',         icon: Building2 },
+    { id: 'AUTH',         label: 'Módulo 1: Auth & IAM',        icon: Shield },
+    { id: 'CORE',         label: 'Módulo 2: Contas & Ledger',   icon: Database },
+    { id: 'CREDIT_CARDS', label: 'Módulo 3: Cartões & Faturas', icon: CreditCardIcon },
+    { id: 'OPEN_FINANCE', label: 'Módulo 4: Open Finance',      icon: Network },
+    { id: 'BUDGETS',      label: 'Módulo 5: Planejamento',      icon: Target },
+    { id: 'ANALYTICS',    label: 'Módulo 6: Relatórios',        icon: BarChart3 },
+    { id: 'NOTIFICATIONS',label: 'Módulo 7: Notificações',      icon: Bell, badge: unreadAlertsCount },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -562,6 +604,8 @@ export default function App() {
                   <CoreFinanceModule
                     accounts={accounts}
                     transactions={transactions}
+                    categories={categories}
+                    creditCards={creditCards}
                     onAddTransaction={handleAddTransaction}
                     onAddAccount={handleAddAccount}
                     onDeleteTransaction={handleDeleteTransaction}
@@ -601,7 +645,7 @@ export default function App() {
                               </span>
                             </div>
                             <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-                              <div 
+                              <div
                                 style={{ width: `${percent}%` }}
                                 className={`h-full ${ratio >= 1.0 ? 'bg-rose-500' : ratio >= 0.8 ? 'bg-amber-400' : 'bg-emerald-400'}`}
                               />
@@ -611,6 +655,46 @@ export default function App() {
                       })}
                     </div>
                   </div>
+
+                  {/* Credit cards summary widget */}
+                  {creditCards.length > 0 && (
+                    <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                      <h3 className="font-semibold text-slate-800 text-xs uppercase tracking-wider flex items-center justify-between pb-2 border-b border-slate-50">
+                        <span>💳 Cartões de Crédito</span>
+                        <button onClick={() => setActiveTab('CREDIT_CARDS')} className="text-violet-600 hover:text-violet-800 text-[10px] lowercase font-bold">
+                          Gerenciar →
+                        </button>
+                      </h3>
+                      <div className="space-y-3">
+                        {creditCards.map(card => {
+                          const currentMonth = new Date().toISOString().slice(0, 7);
+                          const inv = invoices.find(i => i.creditCardId === card.id && i.month === currentMonth);
+                          const used = inv?.totalInCents || 0;
+                          const pct = card.limitInCents > 0 ? Math.min((used / card.limitInCents) * 100, 100) : 0;
+                          return (
+                            <div key={card.id} className="space-y-1">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: card.color }} />
+                                  {card.name}
+                                </span>
+                                <span className="font-mono text-[11px] font-bold text-rose-600">
+                                  {(used / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </span>
+                              </div>
+                              <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                                <div style={{ width: `${pct}%`, backgroundColor: card.color }} className="h-full transition-all" />
+                              </div>
+                              <div className="text-[10px] text-slate-400 flex justify-between">
+                                <span>{Math.round(pct)}% do limite</span>
+                                <span className="text-emerald-600">Disponível: {((card.limitInCents - used) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                 </div>
 
@@ -628,9 +712,24 @@ export default function App() {
             <CoreFinanceModule
               accounts={accounts}
               transactions={transactions}
+              categories={categories}
+              creditCards={creditCards}
               onAddTransaction={handleAddTransaction}
               onAddAccount={handleAddAccount}
               onDeleteTransaction={handleDeleteTransaction}
+            />
+          )}
+
+          {activeTab === 'CREDIT_CARDS' && (
+            <CreditCardModule
+              creditCards={creditCards}
+              invoices={invoices}
+              accounts={accounts}
+              transactions={transactions}
+              onAddCard={handleAddCreditCard}
+              onUpdateCard={handleUpdateCreditCard}
+              onDeleteCard={handleDeleteCreditCard}
+              onPayInvoice={handlePayInvoice}
             />
           )}
 

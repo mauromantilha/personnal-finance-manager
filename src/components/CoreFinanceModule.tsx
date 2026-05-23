@@ -17,12 +17,14 @@ import {
   HelpCircle,
   Trash2
 } from 'lucide-react';
-import { FinancialAccount, Transaction, AccountType, TransactionType } from '../types';
+import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard } from '../types';
 
 interface CoreFinanceModuleProps {
   accounts: FinancialAccount[];
   transactions: Transaction[];
-  onAddTransaction: (tx: Omit<Transaction, 'id' | 'isSynced'>) => Promise<boolean>;
+  categories: Category[];
+  creditCards: CreditCard[];
+  onAddTransaction: (tx: any) => Promise<boolean>;
   onAddAccount: (acc: Omit<FinancialAccount, 'id' | 'isLinked'>) => Promise<boolean>;
   onDeleteTransaction: (id: string) => Promise<boolean>;
 }
@@ -30,33 +32,41 @@ interface CoreFinanceModuleProps {
 export default function CoreFinanceModule({
   accounts,
   transactions,
+  categories,
+  creditCards,
   onAddTransaction,
   onAddAccount,
   onDeleteTransaction
 }: CoreFinanceModuleProps) {
-  
+
   // Wallet Creation form state
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [accName, setAccName] = useState('');
   const [accType, setAccType] = useState<AccountType>('CHECKING');
   const [accBank, setAccBank] = useState('Banco Itaú');
-  const [accBalance, setAccBalance] = useState(''); // String read as Real, e.g. "1250,50" -> converted to integers
+  const [accBalance, setAccBalance] = useState('');
   const [accColor, setAccColor] = useState('#0284C7');
 
   // Transaction form state
   const [txType, setTxType] = useState<TransactionType>('DES');
-  const [txAmount, setTxAmount] = useState(''); // E.g. "150,00"
+  const [txAmount, setTxAmount] = useState('');
   const [txDate, setTxDate] = useState(new Date().toISOString().split('T')[0]);
-  const [txCategory, setTxCategory] = useState('Alimentação');
+  const [txCategory, setTxCategory] = useState('');
   const [txDesc, setTxDesc] = useState('');
   const [txOriginAcc, setTxOriginAcc] = useState('');
   const [txDestAcc, setTxDestAcc] = useState('');
+  const [txCreditCardId, setTxCreditCardId] = useState('');
+  const [txInstallments, setTxInstallments] = useState('1');
+  const [useCard, setUseCard] = useState(false);
 
   // Info message
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Categories preset
-  const CATEGORIES = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Educação', 'Receitas', 'Investimento/Metas', 'Outros'];
+  // Derive category list from D1 (fallback to static if not loaded yet)
+  const FALLBACK_CATS = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Educação', 'Receita', 'Investimentos', 'Outros'];
+  const parentCategories = categories.filter(c => !c.parentId);
+  const categoryNames = parentCategories.length > 0 ? parentCategories.map(c => c.name) : FALLBACK_CATS;
+  const defaultCategory = categoryNames[0] || 'Alimentação';
 
   // Formatter helper
   const formatBRL = (cents: number) => {
@@ -99,39 +109,47 @@ export default function CoreFinanceModule({
 
   const handleCreateTransaction = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!txAmount || !txDesc || !txOriginAcc) {
-      setStatusMsg({ text: 'Compreenda todos os parâmetros obrigatórios da transação.', type: 'error' });
+    if (!txAmount || !txDesc) {
+      setStatusMsg({ text: 'Preencha todos os campos obrigatórios.', type: 'error' });
       return;
     }
-
+    if (useCard && !txCreditCardId) {
+      setStatusMsg({ text: 'Selecione o cartão de crédito.', type: 'error' });
+      return;
+    }
+    if (!useCard && !txOriginAcc) {
+      setStatusMsg({ text: 'Selecione a conta de débito/crédito.', type: 'error' });
+      return;
+    }
     if (txType === 'TRANS' && !txDestAcc) {
       setStatusMsg({ text: 'Transferências exigem uma conta de destino.', type: 'error' });
       return;
     }
-
     const parsedReal = parseFloat(txAmount.replace(',', '.'));
     if (isNaN(parsedReal) || parsedReal <= 0) {
-      setStatusMsg({ text: 'Digite um montante monetário válido maior que zero.', type: 'error' });
+      setStatusMsg({ text: 'Digite um valor válido maior que zero.', type: 'error' });
       return;
     }
     const amountInCents = Math.round(parsedReal * 100);
+    const cat = txType === 'REC' ? (txCategory || 'Receita') : (txCategory || defaultCategory);
 
-    const result = await onAddTransaction({
-      amountInCents,
-      date: txDate,
-      type: txType,
-      category: txType === 'REC' ? 'Receitas' : txCategory,
-      description: txDesc,
-      accountId: txOriginAcc,
-      destinationAccountId: txType === 'TRANS' ? txDestAcc : undefined
-    });
+    const payload: any = { amountInCents, date: txDate, type: txType, category: cat, description: txDesc };
+    if (useCard && txType === 'DES') {
+      payload.creditCardId = txCreditCardId;
+      payload.installments = parseInt(txInstallments, 10) || 1;
+    } else {
+      payload.accountId = txOriginAcc;
+      if (txType === 'TRANS') payload.destinationAccountId = txDestAcc;
+    }
 
+    const result = await onAddTransaction(payload);
     if (result) {
-      setStatusMsg({ text: 'Transação adicionada com sucesso na conta!', type: 'success' });
+      setStatusMsg({ text: 'Transação adicionada com sucesso!', type: 'success' });
       setTxAmount('');
       setTxDesc('');
+      setTxInstallments('1');
     } else {
-      setStatusMsg({ text: 'Falha ao processar as regras de transação.', type: 'error' });
+      setStatusMsg({ text: 'Falha ao processar a transação.', type: 'error' });
     }
     setTimeout(() => setStatusMsg(null), 4000);
   };
@@ -310,105 +328,94 @@ export default function CoreFinanceModule({
             <form onSubmit={handleCreateTransaction} className="space-y-4">
               {/* Type selector */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Qual o tipo de lançamento?</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Tipo de lançamento</label>
                 <div className="grid grid-cols-3 gap-2">
-                  <button 
-                    type="button"
-                    onClick={() => { setTxType('DES'); setTxCategory('Alimentação'); }}
-                    className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${
-                      txType === 'DES' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
+                  <button type="button" onClick={() => { setTxType('DES'); setUseCard(false); setTxCategory(defaultCategory); }}
+                    className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${txType === 'DES' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'}`}>
                     <ArrowUpRight className="w-4 h-4 text-rose-500" /> Despesa (-)
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => { setTxType('REC'); setTxCategory('Receita'); }}
-                    className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${
-                      txType === 'REC' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
+                  <button type="button" onClick={() => { setTxType('REC'); setUseCard(false); setTxCategory('Receita'); }}
+                    className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${txType === 'REC' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'}`}>
                     <ArrowDownLeft className="w-4 h-4 text-emerald-500" /> Receita (+)
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => { setTxType('TRANS'); setTxCategory('Investimento/Metas'); }}
-                    className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${
-                      txType === 'TRANS' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
+                  <button type="button" onClick={() => { setTxType('TRANS'); setUseCard(false); setTxCategory('Investimentos'); }}
+                    className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${txType === 'TRANS' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'}`}>
                     <ArrowLeftRight className="w-4 h-4 text-indigo-500" /> Transferência
                   </button>
                 </div>
               </div>
 
+              {/* Card toggle (only for DES) */}
+              {txType === 'DES' && creditCards.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => setUseCard(!useCard)}
+                    className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border-2 transition-all flex items-center gap-1.5 ${useCard ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                    💳 {useCard ? 'Cartão selecionado' : 'Pagar com cartão'}
+                  </button>
+                  {useCard && (
+                    <select value={txCreditCardId} onChange={e => setTxCreditCardId(e.target.value)}
+                      className="flex-1 text-xs border border-violet-200 rounded-lg px-3 py-1.5 bg-violet-50/30 focus:outline-none font-semibold">
+                      <option value="">Selecione o cartão...</option>
+                      {creditCards.map(c => <option key={c.id} value={c.id}>{c.name}{c.lastFour ? ` •••• ${c.lastFour}` : ''}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Montante Unitário (R$)</label>
-                  <input 
-                    type="text" 
-                    placeholder="E.g. 52,90"
-                    value={txAmount}
-                    onChange={(e) => setTxAmount(e.target.value)}
-                    className="w-full text-xs font-bold font-mono border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none"
-                  />
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Valor Total (R$)</label>
+                  <input type="text" placeholder="Ex: 52,90" value={txAmount} onChange={e => setTxAmount(e.target.value)}
+                    className="w-full text-xs font-bold font-mono border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data da Efetivação</label>
-                  <div className="relative">
-                    <input 
-                      type="date"
-                      value={txDate}
-                      onChange={(e) => setTxDate(e.target.value)}
-                      className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none"
-                    />
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data</label>
+                  <input type="date" value={txDate} onChange={e => setTxDate(e.target.value)}
+                    className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Categoria</label>
+                  <select value={txCategory} disabled={txType === 'REC'} onChange={e => setTxCategory(e.target.value)}
+                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold">
+                    {categoryNames.map((cat: string) => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                </div>
+
+                {/* Account OR installments */}
+                {!useCard ? (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      {txType === 'TRANS' ? 'Conta de Origem' : 'Conta'}
+                    </label>
+                    <select value={txOriginAcc} onChange={e => setTxOriginAcc(e.target.value)}
+                      className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold">
+                      <option value="">Selecione uma conta...</option>
+                      {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name} ({formatBRL(acc.balanceInCents)})</option>)}
+                    </select>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Parcelas</label>
+                    <select value={txInstallments} onChange={e => setTxInstallments(e.target.value)}
+                      className="w-full text-xs border border-violet-200 rounded-lg px-3 py-2 bg-violet-50/20 focus:outline-none font-semibold">
+                      {[1,2,3,4,5,6,7,8,9,10,11,12,18,24].map(n => (
+                        <option key={n} value={n}>{n === 1 ? 'À vista' : `${n}x`}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {txType === 'TRANS' && !useCard && (
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Categoria Contábil</label>
-                  <select 
-                    value={txCategory}
-                    disabled={txType === 'REC'}
-                    onChange={(e) => setTxCategory(e.target.value)}
-                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold"
-                  >
-                    {CATEGORIES.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                    {txType === 'TRANS' ? 'Carteira de Origem' : 'Conta de Débito/Crédito'}
-                  </label>
-                  <select 
-                    value={txOriginAcc}
-                    onChange={(e) => setTxOriginAcc(e.target.value)}
-                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold"
-                  >
-                    <option value="">Selecione uma conta...</option>
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.name} ({formatBRL(acc.balanceInCents)})</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {txType === 'TRANS' && (
-                <div className="animate-slideDown">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Carteira de Destino</label>
-                  <select 
-                    value={txDestAcc}
-                    onChange={(e) => setTxDestAcc(e.target.value)}
-                    className="w-full text-xs border border-teal-200 rounded-lg px-3 py-2 bg-emerald-50/20 focus:bg-white focus:outline-none focus:border-teal-500 font-semibold"
-                  >
-                    <option value="">Selecione uma conta destino...</option>
-                    {accounts.filter(a => a.id !== txOriginAcc).map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.name} ({formatBRL(acc.balanceInCents)})</option>
-                    ))}
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Conta de Destino</label>
+                  <select value={txDestAcc} onChange={e => setTxDestAcc(e.target.value)}
+                    className="w-full text-xs border border-teal-200 rounded-lg px-3 py-2 bg-emerald-50/20 focus:bg-white focus:outline-none focus:border-teal-500 font-semibold">
+                    <option value="">Selecione conta destino...</option>
+                    {accounts.filter(a => a.id !== txOriginAcc).map(acc => <option key={acc.id} value={acc.id}>{acc.name} ({formatBRL(acc.balanceInCents)})</option>)}
                   </select>
                 </div>
               )}

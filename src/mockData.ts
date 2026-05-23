@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FinancialAccount, Transaction, BankConnection, CategoryBudget, FinancialGoal, NotificationAlert } from './types';
+import { FinancialAccount, Transaction, BankConnection, CategoryBudget, FinancialGoal, NotificationAlert, Category, CreditCard, Invoice } from './types';
 
 export const INITIAL_ACCOUNTS: FinancialAccount[] = [
   {
@@ -265,6 +265,41 @@ export const INITIAL_GOALS: FinancialGoal[] = [
     targetDate: '2027-05-15',
     color: '#EA580C', // Orange
   }
+];
+
+export const INITIAL_CATEGORIES: Category[] = [
+  { id: 'cat-alimentacao',   name: 'Alimentação',   parentId: null,              icon: '🍽️', color: '#EA580C', type: 'expense' },
+  { id: 'cat-transporte',    name: 'Transporte',    parentId: null,              icon: '🚗',  color: '#0284C7', type: 'expense' },
+  { id: 'cat-moradia',       name: 'Moradia',       parentId: null,              icon: '🏠',  color: '#7C3AED', type: 'expense' },
+  { id: 'cat-saude',         name: 'Saúde',         parentId: null,              icon: '❤️', color: '#DC2626', type: 'expense' },
+  { id: 'cat-educacao',      name: 'Educação',      parentId: null,              icon: '📚',  color: '#0891B2', type: 'expense' },
+  { id: 'cat-lazer',         name: 'Lazer',         parentId: null,              icon: '🎮',  color: '#16A34A', type: 'expense' },
+  { id: 'cat-vestuario',     name: 'Vestuário',     parentId: null,              icon: '👕',  color: '#DB2777', type: 'expense' },
+  { id: 'cat-investimentos', name: 'Investimentos', parentId: null,              icon: '📈',  color: '#059669', type: 'both' },
+  { id: 'cat-receita',       name: 'Receita',       parentId: null,              icon: '💰',  color: '#EAB308', type: 'income' },
+  { id: 'cat-outros',        name: 'Outros',        parentId: null,              icon: '📦',  color: '#6B7280', type: 'both' },
+  { id: 'cat-supermercado',  name: 'Supermercado',  parentId: 'cat-alimentacao', icon: '🛒',  color: '#EA580C', type: 'expense' },
+  { id: 'cat-restaurante',   name: 'Restaurante',   parentId: 'cat-alimentacao', icon: '🍴',  color: '#F97316', type: 'expense' },
+  { id: 'cat-delivery',      name: 'Delivery',      parentId: 'cat-alimentacao', icon: '🛵',  color: '#FB923C', type: 'expense' },
+  { id: 'cat-uber',          name: 'Uber/99',       parentId: 'cat-transporte',  icon: '📱',  color: '#0284C7', type: 'expense' },
+  { id: 'cat-combustivel',   name: 'Combustível',   parentId: 'cat-transporte',  icon: '⛽',  color: '#0369A1', type: 'expense' },
+  { id: 'cat-aluguel',       name: 'Aluguel',       parentId: 'cat-moradia',     icon: '🔑',  color: '#7C3AED', type: 'expense' },
+  { id: 'cat-farmacia',      name: 'Farmácia',      parentId: 'cat-saude',       icon: '💊',  color: '#DC2626', type: 'expense' },
+  { id: 'cat-streaming',     name: 'Streaming',     parentId: 'cat-lazer',       icon: '📺',  color: '#16A34A', type: 'expense' },
+  { id: 'cat-viagem',        name: 'Viagem',        parentId: 'cat-lazer',       icon: '✈️', color: '#15803D', type: 'expense' },
+  { id: 'cat-salario',       name: 'Salário',       parentId: 'cat-receita',     icon: '💼',  color: '#EAB308', type: 'income' },
+  { id: 'cat-aporte',        name: 'Aporte',        parentId: 'cat-investimentos',icon: '💸', color: '#059669', type: 'expense' },
+];
+
+export const INITIAL_CREDIT_CARDS: CreditCard[] = [
+  { id: 'cc-1', name: 'Nubank Ultravioleta', bankName: 'Nubank',     lastFour: '4531', limitInCents: 1500000, billingDay: 12, dueDay: 19, color: '#8B5CF6', isActive: true },
+  { id: 'cc-2', name: 'Itaú Personnalité',   bankName: 'Banco Itaú', lastFour: '8872', limitInCents: 2000000, billingDay: 20, dueDay: 27, color: '#0284C7', isActive: true },
+];
+
+export const INITIAL_INVOICES: Invoice[] = [
+  { id: 'inv-cc1-2605', creditCardId: 'cc-1', month: '2026-05', totalInCents: 89740,  status: 'open', dueDate: '2026-06-19', paidAt: null, createdAt: '2026-05-01T00:00:00Z' },
+  { id: 'inv-cc2-2605', creditCardId: 'cc-2', month: '2026-05', totalInCents: 245300, status: 'open', dueDate: '2026-06-27', paidAt: null, createdAt: '2026-05-01T00:00:00Z' },
+  { id: 'inv-cc1-2604', creditCardId: 'cc-1', month: '2026-04', totalInCents: 112500, status: 'paid', dueDate: '2026-05-19', paidAt: '2026-05-19T10:30:00Z', createdAt: '2026-04-01T00:00:00Z' },
 ];
 
 export const INITIAL_ALERTS: NotificationAlert[] = [

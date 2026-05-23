@@ -18,7 +18,10 @@ import {
   CategoryBudget,
   FinancialGoal,
   NotificationAlert,
-  ChatMessage
+  ChatMessage,
+  Category,
+  CreditCard,
+  Invoice
 } from './src/types';
 import {
   INITIAL_ACCOUNTS,
@@ -110,7 +113,24 @@ function mapAccount(r: any): FinancialAccount {
   return { id: r.id, name: r.name, type: r.type, bankName: r.bank_name, balanceInCents: r.balance_in_cents, color: r.color, isLinked: !!r.is_linked };
 }
 function mapTransaction(r: any): Transaction {
-  return { id: r.id, amountInCents: r.amount_in_cents, date: r.date, type: r.type, category: r.category, description: r.description, accountId: r.account_id, destinationAccountId: r.destination_account_id || undefined, isSynced: !!r.is_synced, originalMerchantName: r.original_merchant_name || undefined };
+  return {
+    id: r.id, amountInCents: r.amount_in_cents, date: r.date, type: r.type,
+    category: r.category, description: r.description, accountId: r.account_id,
+    destinationAccountId: r.destination_account_id || undefined,
+    isSynced: !!r.is_synced, originalMerchantName: r.original_merchant_name || undefined,
+    creditCardId: r.credit_card_id || undefined, invoiceId: r.invoice_id || undefined,
+    installmentNumber: r.installment_number || undefined, installmentTotal: r.installment_total || undefined,
+    installmentGroupId: r.installment_group_id || undefined,
+  };
+}
+function mapCategory(r: any): Category {
+  return { id: r.id, name: r.name, parentId: r.parent_id || null, icon: r.icon, color: r.color, type: r.type };
+}
+function mapCreditCard(r: any): CreditCard {
+  return { id: r.id, name: r.name, bankName: r.bank_name, lastFour: r.last_four || null, limitInCents: r.limit_in_cents, billingDay: r.billing_day, dueDay: r.due_day, color: r.color, isActive: !!r.is_active };
+}
+function mapInvoice(r: any): Invoice {
+  return { id: r.id, creditCardId: r.credit_card_id, month: r.month, totalInCents: r.total_in_cents, status: r.status, dueDate: r.due_date || null, paidAt: r.paid_at || null, createdAt: r.created_at };
 }
 function mapBudget(r: any): CategoryBudget {
   return { id: r.id, category: r.category, limitInCents: r.limit_in_cents, spentInCents: r.spent_in_cents };
@@ -270,7 +290,7 @@ async function startServer() {
   app.get('/api/data', async (_req, res) => {
     try {
       await recalculateBudgets();
-      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory] = await Promise.all([
+      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices] = await Promise.all([
         d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
         d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
         d1q<any>('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction)),
@@ -278,8 +298,11 @@ async function startServer() {
         d1q<any>('SELECT * FROM goals').then(r => r.map(mapGoal)),
         d1q<any>('SELECT * FROM alerts ORDER BY date DESC').then(r => r.map(mapAlert)),
         d1q<any>('SELECT * FROM chat_history ORDER BY rowid ASC').then(r => r.map(mapChat)),
+        d1q<any>('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC').then(r => r.map(mapCategory)),
+        d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1').then(r => r.map(mapCreditCard)),
+        d1q<any>('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice)),
       ]);
-      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory });
+      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices });
     } catch (e: any) {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -289,8 +312,9 @@ async function startServer() {
   // ── CREATE TRANSACTION ─────────────────────────────────────────────────────
 
   app.post('/api/transactions', async (req, res) => {
-    const { amountInCents, date, type, category, description, accountId, destinationAccountId } = req.body;
-    if (!amountInCents || !date || !type || !category || !description || !accountId)
+    const { amountInCents, date, type, category, description, accountId, destinationAccountId,
+            creditCardId, installments } = req.body;
+    if (!amountInCents || !date || !type || !category || !description)
       return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
     if (!VALID_TX_TYPES.includes(type))
       return res.status(400).json({ error: 'Tipo inválido. Use REC, DES ou TRANS.' });
@@ -298,25 +322,68 @@ async function startServer() {
     if (isNaN(amount) || amount <= 0)
       return res.status(400).json({ error: 'Valor deve ser inteiro positivo em centavos.' });
 
-    const id = `tx-usr-${Date.now()}`;
+    // Credit card transaction: accountId is optional (card carries the debt)
+    const isCreditCard = !!creditCardId;
+    if (!isCreditCard && !accountId)
+      return res.status(400).json({ error: 'accountId obrigatório para transações sem cartão.' });
+
+    const numInstallments = installments && installments > 1 ? Math.min(parseInt(installments, 10), 48) : 1;
+    const installmentGroupId = numInstallments > 1 ? `grp-${Date.now()}` : null;
+    const baseId = `tx-usr-${Date.now()}`;
+
     try {
-      const stmts: { sql: string; params: (string | number | null)[] }[] = [{
-        sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,?,0)',
-        params: [id, amount, date, type, category, description, accountId, destinationAccountId || null]
-      }];
-      if (type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
-      else if (type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, accountId] });
-      else if (type === 'TRANS') {
-        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
-        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, destinationAccountId] });
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+
+      if (isCreditCard) {
+        // Resolve or create invoice for the billing month
+        const txDate = new Date(date);
+        const cardRows = await d1q<any>('SELECT * FROM credit_cards WHERE id = ?', [creditCardId]);
+        if (!cardRows.length) return res.status(404).json({ error: 'Cartão não encontrado.' });
+        const card = mapCreditCard(cardRows[0]);
+
+        for (let i = 0; i < numInstallments; i++) {
+          const instDate = new Date(txDate);
+          instDate.setMonth(instDate.getMonth() + i);
+          const instMonth = `${instDate.getFullYear()}-${String(instDate.getMonth() + 1).padStart(2, '0')}`;
+          const instAmount = Math.round(amount / numInstallments);
+
+          // Ensure invoice exists
+          const invId = `inv-${creditCardId}-${instMonth.replace('-', '')}`;
+          const dueYear = instDate.getMonth() + 1 === 12 ? instDate.getFullYear() + 1 : instDate.getFullYear();
+          const dueMonth = ((instDate.getMonth() + 1) % 12) + 1;
+          const dueDate = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(card.dueDay).padStart(2, '0')}`;
+
+          stmts.push({ sql: `INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))`, params: [invId, creditCardId, instMonth, dueDate] });
+          stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [instAmount, invId] });
+
+          const txId = numInstallments > 1 ? `${baseId}-${i + 1}` : baseId;
+          stmts.push({
+            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?)',
+            params: [txId, instAmount, instDate.toISOString().split('T')[0], type, category,
+              numInstallments > 1 ? `${description} (${i + 1}/${numInstallments})` : description,
+              creditCardId, invId, numInstallments > 1 ? i + 1 : null, numInstallments > 1 ? numInstallments : null, installmentGroupId]
+          });
+        }
+      } else {
+        stmts.push({
+          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,?,0)',
+          params: [baseId, amount, date, type, category, description, accountId, destinationAccountId || null]
+        });
+        if (type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
+        else if (type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, accountId] });
+        else if (type === 'TRANS') {
+          stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
+          stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, destinationAccountId] });
+        }
       }
+
       await d1exec(stmts);
       await recalculateBudgets();
-      if (type === 'DES') {
-        const rows = await d1q<any>('SELECT * FROM transactions WHERE id = ?', [id]);
+      if (type === 'DES' && !isCreditCard) {
+        const rows = await d1q<any>('SELECT * FROM transactions WHERE id = ?', [baseId]);
         if (rows[0]) await checkBudgetThresholds(mapTransaction(rows[0]));
       }
-      res.status(201).json({ id });
+      res.status(201).json({ id: baseId });
     } catch (e: any) {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -542,6 +609,112 @@ async function startServer() {
     } catch (e: any) {
       res.status(500).json({ error: 'Backup failed', details: e.message });
     }
+  });
+
+  // ── CATEGORIES ────────────────────────────────────────────────────────────
+
+  app.get('/api/categories', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC');
+      res.json(rows.map(mapCategory));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/categories', async (req, res) => {
+    const { name, parentId, icon, color, type: catType } = req.body;
+    if (!name) return res.status(400).json({ error: 'name obrigatório.' });
+    const id = `cat-usr-${Date.now()}`;
+    try {
+      await d1q('INSERT INTO categories VALUES (?,?,?,?,?,?)', [id, name, parentId || null, icon || '📦', color || '#6B7280', catType || 'both']);
+      res.status(201).json({ id });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/categories/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      // Prevent deleting parent if children exist
+      const children = await d1q('SELECT id FROM categories WHERE parent_id = ?', [id]);
+      if (children.length) return res.status(400).json({ error: 'Remova as subcategorias antes de excluir a categoria pai.' });
+      await d1q('DELETE FROM categories WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── CREDIT CARDS ──────────────────────────────────────────────────────────
+
+  app.get('/api/credit-cards', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1');
+      res.json(rows.map(mapCreditCard));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/credit-cards', async (req, res) => {
+    const { name, bankName, lastFour, limitInCents, billingDay, dueDay, color } = req.body;
+    if (!name || !bankName || !limitInCents)
+      return res.status(400).json({ error: 'name, bankName e limitInCents são obrigatórios.' });
+    const id = `cc-usr-${Date.now()}`;
+    try {
+      await d1q('INSERT INTO credit_cards VALUES (?,?,?,?,?,?,?,?,1)',
+        [id, name, bankName, lastFour || null, parseInt(limitInCents, 10), billingDay || 1, dueDay || 10, color || '#6366F1']);
+      res.status(201).json({ id });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.put('/api/credit-cards/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, bankName, lastFour, limitInCents, billingDay, dueDay, color } = req.body;
+    try {
+      const rows = await d1q('SELECT id FROM credit_cards WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Cartão não encontrado.' });
+      await d1q('UPDATE credit_cards SET name=?,bank_name=?,last_four=?,limit_in_cents=?,billing_day=?,due_day=?,color=? WHERE id=?',
+        [name, bankName, lastFour || null, parseInt(limitInCents, 10), billingDay || 1, dueDay || 10, color || '#6366F1', id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/credit-cards/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      await d1q('UPDATE credit_cards SET is_active = 0 WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── INVOICES ──────────────────────────────────────────────────────────────
+
+  app.get('/api/invoices', async (req, res) => {
+    try {
+      const { creditCardId, month } = req.query;
+      let sql = 'SELECT * FROM invoices WHERE 1=1';
+      const params: string[] = [];
+      if (creditCardId) { sql += ' AND credit_card_id = ?'; params.push(creditCardId as string); }
+      if (month) { sql += ' AND month = ?'; params.push(month as string); }
+      sql += ' ORDER BY month DESC';
+      const rows = await d1q<any>(sql, params);
+      res.json(rows.map(mapInvoice));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // Pay invoice: debit an account, mark invoice as paid
+  app.post('/api/invoices/:id/pay', async (req, res) => {
+    const { id } = req.params;
+    const { accountId } = req.body;
+    if (!accountId) return res.status(400).json({ error: 'accountId obrigatório para pagamento.' });
+    try {
+      const invRows = await d1q<any>('SELECT * FROM invoices WHERE id = ?', [id]);
+      if (!invRows.length) return res.status(404).json({ error: 'Fatura não encontrada.' });
+      const inv = mapInvoice(invRows[0]);
+      if (inv.status === 'paid') return res.status(400).json({ error: 'Fatura já está paga.' });
+
+      const paidAt = new Date().toISOString();
+      await d1exec([
+        { sql: 'UPDATE invoices SET status = ?, paid_at = ? WHERE id = ?', params: ['paid', paidAt, id] },
+        { sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [inv.totalInCents, accountId] },
+      ]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
 
   // ── AI ADVISOR ─────────────────────────────────────────────────────────────

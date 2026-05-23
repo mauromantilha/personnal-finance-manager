@@ -28,15 +28,54 @@ export type TransactionType = 'REC' | 'DES' | 'TRANS';
 
 export interface Transaction {
   id: string;
-  amountInCents: number; // Stored strictly as positive integer representing cents (positive for both ingress/egress, identified by 'type')
+  amountInCents: number;
   date: string; // ISO 8601 YYYY-MM-DD
   type: TransactionType;
   category: string;
   description: string;
   accountId: string;
-  destinationAccountId?: string; // For transfers
-  isSynced: boolean; // True if loaded via Open Finance
-  originalMerchantName?: string; // External original name before intelligent auto-categorization
+  destinationAccountId?: string;
+  isSynced: boolean;
+  originalMerchantName?: string;
+  // Credit card + installments
+  creditCardId?: string;
+  invoiceId?: string;
+  installmentNumber?: number;
+  installmentTotal?: number;
+  installmentGroupId?: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  parentId: string | null;
+  icon: string;
+  color: string;
+  type: 'income' | 'expense' | 'both';
+  children?: Category[];
+}
+
+export interface CreditCard {
+  id: string;
+  name: string;
+  bankName: string;
+  lastFour: string | null;
+  limitInCents: number;
+  billingDay: number;
+  dueDay: number;
+  color: string;
+  isActive: boolean;
+}
+
+export interface Invoice {
+  id: string;
+  creditCardId: string;
+  month: string; // 'YYYY-MM'
+  totalInCents: number;
+  status: 'open' | 'closed' | 'paid';
+  dueDate: string | null;
+  paidAt: string | null;
+  createdAt: string;
 }
 
 export interface BankConnection {
