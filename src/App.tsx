@@ -204,6 +204,19 @@ export default function App() {
     return false;
   };
 
+  const handleDeleteTransaction = async (id: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        await fetchAllData();
+        return true;
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    return false;
+  };
+
   const handleDeleteGoal = async (id: string): Promise<boolean> => {
     try {
       const response = await fetch(`/api/goals/${id}`, {
@@ -264,7 +277,7 @@ export default function App() {
     setChatHistory(prev => [...prev, newUserMsg]);
 
     try {
-      const response = await fetch('/api/gemini/advisor', {
+      const response = await fetch('/api/groq/advisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text })
@@ -551,6 +564,7 @@ export default function App() {
                     transactions={transactions}
                     onAddTransaction={handleAddTransaction}
                     onAddAccount={handleAddAccount}
+                    onDeleteTransaction={handleDeleteTransaction}
                   />
 
                 </div>
@@ -611,11 +625,12 @@ export default function App() {
           )}
 
           {activeTab === 'CORE' && (
-            <CoreFinanceModule 
+            <CoreFinanceModule
               accounts={accounts}
               transactions={transactions}
               onAddTransaction={handleAddTransaction}
               onAddAccount={handleAddAccount}
+              onDeleteTransaction={handleDeleteTransaction}
             />
           )}
 

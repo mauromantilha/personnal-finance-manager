@@ -4,34 +4,35 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Wallet, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  ArrowLeftRight, 
-  Plus, 
+import {
+  Wallet,
+  ArrowUpRight,
+  ArrowDownLeft,
+  ArrowLeftRight,
+  Plus,
   Database,
-  Tag, 
-  Calendar, 
-  FileText, 
-  CheckCircle, 
+  FileText,
+  CheckCircle,
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  Trash2
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType } from '../types';
 
 interface CoreFinanceModuleProps {
   accounts: FinancialAccount[];
   transactions: Transaction[];
-  onAddTransaction: (tx: any) => Promise<boolean>;
-  onAddAccount: (acc: any) => Promise<boolean>;
+  onAddTransaction: (tx: Omit<Transaction, 'id' | 'isSynced'>) => Promise<boolean>;
+  onAddAccount: (acc: Omit<FinancialAccount, 'id' | 'isLinked'>) => Promise<boolean>;
+  onDeleteTransaction: (id: string) => Promise<boolean>;
 }
 
-export default function CoreFinanceModule({ 
-  accounts, 
-  transactions, 
-  onAddTransaction, 
-  onAddAccount 
+export default function CoreFinanceModule({
+  accounts,
+  transactions,
+  onAddTransaction,
+  onAddAccount,
+  onDeleteTransaction
 }: CoreFinanceModuleProps) {
   
   // Wallet Creation form state
@@ -62,7 +63,7 @@ export default function CoreFinanceModule({
     return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
-  const handleCreateAccount = async (e: React.FormEvent) => {
+  const handleCreateAccount = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!accName || !accBalance) {
       setStatusMsg({ text: 'Por favor, preencha todos os dados da carteira.', type: 'error' });
@@ -96,7 +97,7 @@ export default function CoreFinanceModule({
     setTimeout(() => setStatusMsg(null), 4000);
   };
 
-  const handleCreateTransaction = async (e: React.FormEvent) => {
+  const handleCreateTransaction = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!txAmount || !txDesc || !txOriginAcc) {
       setStatusMsg({ text: 'Compreenda todos os parâmetros obrigatórios da transação.', type: 'error' });
@@ -454,6 +455,7 @@ export default function CoreFinanceModule({
                 <th className="py-2.5 px-3">Canal</th>
                 <th className="py-2.5 px-3">Origem</th>
                 <th className="py-2.5 px-3 text-right">Valor Consolidado</th>
+                <th className="py-2.5 px-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-600 font-medium">
@@ -493,6 +495,15 @@ export default function CoreFinanceModule({
                       ) : (
                         <span className="text-indigo-600 font-bold italic font-mono">⇄ {formatBRL(tx.amountInCents)}</span>
                       )}
+                    </td>
+                    <td className="py-2.5 px-2">
+                      <button
+                        onClick={() => onDeleteTransaction(tx.id)}
+                        title="Excluir lançamento"
+                        className="p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 );

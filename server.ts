@@ -9,7 +9,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import {
   FinancialAccount,
   Transaction,
@@ -28,7 +28,7 @@ import {
   INITIAL_ALERTS
 } from './src/mockData';
 
-// ─── Persistence ────────────────────────────────────────────────────────────
+// ─── Persistence ─────────────────────────────────────────────────────────────
 
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 
@@ -74,7 +74,6 @@ function saveDb() {
   }, null, 2));
 }
 
-// Initialize state from disk (or seed from mockData on first run)
 const db = loadDb();
 let currentAccounts: FinancialAccount[] = db.accounts;
 let currentConnections: BankConnection[] = db.connections;
@@ -84,19 +83,15 @@ let currentGoals: FinancialGoal[] = db.goals;
 let currentAlerts: NotificationAlert[] = db.alerts;
 let chatHistory: ChatMessage[] = db.chatHistory;
 
-// ─── Auth ────────────────────────────────────────────────────────────────────
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 const APP_SECRET = process.env.APP_SECRET || 'mks-dev-secret-please-change-in-production';
 const APP_PASSWORD = process.env.APP_PASSWORD || 'mks2026';
 const COOKIE_NAME = 'mks_session';
-const SESSION_MS = 24 * 60 * 60 * 1000; // 24 h
+const SESSION_MS = 24 * 60 * 60 * 1000;
 
-if (!process.env.APP_SECRET) {
-  console.warn('[WARN] APP_SECRET not set — using insecure default. Set APP_SECRET in .env for production.');
-}
-if (!process.env.APP_PASSWORD) {
-  console.warn('[WARN] APP_PASSWORD not set — using default password "mks2026". Set APP_PASSWORD in .env.');
-}
+if (!process.env.APP_SECRET) console.warn('[WARN] APP_SECRET not set — using insecure default.');
+if (!process.env.APP_PASSWORD) console.warn('[WARN] APP_PASSWORD not set — using default "mks2026".');
 
 function createToken(): string {
   const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MS })).toString('base64url');
@@ -117,9 +112,7 @@ function verifyToken(token: string): boolean {
     if (!crypto.timingSafeEqual(sigBuf, expBuf)) return false;
     const { exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
     return Date.now() < exp;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 function parseCookies(req: express.Request): Record<string, string> {
@@ -131,9 +124,7 @@ function parseCookies(req: express.Request): Record<string, string> {
   );
 }
 
-// Simple in-memory rate limiter: 5 attempts per 15 minutes per IP
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   const record = loginAttempts.get(ip);
@@ -154,29 +145,35 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   next();
 }
 
-// ─── Gemini ──────────────────────────────────────────────────────────────────
+// ─── Groq ─────────────────────────────────────────────────────────────────────
 
-let geminiAIClient: GoogleGenAI | null = null;
+let groqClient: Groq | null = null;
 
-function getGeminiClient(): GoogleGenAI | null {
-  if (!geminiAIClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (key && key !== 'MY_GEMINI_API_KEY') {
-      geminiAIClient = new GoogleGenAI({
-        apiKey: key,
-        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-      });
-    }
+function getGroqClient(): Groq | null {
+  if (!groqClient) {
+    const key = process.env.GROQ_API_KEY;
+    if (key) groqClient = new Groq({ apiKey: key });
   }
-  return geminiAIClient;
+  return groqClient;
 }
 
 // ─── Budget helpers ───────────────────────────────────────────────────────────
 
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Only counts expenses from the current calendar month
 function recalculateBudgets() {
+  const month = getCurrentMonth();
   currentBudgets.forEach(b => {
     b.spentInCents = currentTransactions
-      .filter(tx => tx.type === 'DES' && tx.category.toLowerCase() === b.category.toLowerCase())
+      .filter(tx =>
+        tx.type === 'DES' &&
+        tx.category.toLowerCase() === b.category.toLowerCase() &&
+        tx.date.startsWith(month)
+      )
       .reduce((acc, tx) => acc + tx.amountInCents, 0);
   });
 }
@@ -186,47 +183,42 @@ function checkBudgetThresholds(tx: Transaction) {
   if (!budget) return;
   const ratioBefore = (budget.spentInCents - tx.amountInCents) / budget.limitInCents;
   const ratioAfter = budget.spentInCents / budget.limitInCents;
-  const percentText = Math.round(ratioAfter * 100);
-  const limitFormatted = (budget.limitInCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const pct = Math.round(ratioAfter * 100);
+  const limit = (budget.limitInCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   if (ratioAfter >= 1.0 && ratioBefore < 1.0) {
     currentAlerts.unshift({
-      id: `alert-ovr-${Date.now()}`,
+      id: `alert-ovr-${Date.now()}`, type: 'WARNING', isRead: false, date: new Date().toISOString(),
       title: `🚨 Orçamento Estourado: ${budget.category}`,
-      message: `Você ultrapassou 100% de gasto em ${budget.category}. Gasto atual: R$ ${(budget.spentInCents / 100).toFixed(2)} de ${limitFormatted}.`,
-      type: 'WARNING', date: new Date().toISOString(), isRead: false
+      message: `Você ultrapassou 100% de gasto em ${budget.category}. Gasto: R$ ${(budget.spentInCents / 100).toFixed(2)} de ${limit}.`
     });
   } else if (ratioAfter >= 0.8 && ratioBefore < 0.8) {
     currentAlerts.unshift({
-      id: `alert-warn-${Date.now()}`,
+      id: `alert-warn-${Date.now()}`, type: 'WARNING', isRead: false, date: new Date().toISOString(),
       title: `⚠️ Alerta de Gastos: ${budget.category}`,
-      message: `Atenção: você atingiu ${percentText}% do limite de ${budget.category}. Teto: ${limitFormatted}.`,
-      type: 'WARNING', date: new Date().toISOString(), isRead: false
+      message: `Atenção: você atingiu ${pct}% do limite de ${budget.category}. Teto: ${limit}.`
     });
   }
 }
 
-// ─── Server ───────────────────────────────────────────────────────────────────
+// ─── Validation constants ────────────────────────────────────────────────────
 
 const VALID_TX_TYPES = ['REC', 'DES', 'TRANS'] as const;
 const VALID_ACC_TYPES = ['CASH', 'CHECKING', 'SAVINGS', 'INVESTMENT'] as const;
 
+// ─── Server ───────────────────────────────────────────────────────────────────
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
   app.use(express.json());
 
-  // ── Auth routes (public — registered before requireAuth middleware) ──────────
+  // ── Auth routes (public) ────────────────────────────────────────────────────
 
   app.post('/api/auth/login', (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    if (!checkRateLimit(ip)) {
-      return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em 15 minutos.' });
-    }
+    if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em 15 minutos.' });
     const { password } = req.body;
-    if (!password || password !== APP_PASSWORD) {
-      return res.status(401).json({ error: 'Senha incorreta.' });
-    }
+    if (!password || password !== APP_PASSWORD) return res.status(401).json({ error: 'Senha incorreta.' });
     const token = createToken();
     const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
     res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${secure}`);
@@ -243,48 +235,38 @@ async function startServer() {
     res.json({ authenticated: !!(token && verifyToken(token)) });
   });
 
-  // ── All /api/* routes below require a valid session ────────────────────────
+  // ── All /api/* routes below require a valid session ─────────────────────────
   app.use('/api', requireAuth);
 
   // 1. GET ALL PLATFORM DATA
-  app.get('/api/data', (req, res) => {
+  app.get('/api/data', (_req, res) => {
     recalculateBudgets();
     res.json({ accounts: currentAccounts, connections: currentConnections, transactions: currentTransactions, budgets: currentBudgets, goals: currentGoals, alerts: currentAlerts, chatHistory });
   });
 
-  // 2. CREATE TRANSACTION MANUALLY
+  // 2. CREATE TRANSACTION
   app.post('/api/transactions', (req, res) => {
     const { amountInCents, date, type, category, description, accountId, destinationAccountId } = req.body;
-
     if (!amountInCents || !date || !type || !category || !description || !accountId) {
-      return res.status(400).json({ error: 'Missing parameters. Ensure all fields are filled.' });
+      return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
     }
     if (!VALID_TX_TYPES.includes(type)) {
-      return res.status(400).json({ error: 'Tipo de transação inválido. Use REC, DES ou TRANS.' });
+      return res.status(400).json({ error: 'Tipo inválido. Use REC, DES ou TRANS.' });
     }
     const parsedAmount = parseInt(amountInCents, 10);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return res.status(400).json({ error: 'O valor deve ser um número inteiro positivo em centavos.' });
+      return res.status(400).json({ error: 'Valor deve ser inteiro positivo em centavos.' });
     }
 
     const newTx: Transaction = {
-      id: `tx-usr-${Date.now()}`,
-      amountInCents: parsedAmount,
-      date,
-      type,
-      category,
-      description,
-      accountId,
-      destinationAccountId,
-      isSynced: false
+      id: `tx-usr-${Date.now()}`, amountInCents: parsedAmount,
+      date, type, category, description, accountId, destinationAccountId, isSynced: false
     };
 
     const sourceAcc = currentAccounts.find(a => a.id === accountId);
-    if (type === 'DES' && sourceAcc) {
-      sourceAcc.balanceInCents -= parsedAmount;
-    } else if (type === 'REC' && sourceAcc) {
-      sourceAcc.balanceInCents += parsedAmount;
-    } else if (type === 'TRANS') {
+    if (type === 'DES' && sourceAcc) sourceAcc.balanceInCents -= parsedAmount;
+    else if (type === 'REC' && sourceAcc) sourceAcc.balanceInCents += parsedAmount;
+    else if (type === 'TRANS') {
       const destAcc = currentAccounts.find(a => a.id === destinationAccountId);
       if (sourceAcc) sourceAcc.balanceInCents -= parsedAmount;
       if (destAcc) destAcc.balanceInCents += parsedAmount;
@@ -294,54 +276,65 @@ async function startServer() {
     recalculateBudgets();
     if (type === 'DES') checkBudgetThresholds(newTx);
     saveDb();
-
     res.status(201).json(newTx);
   });
 
-  // 3. CREATE ACCOUNT WALLET
+  // 2b. DELETE TRANSACTION
+  app.delete('/api/transactions/:id', (req, res) => {
+    const { id } = req.params;
+    const index = currentTransactions.findIndex(t => t.id === id);
+    if (index === -1) return res.status(404).json({ error: 'Transação não encontrada.' });
+
+    const [deleted] = currentTransactions.splice(index, 1);
+
+    // Reverse the balance effect
+    const sourceAcc = currentAccounts.find(a => a.id === deleted.accountId);
+    if (deleted.type === 'DES' && sourceAcc) sourceAcc.balanceInCents += deleted.amountInCents;
+    else if (deleted.type === 'REC' && sourceAcc) sourceAcc.balanceInCents -= deleted.amountInCents;
+    else if (deleted.type === 'TRANS') {
+      if (sourceAcc) sourceAcc.balanceInCents += deleted.amountInCents;
+      const destAcc = currentAccounts.find(a => a.id === deleted.destinationAccountId);
+      if (destAcc) destAcc.balanceInCents -= deleted.amountInCents;
+    }
+
+    recalculateBudgets();
+    saveDb();
+    res.json({ success: true, deleted });
+  });
+
+  // 3. CREATE ACCOUNT
   app.post('/api/accounts', (req, res) => {
     const { name, type, bankName, balanceInCents, color } = req.body;
-
     if (!name || !type || !bankName || balanceInCents === undefined) {
-      return res.status(400).json({ error: 'Complete all required details.' });
+      return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
     }
     if (!VALID_ACC_TYPES.includes(type)) {
-      return res.status(400).json({ error: 'Tipo de conta inválido. Use CASH, CHECKING, SAVINGS ou INVESTMENT.' });
+      return res.status(400).json({ error: 'Tipo inválido. Use CASH, CHECKING, SAVINGS ou INVESTMENT.' });
     }
     const parsedBalance = parseInt(balanceInCents, 10);
     if (isNaN(parsedBalance) || parsedBalance < 0) {
-      return res.status(400).json({ error: 'Saldo inicial deve ser um número não-negativo em centavos.' });
+      return res.status(400).json({ error: 'Saldo inicial deve ser não-negativo em centavos.' });
     }
-
     const newAcc: FinancialAccount = {
-      id: `acc-usr-${Date.now()}`,
-      name,
-      type,
-      bankName,
-      balanceInCents: parsedBalance,
-      color: color || '#6B7280',
-      isLinked: false
+      id: `acc-usr-${Date.now()}`, name, type, bankName,
+      balanceInCents: parsedBalance, color: color || '#6B7280', isLinked: false
     };
-
     currentAccounts.push(newAcc);
     saveDb();
     res.status(201).json(newAcc);
   });
 
-  // 4. RESET TO INITIAL SEED STATE
-  app.post('/api/reset', (req, res) => {
+  // 4. RESET
+  app.post('/api/reset', (_req, res) => {
     currentAccounts = structuredClone(INITIAL_ACCOUNTS);
     currentConnections = structuredClone(INITIAL_CONNECTIONS);
     currentTransactions = structuredClone(INITIAL_TRANSACTIONS);
     currentBudgets = structuredClone(INITIAL_BUDGETS);
     currentGoals = structuredClone(INITIAL_GOALS);
     currentAlerts = [{
-      id: `alt-reset-${Date.now()}`,
-      title: 'Restaurado para Estado Inicial',
-      message: 'Dados financeiros reiniciados com sucesso para os valores padrão de auditoria.',
-      type: 'SUCCESS',
-      date: new Date().toISOString(),
-      isRead: false
+      id: `alt-reset-${Date.now()}`, title: 'Restaurado para Estado Inicial',
+      message: 'Dados reiniciados com sucesso para os valores padrão.',
+      type: 'SUCCESS', date: new Date().toISOString(), isRead: false
     }];
     recalculateBudgets();
     saveDb();
@@ -353,7 +346,7 @@ async function startServer() {
     const { limitInCents, category } = req.body;
     const parsedLimit = parseInt(limitInCents, 10);
     if (isNaN(parsedLimit) || parsedLimit <= 0) {
-      return res.status(400).json({ error: 'Limite deve ser um valor positivo em centavos.' });
+      return res.status(400).json({ error: 'Limite deve ser positivo em centavos.' });
     }
     const b = currentBudgets.find(item => item.category.toLowerCase() === category.toLowerCase());
     if (b) {
@@ -363,10 +356,7 @@ async function startServer() {
       return res.json(b);
     }
     const newBudget: CategoryBudget = {
-      id: `b-usr-${Date.now()}`,
-      category,
-      limitInCents: parsedLimit,
-      spentInCents: 0
+      id: `b-usr-${Date.now()}`, category, limitInCents: parsedLimit, spentInCents: 0
     };
     currentBudgets.push(newBudget);
     recalculateBudgets();
@@ -374,86 +364,72 @@ async function startServer() {
     res.json(newBudget);
   });
 
-  // 6. UPDATE FINANCIAL GOAL (deposit)
+  // 6a. DEPOSIT TO GOAL
   app.post('/api/goals/update', (req, res) => {
     const { id, amountToAdd } = req.body;
     const parsedDeposit = parseInt(amountToAdd, 10);
     if (isNaN(parsedDeposit) || parsedDeposit <= 0) {
-      return res.status(400).json({ error: 'Valor do aporte deve ser um número positivo em centavos.' });
+      return res.status(400).json({ error: 'Valor do aporte deve ser positivo em centavos.' });
     }
     const goal = currentGoals.find(g => g.id === id);
-    if (goal) {
-      goal.currentInCents += parsedDeposit;
-      saveDb();
-      return res.json(goal);
-    }
-    res.status(404).json({ error: 'Meta não encontrada' });
+    if (!goal) return res.status(404).json({ error: 'Meta não encontrada.' });
+    goal.currentInCents += parsedDeposit;
+    saveDb();
+    res.json(goal);
   });
 
-  // 6b. CREATE FINANCIAL GOAL
+  // 6b. CREATE GOAL
   app.post('/api/goals', (req, res) => {
     const { name, targetInCents, targetDate, color, currentInCents } = req.body;
     if (!name || isNaN(targetInCents) || targetInCents <= 0 || !targetDate) {
-      return res.status(400).json({ error: 'Parâmetros inválidos para criação da meta' });
+      return res.status(400).json({ error: 'Parâmetros inválidos para criação da meta.' });
     }
     const newGoal: FinancialGoal = {
-      id: `g-usr-${Date.now()}`,
-      name,
+      id: `g-usr-${Date.now()}`, name,
       targetInCents: parseInt(targetInCents, 10),
       currentInCents: currentInCents ? parseInt(currentInCents, 10) : 0,
-      targetDate,
-      color: color || '#6366F1'
+      targetDate, color: color || '#6366F1'
     };
     currentGoals.push(newGoal);
     saveDb();
     res.json(newGoal);
   });
 
-  // 6c. DELETE FINANCIAL GOAL
+  // 6c. DELETE GOAL
   app.delete('/api/goals/:id', (req, res) => {
     const { id } = req.params;
     const index = currentGoals.findIndex(g => g.id === id);
-    if (index !== -1) {
-      const deleted = currentGoals.splice(index, 1);
-      saveDb();
-      return res.json({ success: true, deleted: deleted[0] });
-    }
-    res.status(404).json({ error: 'Meta não encontrada' });
+    if (index === -1) return res.status(404).json({ error: 'Meta não encontrada.' });
+    const [deleted] = currentGoals.splice(index, 1);
+    saveDb();
+    res.json({ success: true, deleted });
   });
 
-  // 7. MARK ALERT AS READ
+  // 7. MARK ALERT READ
   app.post('/api/alerts/read', (req, res) => {
     const { id } = req.body;
     const alert = currentAlerts.find(a => a.id === id);
-    if (alert) {
-      alert.isRead = true;
-      saveDb();
-    }
+    if (alert) { alert.isRead = true; saveDb(); }
     res.json({ success: true });
   });
 
-  // 8. SIMULATOR: BANK OPEN FINANCE CONNECTION & SYNC QUEUE
-  app.post('/api/open-finance/connect', async (req, res) => {
+  // 8. OPEN FINANCE SYNC SIMULATOR
+  app.post('/api/open-finance/connect', (req, res) => {
     const { bankName } = req.body;
-    if (!bankName) {
-      return res.status(400).json({ error: 'Select a valid banking institution' });
-    }
+    if (!bankName) return res.status(400).json({ error: 'Selecione uma instituição bancária.' });
 
-    let existingConn = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
-    if (!existingConn) {
-      existingConn = {
-        id: `conn-bank-${Date.now()}`,
-        institutionName: bankName,
-        logo: '⚡',
-        status: 'SYNCING',
+    let conn = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
+    if (!conn) {
+      conn = {
+        id: `conn-bank-${Date.now()}`, institutionName: bankName, logo: '⚡', status: 'SYNCING',
         itemId: `plg_${bankName.replace(/\s+/g, '').toLowerCase()}_${Math.floor(1000 + Math.random() * 9000)}`
       };
-      currentConnections.push(existingConn);
+      currentConnections.push(conn);
     } else {
-      existingConn.status = 'SYNCING';
+      conn.status = 'SYNCING';
     }
 
-    const mockExternalBankTransactions = [
+    const mockTxns = [
       { desc: 'RESTAURANTE ASSIS BURGER', amount: 8450, category: 'Alimentação' },
       { desc: 'AUTO POSTO IPIRANGA', amount: 15000, category: 'Transporte' },
       { desc: 'MERCADO DISTRITO LTDA', amount: 21020, category: 'Alimentação' },
@@ -462,176 +438,156 @@ async function startServer() {
     ];
 
     setTimeout(() => {
-      const conn = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
-      if (!conn) return;
-      conn.status = 'CONNECTED';
-      conn.lastSyncedAt = new Date().toISOString();
+      const c = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
+      if (!c) return;
+      c.status = 'CONNECTED';
+      c.lastSyncedAt = new Date().toISOString();
 
       let targetAcc = currentAccounts.find(a => a.bankName.toLowerCase() === bankName.toLowerCase());
       if (!targetAcc) {
         targetAcc = {
-          id: `acc-auto-${Date.now()}`,
-          name: `Conta Corrente ${bankName}`,
-          type: 'CHECKING',
-          bankName,
-          balanceInCents: 1200000,
-          color: '#3B82F6',
-          isLinked: true
+          id: `acc-auto-${Date.now()}`, name: `Conta Corrente ${bankName}`, type: 'CHECKING',
+          bankName, balanceInCents: 1200000, color: '#3B82F6', isLinked: true
         };
         currentAccounts.push(targetAcc);
       } else {
         targetAcc.isLinked = true;
       }
 
-      let syncedCount = 0;
-      for (const item of mockExternalBankTransactions) {
-        const dateRandom = new Date();
-        dateRandom.setDate(dateRandom.getDate() - Math.floor(Math.random() * 10));
-        const finalTx: Transaction = {
-          id: `tx-sync-${Math.random().toString(36).substr(2, 9)}`,
-          amountInCents: item.amount,
-          date: dateRandom.toISOString().split('T')[0],
-          type: 'DES',
-          category: item.category,
-          description: item.desc,
-          accountId: targetAcc!.id,
-          isSynced: true,
-          originalMerchantName: item.desc
-        };
-        currentTransactions.unshift(finalTx);
+      let synced = 0;
+      for (const item of mockTxns) {
+        const d = new Date();
+        d.setDate(d.getDate() - Math.floor(Math.random() * 10));
+        currentTransactions.unshift({
+          id: `tx-sync-${Math.random().toString(36).slice(2, 11)}`,
+          amountInCents: item.amount, date: d.toISOString().split('T')[0],
+          type: 'DES', category: item.category, description: item.desc,
+          accountId: targetAcc!.id, isSynced: true, originalMerchantName: item.desc
+        });
         targetAcc!.balanceInCents -= item.amount;
-        syncedCount++;
+        synced++;
       }
 
       recalculateBudgets();
       currentAlerts.unshift({
-        id: `alert-conn-${Date.now()}`,
+        id: `alert-conn-${Date.now()}`, type: 'SUCCESS', isRead: false, date: new Date().toISOString(),
         title: `🔗 Conexão Bem-sucedida: ${bankName}`,
-        message: `Sincronização histórica automatizada concluída para ${bankName}! ${syncedCount} transações consolidadas e categorizadas com sucesso.`,
-        type: 'SUCCESS', date: new Date().toISOString(), isRead: false
+        message: `${synced} transações sincronizadas e categorizadas com sucesso.`
       });
       saveDb();
     }, 4000);
 
-    res.json({
-      success: true,
-      status: 'SYNCING',
-      message: 'Tarefa sync-historical-data enfileirada. Processando histórico bancário de 90 dias.',
-      itemId: existingConn.itemId
-    });
+    res.json({ success: true, status: 'SYNCING', itemId: conn.itemId });
   });
 
-  // 9. CLIENT ADVISOR WITH SERVER-SIDE GEMINI AI API PROXY
-  app.post('/api/gemini/advisor', async (req, res) => {
+  // 9. AI ADVISOR — Groq llama-3.3-70b-versatile
+  app.post('/api/groq/advisor', async (req, res) => {
     const { message } = req.body;
-    const client = getGeminiClient();
+    if (!message) return res.status(400).json({ error: 'Mensagem obrigatória.' });
+
+    const client = getGroqClient();
     recalculateBudgets();
-    const totalBalance = currentAccounts.reduce((sum, a) => sum + a.balanceInCents, 0);
-    const totalTransactions = currentTransactions.length;
-    const budgetSummary = currentBudgets.map(b => `${b.category}: R$ ${(b.spentInCents / 100).toFixed(2)} gastos de R$ ${(b.limitInCents / 100).toFixed(2)}`).join(', ');
-    const activeGoals = currentGoals.map(g => `${g.name}: R$ ${(g.currentInCents / 100).toFixed(2)} de R$ ${(g.targetInCents / 100).toFixed(2)}`).join(', ');
 
-    const systemPrompt = `Você é um Consultor Financeiro de elite especializado em finanças pessoais para brasileiros.
-Você é extremamente cortês, preciso, fala em Português do Brasil de forma empática e profissional.
-As finanças atuais do usuário são:
-- Saldo Patrimonial Total: R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-- Mapeamento de Orçamentos Atuais por categoria: ${budgetSummary}
-- Alvo de Metas e Poupança: ${activeGoals}
-- Quantidade de Transações Registradas: ${totalTransactions}
+    const totalBalance = currentAccounts.reduce((s, a) => s + a.balanceInCents, 0);
+    const budgetSummary = currentBudgets.map(b =>
+      `${b.category}: R$ ${(b.spentInCents / 100).toFixed(2)} gastos de R$ ${(b.limitInCents / 100).toFixed(2)}`
+    ).join(', ');
+    const goalsSummary = currentGoals.map(g =>
+      `${g.name}: R$ ${(g.currentInCents / 100).toFixed(2)} de R$ ${(g.targetInCents / 100).toFixed(2)}`
+    ).join(', ');
 
-REGRAS DE CONVENÇÃO:
-- Não critique as despesas do usuário de forma agressiva. Ofereça insights construtivos específicos para a realidade dele.
-- Retorne apenas Markdown rico e bem estruturado com seções e destaque em negrito.
-- Nunca retorne código nem dados simulados de porta do servidor. Fale diretamente como um ser humano especialista.
-- Responda apenas à pergunta ou dê conselho de planejamento com no máximo 3 pequenos parágrafos focados ou bullet points acionáveis.`;
+    const systemPrompt = `Você é um Consultor Financeiro de elite para brasileiros. Seja cortês, preciso e empático.
+Contexto financeiro atual do usuário:
+- Patrimônio Total: R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+- Orçamentos do mês: ${budgetSummary}
+- Metas de poupança: ${goalsSummary}
+- Total de transações: ${currentTransactions.length}
+
+REGRAS: Não critique despesas agressivamente. Retorne Markdown rico e bem estruturado.
+Responda com no máximo 3 parágrafos ou bullet points acionáveis.`;
 
     if (!client) {
-      const fallbackReplies = [
-        "### 💡 Análise de Saúde Financeira MKS\n\nExcelente controle! Seu patrimônio atual consolidado de **R$ " + (totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + "** demonstra excelente consistência.\n\n" +
-        "#### Próximos Passos Recomendados:\n" +
-        "1. **Segurança**: Sua **Reserva de Emergência** está em **" + Math.round((currentGoals[0]?.currentInCents / currentGoals[0]?.targetInCents) * 100) + "%** do objetivo.\n" +
-        "2. **Ajuste de Categoria**: Você já registrou despesas na categoria **Moradia** correspondendo a maior parcela do seu orçamento fixo.\n" +
-        "3. **Open Finance Ativo**: Excelente integração com Banco Itaú e Inter. Isto garante que novos lançamentos entrarão de forma automática.",
-        "### 📈 Planejamento de Metas de Curto Prazo\n\nAnalisando suas economias, sua carteira possui boas frentes de investimento.\n\n" +
-        "- **Meta Japão**: Atualmente com **R$ " + (currentGoals[1]?.currentInCents / 100).toLocaleString('pt-BR') + "** poupados do total de R$ " + (currentGoals[1]?.targetInCents / 100).toLocaleString('pt-BR') + ".\n" +
-        "- **Sugestão de Economia Inteligente**: Se você reduzir os gastos de *Lazer* e *Alimentação em 10%* nas próximas duas semanas, poderá antecipar seu objetivo em cerca de 45 dias!",
-      ];
-      const selectedReply = message.toLowerCase().includes('viagem') || message.toLowerCase().includes('meta') ? fallbackReplies[1] : fallbackReplies[0];
-      await new Promise(resolve => setTimeout(resolve, 800));
-      return res.json({ reply: selectedReply, note: 'Análise processada localmente devido a chave offline' });
+      await new Promise(r => setTimeout(r, 600));
+      return res.json({
+        reply: `### 💡 Análise MKS Open Finance\n\nSeu patrimônio consolidado é **R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n\n> Configure GROQ_API_KEY no .env para respostas personalizadas com IA.`,
+        note: 'Groq API key não configurada'
+      });
     }
 
     try {
-      const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: message,
-        config: { systemInstruction: systemPrompt, temperature: 0.7 }
+      const response = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message }
+        ],
+        temperature: 0.7,
+        max_tokens: 1024
       });
-      res.json({ reply: response.text || 'Desculpe, não consegui consolidar a resposta analítica no momento.' });
+      res.json({ reply: response.choices[0]?.message?.content || 'Sem resposta do modelo.' });
     } catch (e: any) {
-      res.status(500).json({ error: 'Erro ao invocar Gemini AI no servidor', details: e.message });
+      res.status(500).json({ error: 'Erro ao invocar Groq AI', details: e.message });
     }
   });
 
-  // 10. GEMINI AUTO-CATEGORIZATION ENDPOINT FOR STATEMENTS
-  app.post('/api/gemini/categorize', async (req, res) => {
+  // 10. AUTO-CATEGORIZATION — Groq llama-3.1-8b-instant
+  app.post('/api/groq/categorize', async (req, res) => {
     const { merchantName } = req.body;
-    if (!merchantName) {
-      return res.status(400).json({ error: 'Merchant name is required' });
-    }
-    const client = getGeminiClient();
-    if (!client) {
-      const lower = merchantName.toLowerCase();
-      let category = 'Outros';
-      let cleanDesc = merchantName;
-      if (lower.includes('pao de acucar') || lower.includes('mercado') || lower.includes('burger') || lower.includes('restaurante') || lower.includes('coco bambu') || lower.includes('jantar')) category = 'Alimentação';
-      else if (lower.includes('uber') || lower.includes('posto') || lower.includes('combustivel') || lower.includes('carro')) category = 'Transporte';
-      else if (lower.includes('aluguel') || lower.includes('imovel') || lower.includes('loft') || lower.includes('condominio')) category = 'Moradia';
-      else if (lower.includes('netflix') || lower.includes('cinema') || lower.includes('spotify') || lower.includes('ingresso')) category = 'Lazer';
-      else if (lower.includes('drogaria') || lower.includes('saude') || lower.includes('farmacia') || lower.includes('medico')) category = 'Saúde';
-      else if (lower.includes('livro') || lower.includes('curso') || lower.includes('escola') || lower.includes('ingles')) category = 'Educação';
-      if (lower.includes('uber')) cleanDesc = 'Uber Viagem';
-      else if (lower.includes('pao de acucar')) cleanDesc = 'Supermercado Pão de Açúcar';
-      else if (lower.includes('coco bambu')) cleanDesc = 'Restaurante Coco Bambu';
-      else if (lower.includes('netflix')) cleanDesc = 'Assinatura Mensal Netflix';
-      else if (lower.includes('aluguel')) cleanDesc = 'Aluguel Loft Paulista';
-      else if (lower.includes('posto ipiranga')) cleanDesc = 'Posto Ipiranga Combustível';
-      return res.json({ cleanDescription: cleanDesc, category });
-    }
+    if (!merchantName) return res.status(400).json({ error: 'merchantName obrigatório.' });
+
+    const client = getGroqClient();
+
+    // Fallback regex classifier
+    const classifyLocally = (name: string) => {
+      const l = name.toLowerCase();
+      let category = 'Outros', cleanDesc = name;
+      if (/mercado|supermercado|pao de acucar|burger|restaurante|coco bambu|jantar|lanche/.test(l)) category = 'Alimentação';
+      else if (/uber|posto|combustiv|gasolina|estacion/.test(l)) category = 'Transporte';
+      else if (/aluguel|imovel|loft|condomin/.test(l)) category = 'Moradia';
+      else if (/netflix|cinema|spotify|ingresso|streaming/.test(l)) category = 'Lazer';
+      else if (/drogaria|farmacia|saude|medico|clinica|plano/.test(l)) category = 'Saúde';
+      else if (/livro|curso|escola|facul|ingles|idioma/.test(l)) category = 'Educação';
+      if (/pao de acucar/.test(l)) cleanDesc = 'Supermercado Pão de Açúcar';
+      else if (/coco bambu/.test(l)) cleanDesc = 'Restaurante Coco Bambu';
+      else if (/netflix/.test(l)) cleanDesc = 'Netflix';
+      else if (/uber/.test(l)) cleanDesc = 'Uber';
+      else if (/posto ipiranga/.test(l)) cleanDesc = 'Posto Ipiranga';
+      return { cleanDescription: cleanDesc, category };
+    };
+
+    if (!client) return res.json(classifyLocally(merchantName));
+
     try {
-      const gPrompt = `Dado o nome bruto da transação bancária: "${merchantName}".
-Retorne JSON com duas propriedades:
-"cleanDescription": nome humanizado (ex: "PAO DE ACUCAR SP LOJAS" → "Supermercado Pão de Açúcar").
-"category": exatamente uma de: "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde", "Educação", "Outros".`;
-      const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: gPrompt,
-        config: { responseMimeType: 'application/json', temperature: 0.1 }
+      const response = await client.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        messages: [{
+          role: 'user',
+          content: `Transação bancária: "${merchantName}". Retorne JSON com "cleanDescription" (nome amigável) e "category" (uma de: Alimentação, Transporte, Moradia, Lazer, Saúde, Educação, Outros).`
+        }],
+        temperature: 0.1,
+        max_tokens: 100,
+        response_format: { type: 'json_object' }
       });
-      const parsed = JSON.parse(response.text?.trim() || '{}');
+      const parsed = JSON.parse(response.choices[0]?.message?.content || '{}');
       res.json({ cleanDescription: parsed.cleanDescription || merchantName, category: parsed.category || 'Outros' });
     } catch {
-      res.json({ cleanDescription: merchantName, category: 'Outros' });
+      res.json(classifyLocally(merchantName));
     }
   });
 
-  // 11. VITE MIDDLEWARE / SPA FALLBACKS
+  // 11. VITE / SPA
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Open Finance server listening on http://0.0.0.0:${PORT}`);
+    console.log(`MKS Open Finance server → http://0.0.0.0:${PORT}`);
+    if (!process.env.GROQ_API_KEY) console.warn('[WARN] GROQ_API_KEY não configurada — IA em modo fallback.');
   });
 }
 
