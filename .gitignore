@@ -7,3 +7,4 @@ data/
 *.log
 .env*
 !.env.example
+.ipynb_checkpoints/
