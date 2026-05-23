@@ -616,7 +616,7 @@ REGRAS DE CONVENÇÃO:
 
     try {
       const response = await client.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-2.5-flash',
         contents: message,
         config: {
           systemInstruction: systemPrompt,
@@ -678,7 +678,7 @@ Retorne uma resposta JSON válida com duas propriedades:
 "category": uma dessas categorias exatas: "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde", "Educação" ou "Outros".`;
 
       const response = await client.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-2.5-flash',
         contents: gPrompt,
         config: {
           responseMimeType: 'application/json',
