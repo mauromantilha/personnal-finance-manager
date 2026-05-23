@@ -305,6 +305,28 @@ export default function App() {
     } catch (err) { console.error(err); }
   };
 
+  const handleDeleteBudget = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/budgets/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleMarkAllAlertsRead = async (): Promise<void> => {
+    try {
+      await fetch('/api/alerts/read-all', { method: 'POST' });
+      await fetchAllData();
+    } catch (err) { console.error(err); }
+  };
+
+  const handleClearReadAlerts = async (): Promise<void> => {
+    try {
+      await fetch('/api/alerts/clear-read', { method: 'DELETE' });
+      await fetchAllData();
+    } catch (err) { console.error(err); }
+  };
+
   const handleMarkAlertRead = async (id: string) => {
     try {
       const response = await fetch('/api/alerts/read', {
@@ -830,10 +852,12 @@ export default function App() {
           )}
 
           {activeTab === 'BUDGETS' && (
-            <BudgetsModule 
+            <BudgetsModule
               budgets={budgets}
               goals={goals}
+              categories={categories}
               onUpdateBudget={handleUpdateBudget}
+              onDeleteBudget={handleDeleteBudget}
               onDepositGoal={handleDepositGoal}
               onCreateGoal={handleCreateGoal}
               onDeleteGoal={handleDeleteGoal}
@@ -850,9 +874,11 @@ export default function App() {
           )}
 
           {activeTab === 'NOTIFICATIONS' && (
-            <NotificationsModule 
+            <NotificationsModule
               alerts={alerts}
               onMarkAsRead={handleMarkAlertRead}
+              onMarkAllRead={handleMarkAllAlertsRead}
+              onClearRead={handleClearReadAlerts}
             />
           )}
 

@@ -341,6 +341,66 @@ async function processRecurrences(): Promise<void> {
   }
 }
 
+// ─── Proactive alert engine ───────────────────────────────────────────────────
+
+async function generateProactiveAlerts(): Promise<void> {
+  const now = new Date();
+  const YYYYMM = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+
+  // 1. Negative account balances
+  const accs = await d1q<any>('SELECT * FROM accounts WHERE balance_in_cents < 0');
+  for (const a of accs) {
+    const alertId = `alert-negbal-${a.id}-${YYYYMM}`;
+    const balBRL = (a.balance_in_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    stmts.push({ sql: 'INSERT OR IGNORE INTO alerts VALUES (?,?,?,?,?,0)', params: [alertId, 'WARNING', `🔴 Saldo Negativo: ${a.name}`, `Conta "${a.name}" está com saldo de ${balBRL}. Realize um depósito para regularizar.`, now.toISOString()] });
+  }
+
+  // 2. Credit card usage > 80% of limit
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const cards = await d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1 AND limit_in_cents > 0');
+  const cardInvoices = await Promise.all(
+    cards.map((c: any) => d1q<any>('SELECT COALESCE(SUM(total_in_cents),0) as used FROM invoices WHERE credit_card_id = ? AND month = ?', [c.id, currentMonth]))
+  );
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
+    const used = cardInvoices[i][0]?.used || 0;
+    const ratio = used / card.limit_in_cents;
+    if (ratio >= 0.8) {
+      const alertId = `alert-cclim-${card.id}-${YYYYMM}`;
+      const pct = Math.round(ratio * 100);
+      const limBRL = (card.limit_in_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const emoji = ratio >= 1.0 ? '🚨' : '⚠️';
+      stmts.push({ sql: 'INSERT OR IGNORE INTO alerts VALUES (?,?,?,?,?,0)', params: [alertId, 'WARNING', `${emoji} Limite de Cartão: ${card.name}`, `Cartão "${card.name}" utilizou ${pct}% do limite de ${limBRL}. Controle os gastos.`, now.toISOString()] });
+    }
+  }
+
+  // 3. Invoices due in ≤ 3 days (not paid)
+  const todayStr = now.toISOString().split('T')[0];
+  const soon = new Date(now); soon.setDate(soon.getDate() + 3);
+  const soonStr = soon.toISOString().split('T')[0];
+  const dueInvs = await d1q<any>(
+    `SELECT i.*, c.name as card_name FROM invoices i JOIN credit_cards c ON c.id = i.credit_card_id WHERE i.status != 'paid' AND i.due_date IS NOT NULL AND i.due_date BETWEEN ? AND ?`,
+    [todayStr, soonStr]
+  );
+  for (const inv of dueInvs) {
+    const alertId = `alert-invdue-${inv.id}`;
+    const total = (inv.total_in_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const dueFmt = new Date(inv.due_date + 'T12:00:00').toLocaleDateString('pt-BR');
+    stmts.push({ sql: 'INSERT OR IGNORE INTO alerts VALUES (?,?,?,?,?,0)', params: [alertId, 'WARNING', `📅 Fatura Vencendo: ${inv.card_name}`, `Fatura de ${total} vence em ${dueFmt}. Acesse Cartões para efetuar o pagamento.`, now.toISOString()] });
+  }
+
+  // 4. Goals at 100%+
+  const goals = await d1q<any>('SELECT * FROM goals WHERE target_in_cents > 0 AND current_in_cents >= target_in_cents');
+  for (const g of goals) {
+    const alertId = `alert-goalreach-${g.id}-${YYYYMM}`;
+    const tgt = (g.target_in_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    stmts.push({ sql: 'INSERT OR IGNORE INTO alerts VALUES (?,?,?,?,?,0)', params: [alertId, 'SUCCESS', `🎯 Meta Atingida: ${g.name}`, `Parabéns! Você concluiu 100% da meta "${g.name}" de ${tgt}. Continue assim!`, now.toISOString()] });
+  }
+
+  if (stmts.length) await d1exec(stmts);
+}
+
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 const VALID_TX_TYPES = ['REC', 'DES', 'TRANS'] as const;
@@ -384,6 +444,7 @@ async function startServer() {
     try {
       await processRecurrences();
       await recalculateBudgets();
+      await generateProactiveAlerts();
       const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences] = await Promise.all([
         d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
         d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
@@ -574,6 +635,18 @@ async function startServer() {
     }
   });
 
+  app.delete('/api/budgets/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      const rows = await d1q('SELECT id FROM budgets WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Orçamento não encontrado.' });
+      await d1q('DELETE FROM budgets WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
+
   // ── GOALS ──────────────────────────────────────────────────────────────────
 
   app.post('/api/goals/update', async (req, res) => {
@@ -621,6 +694,24 @@ async function startServer() {
     const { id } = req.body;
     try {
       await d1q('UPDATE alerts SET is_read = 1 WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
+
+  app.post('/api/alerts/read-all', async (_req, res) => {
+    try {
+      await d1q('UPDATE alerts SET is_read = 1');
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
+
+  app.delete('/api/alerts/clear-read', async (_req, res) => {
+    try {
+      await d1q('DELETE FROM alerts WHERE is_read = 1');
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: 'D1 error', details: e.message });
