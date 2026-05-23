@@ -5,9 +5,10 @@
 
 import 'dotenv/config';
 import crypto from 'crypto';
-import express from 'express';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import Groq from 'groq-sdk';
 import {
@@ -28,60 +29,104 @@ import {
   INITIAL_ALERTS
 } from './src/mockData';
 
-// ─── Persistence ─────────────────────────────────────────────────────────────
+// ─── Cloudflare D1 + R2 ──────────────────────────────────────────────────────
 
-const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
+const CF_ACCOUNT_ID = '9b61f609fee4408fd1c4344feaf9b16a';
+const D1_DATABASE_ID = '06790b84-c635-4111-918d-cbdad49a2f29';
+const R2_BUCKET = 'mks-finance-storage';
+const WRANGLER_CONFIG = path.join(os.homedir(), '.config/.wrangler/config/default.toml');
 
-interface DbState {
-  accounts: FinancialAccount[];
-  connections: BankConnection[];
-  transactions: Transaction[];
-  budgets: CategoryBudget[];
-  goals: FinancialGoal[];
-  alerts: NotificationAlert[];
-  chatHistory: ChatMessage[];
-}
+let tokenCache: { value: string; expiresAt: number } | null = null;
 
-function loadDb(): DbState {
+function readWranglerToken(): { value: string; expiresAt: number } | null {
   try {
-    if (fs.existsSync(DB_PATH)) {
-      return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
-    }
-  } catch {
-    // fall through to seed defaults
+    const raw = fs.readFileSync(WRANGLER_CONFIG, 'utf-8');
+    const tokenMatch = raw.match(/oauth_token = "([^"]+)"/);
+    const expMatch = raw.match(/expiration_time = "([^"]+)"/);
+    if (!tokenMatch) return null;
+    return {
+      value: tokenMatch[1],
+      expiresAt: expMatch ? new Date(expMatch[1]).getTime() : Date.now() + 300_000
+    };
+  } catch { return null; }
+}
+
+async function getCFToken(): Promise<string> {
+  // Permanent API token (preferred for production)
+  if (process.env.CLOUDFLARE_API_TOKEN) return process.env.CLOUDFLARE_API_TOKEN;
+
+  // In-memory cache still valid
+  if (tokenCache && Date.now() < tokenCache.expiresAt - 30_000) return tokenCache.value;
+
+  // Read fresh token from wrangler config (wrangler keeps it up-to-date)
+  const fromFile = readWranglerToken();
+  if (fromFile && Date.now() < fromFile.expiresAt - 30_000) {
+    tokenCache = fromFile;
+    return tokenCache.value;
   }
-  return {
-    accounts: structuredClone(INITIAL_ACCOUNTS),
-    connections: structuredClone(INITIAL_CONNECTIONS),
-    transactions: structuredClone(INITIAL_TRANSACTIONS),
-    budgets: structuredClone(INITIAL_BUDGETS),
-    goals: structuredClone(INITIAL_GOALS),
-    alerts: structuredClone(INITIAL_ALERTS),
-    chatHistory: []
-  };
+
+  throw new Error('CF token expirado. Configure CLOUDFLARE_API_TOKEN no .env ou execute: npx wrangler login');
 }
 
-function saveDb() {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  fs.writeFileSync(DB_PATH, JSON.stringify({
-    accounts: currentAccounts,
-    connections: currentConnections,
-    transactions: currentTransactions,
-    budgets: currentBudgets,
-    goals: currentGoals,
-    alerts: currentAlerts,
-    chatHistory
-  }, null, 2));
+async function d1q<T = any>(sql: string, params: (string | number | null)[] = []): Promise<T[]> {
+  const token = await getCFToken();
+  const res = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${D1_DATABASE_ID}/query`,
+    {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params })
+    }
+  );
+  const data = await res.json() as any;
+  if (!data.success) throw new Error(data.errors?.[0]?.message || 'D1 error: ' + JSON.stringify(data.errors));
+  return (data.result?.[0]?.results || []) as T[];
 }
 
-const db = loadDb();
-let currentAccounts: FinancialAccount[] = db.accounts;
-let currentConnections: BankConnection[] = db.connections;
-let currentTransactions: Transaction[] = db.transactions;
-let currentBudgets: CategoryBudget[] = db.budgets;
-let currentGoals: FinancialGoal[] = db.goals;
-let currentAlerts: NotificationAlert[] = db.alerts;
-let chatHistory: ChatMessage[] = db.chatHistory;
+// D1 REST API has no batch endpoint — execute all statements in parallel
+async function d1exec(stmts: { sql: string; params?: (string | number | null)[] }[]): Promise<void> {
+  await Promise.all(stmts.map(s => d1q(s.sql, s.params || [])));
+}
+
+async function r2Put(key: string, body: string): Promise<void> {
+  try {
+    const token = await getCFToken();
+    await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects/${encodeURIComponent(key)}`,
+      {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body
+      }
+    );
+  } catch (e) {
+    console.error('[R2] Upload failed:', e);
+  }
+}
+
+// ─── Row mappers ──────────────────────────────────────────────────────────────
+
+function mapAccount(r: any): FinancialAccount {
+  return { id: r.id, name: r.name, type: r.type, bankName: r.bank_name, balanceInCents: r.balance_in_cents, color: r.color, isLinked: !!r.is_linked };
+}
+function mapTransaction(r: any): Transaction {
+  return { id: r.id, amountInCents: r.amount_in_cents, date: r.date, type: r.type, category: r.category, description: r.description, accountId: r.account_id, destinationAccountId: r.destination_account_id || undefined, isSynced: !!r.is_synced, originalMerchantName: r.original_merchant_name || undefined };
+}
+function mapBudget(r: any): CategoryBudget {
+  return { id: r.id, category: r.category, limitInCents: r.limit_in_cents, spentInCents: r.spent_in_cents };
+}
+function mapGoal(r: any): FinancialGoal {
+  return { id: r.id, name: r.name, targetInCents: r.target_in_cents, currentInCents: r.current_in_cents, targetDate: r.target_date, color: r.color };
+}
+function mapAlert(r: any): NotificationAlert {
+  return { id: r.id, type: r.type, title: r.title, message: r.message, date: r.date, isRead: !!r.is_read };
+}
+function mapConnection(r: any): BankConnection {
+  return { id: r.id, institutionName: r.institution_name, logo: r.logo, status: r.status, itemId: r.item_id || undefined, lastSyncedAt: r.last_synced_at || undefined };
+}
+function mapChat(r: any): ChatMessage {
+  return { id: r.id, sender: r.sender, text: r.text, timestamp: r.timestamp };
+}
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -90,8 +135,8 @@ const APP_PASSWORD = process.env.APP_PASSWORD || 'mks2026';
 const COOKIE_NAME = 'mks_session';
 const SESSION_MS = 24 * 60 * 60 * 1000;
 
-if (!process.env.APP_SECRET) console.warn('[WARN] APP_SECRET not set — using insecure default.');
-if (!process.env.APP_PASSWORD) console.warn('[WARN] APP_PASSWORD not set — using default "mks2026".');
+if (!process.env.APP_SECRET) console.warn('[WARN] APP_SECRET não configurado — usando valor padrão inseguro.');
+if (!process.env.APP_PASSWORD) console.warn('[WARN] APP_PASSWORD não configurado — usando "mks2026".');
 
 function createToken(): string {
   const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MS })).toString('base64url');
@@ -127,80 +172,63 @@ function parseCookies(req: express.Request): Record<string, string> {
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  const record = loginAttempts.get(ip);
-  if (!record || now > record.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
-    return true;
-  }
-  if (record.count >= 5) return false;
-  record.count++;
+  const rec = loginAttempts.get(ip);
+  if (!rec || now > rec.resetAt) { loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 }); return true; }
+  if (rec.count >= 5) return false;
+  rec.count++;
   return true;
 }
 
 function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = parseCookies(req)[COOKIE_NAME];
-  if (!token || !verifyToken(token)) {
-    return res.status(401).json({ error: 'Não autorizado. Faça login primeiro.' });
-  }
+  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Não autorizado. Faça login primeiro.' });
   next();
 }
 
 // ─── Groq ─────────────────────────────────────────────────────────────────────
 
 let groqClient: Groq | null = null;
-
 function getGroqClient(): Groq | null {
-  if (!groqClient) {
-    const key = process.env.GROQ_API_KEY;
-    if (key) groqClient = new Groq({ apiKey: key });
-  }
+  if (!groqClient && process.env.GROQ_API_KEY) groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
   return groqClient;
 }
 
 // ─── Budget helpers ───────────────────────────────────────────────────────────
 
 function getCurrentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Only counts expenses from the current calendar month
-function recalculateBudgets() {
-  const month = getCurrentMonth();
-  currentBudgets.forEach(b => {
-    b.spentInCents = currentTransactions
-      .filter(tx =>
-        tx.type === 'DES' &&
-        tx.category.toLowerCase() === b.category.toLowerCase() &&
-        tx.date.startsWith(month)
-      )
-      .reduce((acc, tx) => acc + tx.amountInCents, 0);
-  });
+async function recalculateBudgets(): Promise<void> {
+  await d1q(`
+    UPDATE budgets
+    SET spent_in_cents = (
+      SELECT COALESCE(SUM(t.amount_in_cents), 0)
+      FROM transactions t
+      WHERE t.type = 'DES'
+        AND LOWER(t.category) = LOWER(budgets.category)
+        AND t.date LIKE ?
+    )
+  `, [`${getCurrentMonth()}%`]);
 }
 
-function checkBudgetThresholds(tx: Transaction) {
-  const budget = currentBudgets.find(b => b.category.toLowerCase() === tx.category.toLowerCase());
-  if (!budget) return;
-  const ratioBefore = (budget.spentInCents - tx.amountInCents) / budget.limitInCents;
-  const ratioAfter = budget.spentInCents / budget.limitInCents;
+async function checkBudgetThresholds(tx: Transaction): Promise<void> {
+  const rows = await d1q<any>('SELECT * FROM budgets WHERE LOWER(category) = LOWER(?)', [tx.category]);
+  if (!rows.length) return;
+  const b = mapBudget(rows[0]);
+  const ratioBefore = (b.spentInCents - tx.amountInCents) / b.limitInCents;
+  const ratioAfter = b.spentInCents / b.limitInCents;
   const pct = Math.round(ratioAfter * 100);
-  const limit = (budget.limitInCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const limit = (b.limitInCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   if (ratioAfter >= 1.0 && ratioBefore < 1.0) {
-    currentAlerts.unshift({
-      id: `alert-ovr-${Date.now()}`, type: 'WARNING', isRead: false, date: new Date().toISOString(),
-      title: `🚨 Orçamento Estourado: ${budget.category}`,
-      message: `Você ultrapassou 100% de gasto em ${budget.category}. Gasto: R$ ${(budget.spentInCents / 100).toFixed(2)} de ${limit}.`
-    });
+    await d1q('INSERT INTO alerts VALUES (?,?,?,?,?,?)', [`alert-ovr-${Date.now()}`, 'WARNING', `🚨 Orçamento Estourado: ${b.category}`, `Você ultrapassou 100% em ${b.category}. Gasto: R$ ${(b.spentInCents / 100).toFixed(2)} de ${limit}.`, new Date().toISOString(), 0]);
   } else if (ratioAfter >= 0.8 && ratioBefore < 0.8) {
-    currentAlerts.unshift({
-      id: `alert-warn-${Date.now()}`, type: 'WARNING', isRead: false, date: new Date().toISOString(),
-      title: `⚠️ Alerta de Gastos: ${budget.category}`,
-      message: `Atenção: você atingiu ${pct}% do limite de ${budget.category}. Teto: ${limit}.`
-    });
+    await d1q('INSERT INTO alerts VALUES (?,?,?,?,?,?)', [`alert-warn-${Date.now()}`, 'WARNING', `⚠️ Alerta de Gastos: ${b.category}`, `Você atingiu ${pct}% do limite de ${b.category}. Teto: ${limit}.`, new Date().toISOString(), 0]);
   }
 }
 
-// ─── Validation constants ────────────────────────────────────────────────────
+// ─── Validation ──────────────────────────────────────────────────────────────
 
 const VALID_TX_TYPES = ['REC', 'DES', 'TRANS'] as const;
 const VALID_ACC_TYPES = ['CASH', 'CHECKING', 'SAVINGS', 'INVESTMENT'] as const;
@@ -212,11 +240,11 @@ async function startServer() {
   const PORT = 3000;
   app.use(express.json());
 
-  // ── Auth routes (public) ────────────────────────────────────────────────────
+  // ── Auth (public) ──────────────────────────────────────────────────────────
 
   app.post('/api/auth/login', (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em 15 minutos.' });
+    if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente em 15 minutos.' });
     const { password } = req.body;
     if (!password || password !== APP_PASSWORD) return res.status(401).json({ error: 'Senha incorreta.' });
     const token = createToken();
@@ -235,309 +263,326 @@ async function startServer() {
     res.json({ authenticated: !!(token && verifyToken(token)) });
   });
 
-  // ── All /api/* routes below require a valid session ─────────────────────────
   app.use('/api', requireAuth);
 
-  // 1. GET ALL PLATFORM DATA
-  app.get('/api/data', (_req, res) => {
-    recalculateBudgets();
-    res.json({ accounts: currentAccounts, connections: currentConnections, transactions: currentTransactions, budgets: currentBudgets, goals: currentGoals, alerts: currentAlerts, chatHistory });
+  // ── GET ALL DATA ───────────────────────────────────────────────────────────
+
+  app.get('/api/data', async (_req, res) => {
+    try {
+      await recalculateBudgets();
+      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory] = await Promise.all([
+        d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
+        d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
+        d1q<any>('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction)),
+        d1q<any>('SELECT * FROM budgets').then(r => r.map(mapBudget)),
+        d1q<any>('SELECT * FROM goals').then(r => r.map(mapGoal)),
+        d1q<any>('SELECT * FROM alerts ORDER BY date DESC').then(r => r.map(mapAlert)),
+        d1q<any>('SELECT * FROM chat_history ORDER BY rowid ASC').then(r => r.map(mapChat)),
+      ]);
+      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory });
+    } catch (e: any) {
+      console.error('[D1]', e.message);
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
   });
 
-  // 2. CREATE TRANSACTION
-  app.post('/api/transactions', (req, res) => {
+  // ── CREATE TRANSACTION ─────────────────────────────────────────────────────
+
+  app.post('/api/transactions', async (req, res) => {
     const { amountInCents, date, type, category, description, accountId, destinationAccountId } = req.body;
-    if (!amountInCents || !date || !type || !category || !description || !accountId) {
+    if (!amountInCents || !date || !type || !category || !description || !accountId)
       return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
-    }
-    if (!VALID_TX_TYPES.includes(type)) {
+    if (!VALID_TX_TYPES.includes(type))
       return res.status(400).json({ error: 'Tipo inválido. Use REC, DES ou TRANS.' });
-    }
-    const parsedAmount = parseInt(amountInCents, 10);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    const amount = parseInt(amountInCents, 10);
+    if (isNaN(amount) || amount <= 0)
       return res.status(400).json({ error: 'Valor deve ser inteiro positivo em centavos.' });
+
+    const id = `tx-usr-${Date.now()}`;
+    try {
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [{
+        sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,?,0)',
+        params: [id, amount, date, type, category, description, accountId, destinationAccountId || null]
+      }];
+      if (type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
+      else if (type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, accountId] });
+      else if (type === 'TRANS') {
+        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
+        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, destinationAccountId] });
+      }
+      await d1exec(stmts);
+      await recalculateBudgets();
+      if (type === 'DES') {
+        const rows = await d1q<any>('SELECT * FROM transactions WHERE id = ?', [id]);
+        if (rows[0]) await checkBudgetThresholds(mapTransaction(rows[0]));
+      }
+      res.status(201).json({ id });
+    } catch (e: any) {
+      console.error('[D1]', e.message);
+      res.status(500).json({ error: 'D1 error', details: e.message });
     }
-
-    const newTx: Transaction = {
-      id: `tx-usr-${Date.now()}`, amountInCents: parsedAmount,
-      date, type, category, description, accountId, destinationAccountId, isSynced: false
-    };
-
-    const sourceAcc = currentAccounts.find(a => a.id === accountId);
-    if (type === 'DES' && sourceAcc) sourceAcc.balanceInCents -= parsedAmount;
-    else if (type === 'REC' && sourceAcc) sourceAcc.balanceInCents += parsedAmount;
-    else if (type === 'TRANS') {
-      const destAcc = currentAccounts.find(a => a.id === destinationAccountId);
-      if (sourceAcc) sourceAcc.balanceInCents -= parsedAmount;
-      if (destAcc) destAcc.balanceInCents += parsedAmount;
-    }
-
-    currentTransactions.unshift(newTx);
-    recalculateBudgets();
-    if (type === 'DES') checkBudgetThresholds(newTx);
-    saveDb();
-    res.status(201).json(newTx);
   });
 
-  // 2b. DELETE TRANSACTION
-  app.delete('/api/transactions/:id', (req, res) => {
+  // ── DELETE TRANSACTION ─────────────────────────────────────────────────────
+
+  app.delete('/api/transactions/:id', async (req, res) => {
     const { id } = req.params;
-    const index = currentTransactions.findIndex(t => t.id === id);
-    if (index === -1) return res.status(404).json({ error: 'Transação não encontrada.' });
-
-    const [deleted] = currentTransactions.splice(index, 1);
-
-    // Reverse the balance effect
-    const sourceAcc = currentAccounts.find(a => a.id === deleted.accountId);
-    if (deleted.type === 'DES' && sourceAcc) sourceAcc.balanceInCents += deleted.amountInCents;
-    else if (deleted.type === 'REC' && sourceAcc) sourceAcc.balanceInCents -= deleted.amountInCents;
-    else if (deleted.type === 'TRANS') {
-      if (sourceAcc) sourceAcc.balanceInCents += deleted.amountInCents;
-      const destAcc = currentAccounts.find(a => a.id === deleted.destinationAccountId);
-      if (destAcc) destAcc.balanceInCents -= deleted.amountInCents;
+    try {
+      const rows = await d1q<any>('SELECT * FROM transactions WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Transação não encontrada.' });
+      const tx = mapTransaction(rows[0]);
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [
+        { sql: 'DELETE FROM transactions WHERE id = ?', params: [id] }
+      ];
+      if (tx.type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [tx.amountInCents, tx.accountId] });
+      else if (tx.type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [tx.amountInCents, tx.accountId] });
+      else if (tx.type === 'TRANS') {
+        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [tx.amountInCents, tx.accountId] });
+        if (tx.destinationAccountId) stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [tx.amountInCents, tx.destinationAccountId] });
+      }
+      await d1exec(stmts);
+      await recalculateBudgets();
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('[D1]', e.message);
+      res.status(500).json({ error: 'D1 error', details: e.message });
     }
-
-    recalculateBudgets();
-    saveDb();
-    res.json({ success: true, deleted });
   });
 
-  // 3. CREATE ACCOUNT
-  app.post('/api/accounts', (req, res) => {
+  // ── CREATE ACCOUNT ─────────────────────────────────────────────────────────
+
+  app.post('/api/accounts', async (req, res) => {
     const { name, type, bankName, balanceInCents, color } = req.body;
-    if (!name || !type || !bankName || balanceInCents === undefined) {
+    if (!name || !type || !bankName || balanceInCents === undefined)
       return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
-    }
-    if (!VALID_ACC_TYPES.includes(type)) {
-      return res.status(400).json({ error: 'Tipo inválido. Use CASH, CHECKING, SAVINGS ou INVESTMENT.' });
-    }
-    const parsedBalance = parseInt(balanceInCents, 10);
-    if (isNaN(parsedBalance) || parsedBalance < 0) {
+    if (!VALID_ACC_TYPES.includes(type))
+      return res.status(400).json({ error: 'Tipo inválido.' });
+    const balance = parseInt(balanceInCents, 10);
+    if (isNaN(balance) || balance < 0)
       return res.status(400).json({ error: 'Saldo inicial deve ser não-negativo em centavos.' });
+    const id = `acc-usr-${Date.now()}`;
+    try {
+      await d1q('INSERT INTO accounts VALUES (?,?,?,?,?,?,0)', [id, name, type, bankName, balance, color || '#6B7280']);
+      res.status(201).json({ id });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
     }
-    const newAcc: FinancialAccount = {
-      id: `acc-usr-${Date.now()}`, name, type, bankName,
-      balanceInCents: parsedBalance, color: color || '#6B7280', isLinked: false
-    };
-    currentAccounts.push(newAcc);
-    saveDb();
-    res.status(201).json(newAcc);
   });
 
-  // 4. RESET
-  app.post('/api/reset', (_req, res) => {
-    currentAccounts = structuredClone(INITIAL_ACCOUNTS);
-    currentConnections = structuredClone(INITIAL_CONNECTIONS);
-    currentTransactions = structuredClone(INITIAL_TRANSACTIONS);
-    currentBudgets = structuredClone(INITIAL_BUDGETS);
-    currentGoals = structuredClone(INITIAL_GOALS);
-    currentAlerts = [{
-      id: `alt-reset-${Date.now()}`, title: 'Restaurado para Estado Inicial',
-      message: 'Dados reiniciados com sucesso para os valores padrão.',
-      type: 'SUCCESS', date: new Date().toISOString(), isRead: false
-    }];
-    recalculateBudgets();
-    saveDb();
-    res.json({ success: true });
+  // ── RESET ──────────────────────────────────────────────────────────────────
+
+  app.post('/api/reset', async (_req, res) => {
+    try {
+      const stmts: { sql: string; params?: (string | number | null)[] }[] = [
+        { sql: 'DELETE FROM transactions' }, { sql: 'DELETE FROM accounts' },
+        { sql: 'DELETE FROM connections' }, { sql: 'DELETE FROM budgets' },
+        { sql: 'DELETE FROM goals' }, { sql: 'DELETE FROM alerts' }, { sql: 'DELETE FROM chat_history' }
+      ];
+      for (const a of INITIAL_ACCOUNTS) stmts.push({ sql: 'INSERT INTO accounts VALUES (?,?,?,?,?,?,?)', params: [a.id, a.name, a.type, a.bankName, a.balanceInCents, a.color, a.isLinked ? 1 : 0] });
+      for (const c of INITIAL_CONNECTIONS) stmts.push({ sql: 'INSERT INTO connections VALUES (?,?,?,?,?,?)', params: [c.id, c.institutionName, c.logo || '🏦', c.status, c.itemId || null, c.lastSyncedAt || null] });
+      for (const t of INITIAL_TRANSACTIONS) stmts.push({ sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced,original_merchant_name) VALUES (?,?,?,?,?,?,?,?,?,?)', params: [t.id, t.amountInCents, t.date, t.type, t.category, t.description, t.accountId, t.destinationAccountId || null, t.isSynced ? 1 : 0, t.originalMerchantName || null] });
+      for (const b of INITIAL_BUDGETS) stmts.push({ sql: 'INSERT INTO budgets VALUES (?,?,?,?)', params: [b.id, b.category, b.limitInCents, b.spentInCents] });
+      for (const g of INITIAL_GOALS) stmts.push({ sql: 'INSERT INTO goals VALUES (?,?,?,?,?,?)', params: [g.id, g.name, g.targetInCents, g.currentInCents, g.targetDate, g.color] });
+      for (const a of INITIAL_ALERTS) stmts.push({ sql: 'INSERT INTO alerts VALUES (?,?,?,?,?,?)', params: [a.id, a.type, a.title, a.message, a.date, a.isRead ? 1 : 0] });
+      stmts.push({ sql: 'INSERT INTO alerts VALUES (?,?,?,?,?,?)', params: [`alt-reset-${Date.now()}`, 'SUCCESS', 'Restaurado para Estado Inicial', 'Dados reiniciados com sucesso para os valores padrão.', new Date().toISOString(), 0] });
+      await d1exec(stmts);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
   });
 
-  // 5. UPDATE BUDGET LIMIT
-  app.post('/api/budgets/update', (req, res) => {
+  // ── UPDATE BUDGET ──────────────────────────────────────────────────────────
+
+  app.post('/api/budgets/update', async (req, res) => {
     const { limitInCents, category } = req.body;
-    const parsedLimit = parseInt(limitInCents, 10);
-    if (isNaN(parsedLimit) || parsedLimit <= 0) {
-      return res.status(400).json({ error: 'Limite deve ser positivo em centavos.' });
+    const limit = parseInt(limitInCents, 10);
+    if (isNaN(limit) || limit <= 0) return res.status(400).json({ error: 'Limite deve ser positivo em centavos.' });
+    try {
+      const existing = await d1q('SELECT id FROM budgets WHERE LOWER(category) = LOWER(?)', [category]);
+      if (existing.length) {
+        await d1q('UPDATE budgets SET limit_in_cents = ? WHERE LOWER(category) = LOWER(?)', [limit, category]);
+      } else {
+        await d1q('INSERT INTO budgets VALUES (?,?,?,0)', [`b-usr-${Date.now()}`, category, limit]);
+      }
+      await recalculateBudgets();
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
     }
-    const b = currentBudgets.find(item => item.category.toLowerCase() === category.toLowerCase());
-    if (b) {
-      b.limitInCents = parsedLimit;
-      recalculateBudgets();
-      saveDb();
-      return res.json(b);
-    }
-    const newBudget: CategoryBudget = {
-      id: `b-usr-${Date.now()}`, category, limitInCents: parsedLimit, spentInCents: 0
-    };
-    currentBudgets.push(newBudget);
-    recalculateBudgets();
-    saveDb();
-    res.json(newBudget);
   });
 
-  // 6a. DEPOSIT TO GOAL
-  app.post('/api/goals/update', (req, res) => {
+  // ── GOALS ──────────────────────────────────────────────────────────────────
+
+  app.post('/api/goals/update', async (req, res) => {
     const { id, amountToAdd } = req.body;
-    const parsedDeposit = parseInt(amountToAdd, 10);
-    if (isNaN(parsedDeposit) || parsedDeposit <= 0) {
-      return res.status(400).json({ error: 'Valor do aporte deve ser positivo em centavos.' });
+    const amount = parseInt(amountToAdd, 10);
+    if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Valor deve ser positivo em centavos.' });
+    try {
+      const rows = await d1q('SELECT id FROM goals WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Meta não encontrada.' });
+      await d1q('UPDATE goals SET current_in_cents = current_in_cents + ? WHERE id = ?', [amount, id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
     }
-    const goal = currentGoals.find(g => g.id === id);
-    if (!goal) return res.status(404).json({ error: 'Meta não encontrada.' });
-    goal.currentInCents += parsedDeposit;
-    saveDb();
-    res.json(goal);
   });
 
-  // 6b. CREATE GOAL
-  app.post('/api/goals', (req, res) => {
+  app.post('/api/goals', async (req, res) => {
     const { name, targetInCents, targetDate, color, currentInCents } = req.body;
-    if (!name || isNaN(targetInCents) || targetInCents <= 0 || !targetDate) {
+    if (!name || isNaN(targetInCents) || targetInCents <= 0 || !targetDate)
       return res.status(400).json({ error: 'Parâmetros inválidos para criação da meta.' });
+    const id = `g-usr-${Date.now()}`;
+    try {
+      await d1q('INSERT INTO goals VALUES (?,?,?,?,?,?)', [id, name, parseInt(targetInCents, 10), currentInCents ? parseInt(currentInCents, 10) : 0, targetDate, color || '#6366F1']);
+      res.json({ id });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
     }
-    const newGoal: FinancialGoal = {
-      id: `g-usr-${Date.now()}`, name,
-      targetInCents: parseInt(targetInCents, 10),
-      currentInCents: currentInCents ? parseInt(currentInCents, 10) : 0,
-      targetDate, color: color || '#6366F1'
-    };
-    currentGoals.push(newGoal);
-    saveDb();
-    res.json(newGoal);
   });
 
-  // 6c. DELETE GOAL
-  app.delete('/api/goals/:id', (req, res) => {
+  app.delete('/api/goals/:id', async (req, res) => {
     const { id } = req.params;
-    const index = currentGoals.findIndex(g => g.id === id);
-    if (index === -1) return res.status(404).json({ error: 'Meta não encontrada.' });
-    const [deleted] = currentGoals.splice(index, 1);
-    saveDb();
-    res.json({ success: true, deleted });
+    try {
+      const rows = await d1q('SELECT id FROM goals WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Meta não encontrada.' });
+      await d1q('DELETE FROM goals WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
   });
 
-  // 7. MARK ALERT READ
-  app.post('/api/alerts/read', (req, res) => {
+  // ── ALERTS ─────────────────────────────────────────────────────────────────
+
+  app.post('/api/alerts/read', async (req, res) => {
     const { id } = req.body;
-    const alert = currentAlerts.find(a => a.id === id);
-    if (alert) { alert.isRead = true; saveDb(); }
-    res.json({ success: true });
+    try {
+      await d1q('UPDATE alerts SET is_read = 1 WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
   });
 
-  // 8. OPEN FINANCE SYNC SIMULATOR
-  app.post('/api/open-finance/connect', (req, res) => {
+  // ── OPEN FINANCE SYNC ──────────────────────────────────────────────────────
+
+  app.post('/api/open-finance/connect', async (req, res) => {
     const { bankName } = req.body;
     if (!bankName) return res.status(400).json({ error: 'Selecione uma instituição bancária.' });
-
-    let conn = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
-    if (!conn) {
-      conn = {
-        id: `conn-bank-${Date.now()}`, institutionName: bankName, logo: '⚡', status: 'SYNCING',
-        itemId: `plg_${bankName.replace(/\s+/g, '').toLowerCase()}_${Math.floor(1000 + Math.random() * 9000)}`
-      };
-      currentConnections.push(conn);
-    } else {
-      conn.status = 'SYNCING';
-    }
-
-    const mockTxns = [
-      { desc: 'RESTAURANTE ASSIS BURGER', amount: 8450, category: 'Alimentação' },
-      { desc: 'AUTO POSTO IPIRANGA', amount: 15000, category: 'Transporte' },
-      { desc: 'MERCADO DISTRITO LTDA', amount: 21020, category: 'Alimentação' },
-      { desc: 'CORTE FEITO BARBEARIA', amount: 6500, category: 'Outros' },
-      { desc: 'CURSO INGLÊS COMPLETO', amount: 18000, category: 'Educação' },
-    ];
-
-    setTimeout(() => {
-      const c = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
-      if (!c) return;
-      c.status = 'CONNECTED';
-      c.lastSyncedAt = new Date().toISOString();
-
-      let targetAcc = currentAccounts.find(a => a.bankName.toLowerCase() === bankName.toLowerCase());
-      if (!targetAcc) {
-        targetAcc = {
-          id: `acc-auto-${Date.now()}`, name: `Conta Corrente ${bankName}`, type: 'CHECKING',
-          bankName, balanceInCents: 1200000, color: '#3B82F6', isLinked: true
-        };
-        currentAccounts.push(targetAcc);
+    try {
+      const existing = await d1q<any>('SELECT * FROM connections WHERE LOWER(institution_name) = LOWER(?)', [bankName]);
+      let connId: string;
+      let itemId: string;
+      if (existing.length) {
+        connId = existing[0].id;
+        itemId = existing[0].item_id || `plg_${bankName.replace(/\s+/g, '').toLowerCase()}_${Math.floor(1000 + Math.random() * 9000)}`;
+        await d1q('UPDATE connections SET status = ? WHERE id = ?', ['SYNCING', connId]);
       } else {
-        targetAcc.isLinked = true;
+        connId = `conn-bank-${Date.now()}`;
+        itemId = `plg_${bankName.replace(/\s+/g, '').toLowerCase()}_${Math.floor(1000 + Math.random() * 9000)}`;
+        await d1q('INSERT INTO connections VALUES (?,?,?,?,?,?)', [connId, bankName, '⚡', 'SYNCING', itemId, null]);
       }
 
-      let synced = 0;
-      for (const item of mockTxns) {
-        const d = new Date();
-        d.setDate(d.getDate() - Math.floor(Math.random() * 10));
-        currentTransactions.unshift({
-          id: `tx-sync-${Math.random().toString(36).slice(2, 11)}`,
-          amountInCents: item.amount, date: d.toISOString().split('T')[0],
-          type: 'DES', category: item.category, description: item.desc,
-          accountId: targetAcc!.id, isSynced: true, originalMerchantName: item.desc
-        });
-        targetAcc!.balanceInCents -= item.amount;
-        synced++;
-      }
+      const mockTxns = [
+        { desc: 'RESTAURANTE ASSIS BURGER', amount: 8450, category: 'Alimentação' },
+        { desc: 'AUTO POSTO IPIRANGA', amount: 15000, category: 'Transporte' },
+        { desc: 'MERCADO DISTRITO LTDA', amount: 21020, category: 'Alimentação' },
+        { desc: 'CORTE FEITO BARBEARIA', amount: 6500, category: 'Outros' },
+        { desc: 'CURSO INGLÊS COMPLETO', amount: 18000, category: 'Educação' },
+      ];
 
-      recalculateBudgets();
-      currentAlerts.unshift({
-        id: `alert-conn-${Date.now()}`, type: 'SUCCESS', isRead: false, date: new Date().toISOString(),
-        title: `🔗 Conexão Bem-sucedida: ${bankName}`,
-        message: `${synced} transações sincronizadas e categorizadas com sucesso.`
-      });
-      saveDb();
-    }, 4000);
+      setTimeout(async () => {
+        try {
+          await d1q('UPDATE connections SET status = ?, last_synced_at = ? WHERE id = ?', ['CONNECTED', new Date().toISOString(), connId]);
+          const accRows = await d1q<any>('SELECT * FROM accounts WHERE LOWER(bank_name) = LOWER(?)', [bankName]);
+          let targetAccId: string;
+          if (accRows.length) {
+            targetAccId = accRows[0].id;
+            await d1q('UPDATE accounts SET is_linked = 1 WHERE id = ?', [targetAccId]);
+          } else {
+            targetAccId = `acc-auto-${Date.now()}`;
+            await d1q('INSERT INTO accounts VALUES (?,?,?,?,?,?,1)', [targetAccId, `Conta Corrente ${bankName}`, 'CHECKING', bankName, 1200000, '#3B82F6']);
+          }
+          const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+          for (const item of mockTxns) {
+            const d = new Date();
+            d.setDate(d.getDate() - Math.floor(Math.random() * 10));
+            const txId = `tx-sync-${Math.random().toString(36).slice(2, 11)}`;
+            stmts.push({ sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,original_merchant_name) VALUES (?,?,?,?,?,?,?,1,?)', params: [txId, item.amount, d.toISOString().split('T')[0], 'DES', item.category, item.desc, targetAccId, item.desc] });
+            stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [item.amount, targetAccId] });
+          }
+          stmts.push({ sql: 'INSERT INTO alerts VALUES (?,?,?,?,?,?)', params: [`alert-conn-${Date.now()}`, 'SUCCESS', `🔗 Conexão Bem-sucedida: ${bankName}`, `${mockTxns.length} transações sincronizadas com sucesso.`, new Date().toISOString(), 0] });
+          await d1exec(stmts);
+          await recalculateBudgets();
+        } catch (e) { console.error('[SYNC]', e); }
+      }, 4000);
 
-    res.json({ success: true, status: 'SYNCING', itemId: conn.itemId });
+      res.json({ success: true, status: 'SYNCING', itemId });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
   });
 
-  // 9. AI ADVISOR — Groq llama-3.3-70b-versatile
+  // ── R2 BACKUP ─────────────────────────────────────────────────────────────
+
+  app.post('/api/backup', async (_req, res) => {
+    try {
+      const [accounts, transactions, budgets, goals, alerts] = await Promise.all([
+        d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
+        d1q<any>('SELECT * FROM transactions ORDER BY date DESC').then(r => r.map(mapTransaction)),
+        d1q<any>('SELECT * FROM budgets').then(r => r.map(mapBudget)),
+        d1q<any>('SELECT * FROM goals').then(r => r.map(mapGoal)),
+        d1q<any>('SELECT * FROM alerts').then(r => r.map(mapAlert)),
+      ]);
+      const snapshot = { exportedAt: new Date().toISOString(), accounts, transactions, budgets, goals, alerts };
+      const key = `backups/${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      await r2Put(key, JSON.stringify(snapshot, null, 2));
+      res.json({ success: true, key, records: { accounts: accounts.length, transactions: transactions.length } });
+    } catch (e: any) {
+      res.status(500).json({ error: 'Backup failed', details: e.message });
+    }
+  });
+
+  // ── AI ADVISOR ─────────────────────────────────────────────────────────────
+
   app.post('/api/groq/advisor', async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: 'Mensagem obrigatória.' });
-
     const client = getGroqClient();
-    recalculateBudgets();
-
-    const totalBalance = currentAccounts.reduce((s, a) => s + a.balanceInCents, 0);
-    const budgetSummary = currentBudgets.map(b =>
-      `${b.category}: R$ ${(b.spentInCents / 100).toFixed(2)} gastos de R$ ${(b.limitInCents / 100).toFixed(2)}`
-    ).join(', ');
-    const goalsSummary = currentGoals.map(g =>
-      `${g.name}: R$ ${(g.currentInCents / 100).toFixed(2)} de R$ ${(g.targetInCents / 100).toFixed(2)}`
-    ).join(', ');
-
-    const systemPrompt = `Você é um Consultor Financeiro de elite para brasileiros. Seja cortês, preciso e empático.
-Contexto financeiro atual do usuário:
-- Patrimônio Total: R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-- Orçamentos do mês: ${budgetSummary}
-- Metas de poupança: ${goalsSummary}
-- Total de transações: ${currentTransactions.length}
-
-REGRAS: Não critique despesas agressivamente. Retorne Markdown rico e bem estruturado.
-Responda com no máximo 3 parágrafos ou bullet points acionáveis.`;
+    await recalculateBudgets();
+    const [accounts, budgets, goals, txRows] = await Promise.all([
+      d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
+      d1q<any>('SELECT * FROM budgets').then(r => r.map(mapBudget)),
+      d1q<any>('SELECT * FROM goals').then(r => r.map(mapGoal)),
+      d1q<any>('SELECT COUNT(*) as cnt FROM transactions'),
+    ]);
+    const totalBalance = accounts.reduce((s: number, a: FinancialAccount) => s + a.balanceInCents, 0);
+    const budgetSummary = budgets.map((b: CategoryBudget) => `${b.category}: R$ ${(b.spentInCents / 100).toFixed(2)} de R$ ${(b.limitInCents / 100).toFixed(2)}`).join(', ');
+    const goalsSummary = goals.map((g: FinancialGoal) => `${g.name}: R$ ${(g.currentInCents / 100).toFixed(2)} de R$ ${(g.targetInCents / 100).toFixed(2)}`).join(', ');
+    const systemPrompt = `Você é um Consultor Financeiro de elite para brasileiros. Seja cortês, preciso e empático.\nContexto financeiro:\n- Patrimônio Total: R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n- Orçamentos: ${budgetSummary}\n- Metas: ${goalsSummary}\n- Total transações: ${txRows[0]?.cnt || 0}\n\nRetorne Markdown rico. Máximo 3 parágrafos ou bullet points acionáveis.`;
 
     if (!client) {
-      await new Promise(r => setTimeout(r, 600));
-      return res.json({
-        reply: `### 💡 Análise MKS Open Finance\n\nSeu patrimônio consolidado é **R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n\n> Configure GROQ_API_KEY no .env para respostas personalizadas com IA.`,
-        note: 'Groq API key não configurada'
-      });
+      return res.json({ reply: `### 💡 Análise MKS Open Finance\n\nPatrimônio: **R$ ${(totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n\n> Configure GROQ_API_KEY no .env para IA personalizada.` });
     }
-
     try {
       const response = await client.chat.completions.create({
         model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: message }
-        ],
-        temperature: 0.7,
-        max_tokens: 1024
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: message }],
+        temperature: 0.7, max_tokens: 1024
       });
       res.json({ reply: response.choices[0]?.message?.content || 'Sem resposta do modelo.' });
     } catch (e: any) {
-      res.status(500).json({ error: 'Erro ao invocar Groq AI', details: e.message });
+      res.status(500).json({ error: 'Groq error', details: e.message });
     }
   });
 
-  // 10. AUTO-CATEGORIZATION — Groq llama-3.1-8b-instant
+  // ── CATEGORIZE ─────────────────────────────────────────────────────────────
+
   app.post('/api/groq/categorize', async (req, res) => {
     const { merchantName } = req.body;
     if (!merchantName) return res.status(400).json({ error: 'merchantName obrigatório.' });
-
     const client = getGroqClient();
-
-    // Fallback regex classifier
     const classifyLocally = (name: string) => {
       const l = name.toLowerCase();
       let category = 'Outros', cleanDesc = name;
@@ -551,31 +596,22 @@ Responda com no máximo 3 parágrafos ou bullet points acionáveis.`;
       else if (/coco bambu/.test(l)) cleanDesc = 'Restaurante Coco Bambu';
       else if (/netflix/.test(l)) cleanDesc = 'Netflix';
       else if (/uber/.test(l)) cleanDesc = 'Uber';
-      else if (/posto ipiranga/.test(l)) cleanDesc = 'Posto Ipiranga';
       return { cleanDescription: cleanDesc, category };
     };
-
     if (!client) return res.json(classifyLocally(merchantName));
-
     try {
       const response = await client.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        messages: [{
-          role: 'user',
-          content: `Transação bancária: "${merchantName}". Retorne JSON com "cleanDescription" (nome amigável) e "category" (uma de: Alimentação, Transporte, Moradia, Lazer, Saúde, Educação, Outros).`
-        }],
-        temperature: 0.1,
-        max_tokens: 100,
-        response_format: { type: 'json_object' }
+        messages: [{ role: 'user', content: `Transação bancária: "${merchantName}". Retorne JSON com "cleanDescription" e "category" (Alimentação, Transporte, Moradia, Lazer, Saúde, Educação, Outros).` }],
+        temperature: 0.1, max_tokens: 100, response_format: { type: 'json_object' }
       });
       const parsed = JSON.parse(response.choices[0]?.message?.content || '{}');
       res.json({ cleanDescription: parsed.cleanDescription || merchantName, category: parsed.category || 'Outros' });
-    } catch {
-      res.json(classifyLocally(merchantName));
-    }
+    } catch { res.json(classifyLocally(merchantName)); }
   });
 
-  // 11. VITE / SPA
+  // ── VITE / SPA ─────────────────────────────────────────────────────────────
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
@@ -586,7 +622,9 @@ Responda com no máximo 3 parágrafos ou bullet points acionáveis.`;
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MKS Open Finance server → http://0.0.0.0:${PORT}`);
+    console.log(`MKS Open Finance → http://0.0.0.0:${PORT}`);
+    console.log(`[D1] mks-finance (${D1_DATABASE_ID})`);
+    console.log(`[R2] ${R2_BUCKET}`);
     if (!process.env.GROQ_API_KEY) console.warn('[WARN] GROQ_API_KEY não configurada — IA em modo fallback.');
   });
 }
