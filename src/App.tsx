@@ -631,10 +631,11 @@ export default function App() {
                 <div className="xl:col-span-2 space-y-6">
                   
                   {/* Miniature Analytics preview */}
-                  <AnalyticsModule 
+                  <AnalyticsModule
                     accounts={accounts}
                     transactions={transactions}
                     budgets={budgets}
+                    recurrences={recurrences}
                   />
 
                   {/* Manual / Open Finance Ledger tables preview */}
@@ -840,10 +841,11 @@ export default function App() {
           )}
 
           {activeTab === 'ANALYTICS' && (
-            <AnalyticsModule 
+            <AnalyticsModule
               accounts={accounts}
               transactions={transactions}
               budgets={budgets}
+              recurrences={recurrences}
             />
           )}
 

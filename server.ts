@@ -871,6 +871,88 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
 
+  // ── REPORTS ───────────────────────────────────────────────────────────────
+
+  // Monthly aggregated summary (last N months)
+  app.get('/api/reports/monthly-summary', async (req, res) => {
+    try {
+      const months = Math.min(parseInt((req.query.months as string) || '6', 10), 24);
+      const results: { month: string; income: number; expense: number; balance: number }[] = [];
+      const now = new Date();
+
+      // Build one query per month in parallel
+      const monthKeys: string[] = [];
+      for (let i = months - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+
+      const monthData = await Promise.all(
+        monthKeys.map(m =>
+          d1q<any>(
+            `SELECT type, SUM(amount_in_cents) as total FROM transactions
+             WHERE date LIKE ? AND type IN ('REC','DES') GROUP BY type`,
+            [`${m}%`]
+          )
+        )
+      );
+
+      for (let i = 0; i < monthKeys.length; i++) {
+        let income = 0, expense = 0;
+        for (const row of monthData[i]) {
+          if (row.type === 'REC') income = row.total;
+          else if (row.type === 'DES') expense = row.total;
+        }
+        results.push({ month: monthKeys[i], income, expense, balance: income - expense });
+      }
+
+      res.json(results);
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
+
+  // CSV export of transactions
+  app.get('/api/export/transactions.csv', async (req, res) => {
+    try {
+      const { startDate, endDate, type } = req.query;
+      let sql = 'SELECT t.*, a.name as account_name FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id WHERE 1=1';
+      const params: (string | number | null)[] = [];
+      if (startDate) { sql += ' AND t.date >= ?'; params.push(startDate as string); }
+      if (endDate)   { sql += ' AND t.date <= ?'; params.push(endDate as string); }
+      if (type)      { sql += ' AND t.type = ?';  params.push(type as string); }
+      sql += ' ORDER BY t.date DESC, t.created_at DESC';
+
+      const rows = await d1q<any>(sql, params);
+
+      const headers = ['id', 'data', 'tipo', 'categoria', 'descricao', 'conta', 'valor_reais', 'sinc_open_finance', 'merchant_original', 'cartao_credito_id', 'parcela', 'parcelas_total'];
+      const lines = [headers.join(',')];
+      for (const r of rows) {
+        const cols = [
+          r.id,
+          r.date,
+          r.type,
+          r.category,
+          `"${(r.description || '').replace(/"/g, '""')}"`,
+          `"${(r.account_name || '').replace(/"/g, '""')}"`,
+          (r.amount_in_cents / 100).toFixed(2),
+          r.is_synced ? 'sim' : 'nao',
+          `"${(r.original_merchant_name || '').replace(/"/g, '""')}"`,
+          r.credit_card_id || '',
+          r.installment_number || '',
+          r.installment_total || '',
+        ];
+        lines.push(cols.join(','));
+      }
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="transacoes.csv"');
+      res.send('﻿' + lines.join('\r\n')); // BOM for Excel UTF-8
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
+
   // ── AI ADVISOR ─────────────────────────────────────────────────────────────
 
   app.post('/api/groq/advisor', async (req, res) => {
