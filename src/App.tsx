@@ -21,7 +21,8 @@ import {
   Clock,
   Menu,
   X,
-  HelpCircle
+  HelpCircle,
+  LogOut
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -32,6 +33,7 @@ import BudgetsModule from './components/BudgetsModule';
 import AnalyticsModule from './components/AnalyticsModule';
 import NotificationsModule from './components/NotificationsModule';
 import AIAdvisor from './components/AIAdvisor';
+import LoginScreen from './components/LoginScreen';
 
 import { 
   UserProfile, 
@@ -69,11 +71,12 @@ export default function App() {
   const [alerts, setAlerts] = useState<NotificationAlert[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
-  // Load all variables from Express Server
   const fetchAllData = useCallback(async () => {
     try {
       const response = await fetch('/api/data');
+      if (response.status === 401) { setIsAuthenticated(false); return; }
       if (response.ok) {
         const data = await response.json();
         setAccounts(data.accounts || []);
@@ -94,7 +97,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetchAllData();
+    async function initialize() {
+      try {
+        const res = await fetch('/api/auth/status');
+        const { authenticated } = await res.json();
+        setIsAuthenticated(authenticated);
+        if (authenticated) await fetchAllData();
+        else setIsLoading(false);
+      } catch {
+        setIsAuthenticated(false);
+        setIsLoading(false);
+      }
+    }
+    initialize();
   }, [fetchAllData]);
 
   // Total balance helper
@@ -293,6 +308,36 @@ export default function App() {
     }
   };
 
+  const handleLogin = async (password: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        setIsAuthenticated(true);
+        await fetchAllData();
+        return true;
+      }
+    } catch {
+      // ignore network errors
+    }
+    return false;
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setIsAuthenticated(false);
+    setAccounts([]);
+    setConnections([]);
+    setTransactions([]);
+    setBudgets([]);
+    setGoals([]);
+    setAlerts([]);
+    setChatHistory([]);
+  };
+
   // Nav configuration
   const sidebarNavItems = [
     { id: 'DASHBOARD', label: 'Estatísticas Gerais', icon: Building2 },
@@ -304,7 +349,7 @@ export default function App() {
     { id: 'NOTIFICATIONS', label: 'Módulo 6: Notificações', icon: Bell, badge: unreadAlertsCount }
   ];
 
-  if (isLoading) {
+  if (isLoading || isAuthenticated === null) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans">
         <div className="flex flex-col items-center gap-4 text-center">
@@ -316,6 +361,10 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={handleLogin} />;
   }
 
   return (
@@ -366,12 +415,20 @@ export default function App() {
             </div>
           </div>
 
-          <button 
+          <button
             onClick={fetchAllData}
             title="Sincronizar Ledger com Servidor"
             className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
           >
             <RefreshCw className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={handleLogout}
+            title="Sair"
+            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>

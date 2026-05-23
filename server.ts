@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import 'dotenv/config';
+import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -26,7 +28,8 @@ import {
   INITIAL_ALERTS
 } from './src/mockData';
 
-// --- Persistence ---
+// ─── Persistence ────────────────────────────────────────────────────────────
+
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 
 interface DbState {
@@ -81,7 +84,78 @@ let currentGoals: FinancialGoal[] = db.goals;
 let currentAlerts: NotificationAlert[] = db.alerts;
 let chatHistory: ChatMessage[] = db.chatHistory;
 
-// Lazy init for Google Gemini Client
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+const APP_SECRET = process.env.APP_SECRET || 'mks-dev-secret-please-change-in-production';
+const APP_PASSWORD = process.env.APP_PASSWORD || 'mks2026';
+const COOKIE_NAME = 'mks_session';
+const SESSION_MS = 24 * 60 * 60 * 1000; // 24 h
+
+if (!process.env.APP_SECRET) {
+  console.warn('[WARN] APP_SECRET not set — using insecure default. Set APP_SECRET in .env for production.');
+}
+if (!process.env.APP_PASSWORD) {
+  console.warn('[WARN] APP_PASSWORD not set — using default password "mks2026". Set APP_PASSWORD in .env.');
+}
+
+function createToken(): string {
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MS })).toString('base64url');
+  const sig = crypto.createHmac('sha256', APP_SECRET).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+
+function verifyToken(token: string): boolean {
+  try {
+    const dotIdx = token.lastIndexOf('.');
+    if (dotIdx === -1) return false;
+    const payload = token.slice(0, dotIdx);
+    const sig = token.slice(dotIdx + 1);
+    const expected = crypto.createHmac('sha256', APP_SECRET).update(payload).digest('hex');
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length) return false;
+    if (!crypto.timingSafeEqual(sigBuf, expBuf)) return false;
+    const { exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    return Date.now() < exp;
+  } catch {
+    return false;
+  }
+}
+
+function parseCookies(req: express.Request): Record<string, string> {
+  return Object.fromEntries(
+    (req.headers.cookie || '').split(';').filter(Boolean).map(c => {
+      const i = c.indexOf('=');
+      return i === -1 ? [c.trim(), ''] : [c.slice(0, i).trim(), c.slice(i + 1).trim()];
+    })
+  );
+}
+
+// Simple in-memory rate limiter: 5 attempts per 15 minutes per IP
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    return true;
+  }
+  if (record.count >= 5) return false;
+  record.count++;
+  return true;
+}
+
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const token = parseCookies(req)[COOKIE_NAME];
+  if (!token || !verifyToken(token)) {
+    return res.status(401).json({ error: 'Não autorizado. Faça login primeiro.' });
+  }
+  next();
+}
+
+// ─── Gemini ──────────────────────────────────────────────────────────────────
+
 let geminiAIClient: GoogleGenAI | null = null;
 
 function getGeminiClient(): GoogleGenAI | null {
@@ -97,7 +171,8 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiAIClient;
 }
 
-// Recalculate spending in budgets from transactions
+// ─── Budget helpers ───────────────────────────────────────────────────────────
+
 function recalculateBudgets() {
   currentBudgets.forEach(b => {
     b.spentInCents = currentTransactions
@@ -106,36 +181,34 @@ function recalculateBudgets() {
   });
 }
 
-// Trigger budget threshold alerts when a new expense is added
 function checkBudgetThresholds(tx: Transaction) {
   const budget = currentBudgets.find(b => b.category.toLowerCase() === tx.category.toLowerCase());
   if (!budget) return;
-
   const ratioBefore = (budget.spentInCents - tx.amountInCents) / budget.limitInCents;
   const ratioAfter = budget.spentInCents / budget.limitInCents;
   const percentText = Math.round(ratioAfter * 100);
   const limitFormatted = (budget.limitInCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
   if (ratioAfter >= 1.0 && ratioBefore < 1.0) {
     currentAlerts.unshift({
       id: `alert-ovr-${Date.now()}`,
       title: `🚨 Orçamento Estourado: ${budget.category}`,
       message: `Você ultrapassou 100% de gasto em ${budget.category}. Gasto atual: R$ ${(budget.spentInCents / 100).toFixed(2)} de ${limitFormatted}.`,
-      type: 'WARNING',
-      date: new Date().toISOString(),
-      isRead: false
+      type: 'WARNING', date: new Date().toISOString(), isRead: false
     });
   } else if (ratioAfter >= 0.8 && ratioBefore < 0.8) {
     currentAlerts.unshift({
       id: `alert-warn-${Date.now()}`,
       title: `⚠️ Alerta de Gastos: ${budget.category}`,
       message: `Atenção: você atingiu ${percentText}% do limite de ${budget.category}. Teto: ${limitFormatted}.`,
-      type: 'WARNING',
-      date: new Date().toISOString(),
-      isRead: false
+      type: 'WARNING', date: new Date().toISOString(), isRead: false
     });
   }
 }
+
+// ─── Server ───────────────────────────────────────────────────────────────────
+
+const VALID_TX_TYPES = ['REC', 'DES', 'TRANS'] as const;
+const VALID_ACC_TYPES = ['CASH', 'CHECKING', 'SAVINGS', 'INVESTMENT'] as const;
 
 async function startServer() {
   const app = express();
@@ -143,18 +216,40 @@ async function startServer() {
 
   app.use(express.json());
 
+  // ── Auth routes (public — registered before requireAuth middleware) ──────────
+
+  app.post('/api/auth/login', (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    if (!checkRateLimit(ip)) {
+      return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em 15 minutos.' });
+    }
+    const { password } = req.body;
+    if (!password || password !== APP_PASSWORD) {
+      return res.status(401).json({ error: 'Senha incorreta.' });
+    }
+    const token = createToken();
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${secure}`);
+    res.json({ success: true });
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+    res.json({ success: true });
+  });
+
+  app.get('/api/auth/status', (req, res) => {
+    const token = parseCookies(req)[COOKIE_NAME];
+    res.json({ authenticated: !!(token && verifyToken(token)) });
+  });
+
+  // ── All /api/* routes below require a valid session ────────────────────────
+  app.use('/api', requireAuth);
+
   // 1. GET ALL PLATFORM DATA
   app.get('/api/data', (req, res) => {
     recalculateBudgets();
-    res.json({
-      accounts: currentAccounts,
-      connections: currentConnections,
-      transactions: currentTransactions,
-      budgets: currentBudgets,
-      goals: currentGoals,
-      alerts: currentAlerts,
-      chatHistory
-    });
+    res.json({ accounts: currentAccounts, connections: currentConnections, transactions: currentTransactions, budgets: currentBudgets, goals: currentGoals, alerts: currentAlerts, chatHistory });
   });
 
   // 2. CREATE TRANSACTION MANUALLY
@@ -164,10 +259,17 @@ async function startServer() {
     if (!amountInCents || !date || !type || !category || !description || !accountId) {
       return res.status(400).json({ error: 'Missing parameters. Ensure all fields are filled.' });
     }
+    if (!VALID_TX_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'Tipo de transação inválido. Use REC, DES ou TRANS.' });
+    }
+    const parsedAmount = parseInt(amountInCents, 10);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ error: 'O valor deve ser um número inteiro positivo em centavos.' });
+    }
 
     const newTx: Transaction = {
       id: `tx-usr-${Date.now()}`,
-      amountInCents: parseInt(amountInCents, 10),
+      amountInCents: parsedAmount,
       date,
       type,
       category,
@@ -179,13 +281,13 @@ async function startServer() {
 
     const sourceAcc = currentAccounts.find(a => a.id === accountId);
     if (type === 'DES' && sourceAcc) {
-      sourceAcc.balanceInCents -= newTx.amountInCents;
+      sourceAcc.balanceInCents -= parsedAmount;
     } else if (type === 'REC' && sourceAcc) {
-      sourceAcc.balanceInCents += newTx.amountInCents;
+      sourceAcc.balanceInCents += parsedAmount;
     } else if (type === 'TRANS') {
       const destAcc = currentAccounts.find(a => a.id === destinationAccountId);
-      if (sourceAcc) sourceAcc.balanceInCents -= newTx.amountInCents;
-      if (destAcc) destAcc.balanceInCents += newTx.amountInCents;
+      if (sourceAcc) sourceAcc.balanceInCents -= parsedAmount;
+      if (destAcc) destAcc.balanceInCents += parsedAmount;
     }
 
     currentTransactions.unshift(newTx);
@@ -203,20 +305,26 @@ async function startServer() {
     if (!name || !type || !bankName || balanceInCents === undefined) {
       return res.status(400).json({ error: 'Complete all required details.' });
     }
+    if (!VALID_ACC_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'Tipo de conta inválido. Use CASH, CHECKING, SAVINGS ou INVESTMENT.' });
+    }
+    const parsedBalance = parseInt(balanceInCents, 10);
+    if (isNaN(parsedBalance) || parsedBalance < 0) {
+      return res.status(400).json({ error: 'Saldo inicial deve ser um número não-negativo em centavos.' });
+    }
 
     const newAcc: FinancialAccount = {
       id: `acc-usr-${Date.now()}`,
       name,
       type,
       bankName,
-      balanceInCents: parseInt(balanceInCents, 10),
+      balanceInCents: parsedBalance,
       color: color || '#6B7280',
       isLinked: false
     };
 
     currentAccounts.push(newAcc);
     saveDb();
-
     res.status(201).json(newAcc);
   });
 
@@ -243,9 +351,13 @@ async function startServer() {
   // 5. UPDATE BUDGET LIMIT
   app.post('/api/budgets/update', (req, res) => {
     const { limitInCents, category } = req.body;
+    const parsedLimit = parseInt(limitInCents, 10);
+    if (isNaN(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ error: 'Limite deve ser um valor positivo em centavos.' });
+    }
     const b = currentBudgets.find(item => item.category.toLowerCase() === category.toLowerCase());
     if (b) {
-      b.limitInCents = parseInt(limitInCents, 10);
+      b.limitInCents = parsedLimit;
       recalculateBudgets();
       saveDb();
       return res.json(b);
@@ -253,7 +365,7 @@ async function startServer() {
     const newBudget: CategoryBudget = {
       id: `b-usr-${Date.now()}`,
       category,
-      limitInCents: parseInt(limitInCents, 10),
+      limitInCents: parsedLimit,
       spentInCents: 0
     };
     currentBudgets.push(newBudget);
@@ -265,9 +377,13 @@ async function startServer() {
   // 6. UPDATE FINANCIAL GOAL (deposit)
   app.post('/api/goals/update', (req, res) => {
     const { id, amountToAdd } = req.body;
+    const parsedDeposit = parseInt(amountToAdd, 10);
+    if (isNaN(parsedDeposit) || parsedDeposit <= 0) {
+      return res.status(400).json({ error: 'Valor do aporte deve ser um número positivo em centavos.' });
+    }
     const goal = currentGoals.find(g => g.id === id);
     if (goal) {
-      goal.currentInCents += parseInt(amountToAdd, 10);
+      goal.currentInCents += parsedDeposit;
       saveDb();
       return res.json(goal);
     }
@@ -277,11 +393,9 @@ async function startServer() {
   // 6b. CREATE FINANCIAL GOAL
   app.post('/api/goals', (req, res) => {
     const { name, targetInCents, targetDate, color, currentInCents } = req.body;
-
     if (!name || isNaN(targetInCents) || targetInCents <= 0 || !targetDate) {
       return res.status(400).json({ error: 'Parâmetros inválidos para criação da meta' });
     }
-
     const newGoal: FinancialGoal = {
       id: `g-usr-${Date.now()}`,
       name,
@@ -290,7 +404,6 @@ async function startServer() {
       targetDate,
       color: color || '#6366F1'
     };
-
     currentGoals.push(newGoal);
     saveDb();
     res.json(newGoal);
@@ -322,7 +435,6 @@ async function startServer() {
   // 8. SIMULATOR: BANK OPEN FINANCE CONNECTION & SYNC QUEUE
   app.post('/api/open-finance/connect', async (req, res) => {
     const { bankName } = req.body;
-
     if (!bankName) {
       return res.status(400).json({ error: 'Select a valid banking institution' });
     }
@@ -352,7 +464,6 @@ async function startServer() {
     setTimeout(() => {
       const conn = currentConnections.find(c => c.institutionName.toLowerCase() === bankName.toLowerCase());
       if (!conn) return;
-
       conn.status = 'CONNECTED';
       conn.lastSyncedAt = new Date().toISOString();
 
@@ -376,7 +487,6 @@ async function startServer() {
       for (const item of mockExternalBankTransactions) {
         const dateRandom = new Date();
         dateRandom.setDate(dateRandom.getDate() - Math.floor(Math.random() * 10));
-
         const finalTx: Transaction = {
           id: `tx-sync-${Math.random().toString(36).substr(2, 9)}`,
           amountInCents: item.amount,
@@ -388,30 +498,25 @@ async function startServer() {
           isSynced: true,
           originalMerchantName: item.desc
         };
-
         currentTransactions.unshift(finalTx);
         targetAcc!.balanceInCents -= item.amount;
         syncedCount++;
       }
 
       recalculateBudgets();
-
       currentAlerts.unshift({
         id: `alert-conn-${Date.now()}`,
         title: `🔗 Conexão Bem-sucedida: ${bankName}`,
         message: `Sincronização histórica automatizada concluída para ${bankName}! ${syncedCount} transações consolidadas e categorizadas com sucesso.`,
-        type: 'SUCCESS',
-        date: new Date().toISOString(),
-        isRead: false
+        type: 'SUCCESS', date: new Date().toISOString(), isRead: false
       });
-
       saveDb();
     }, 4000);
 
     res.json({
       success: true,
       status: 'SYNCING',
-      message: 'Tarefa sync-historical-data enfileirada no Redis. Processando histórico bancário de 90 dias.',
+      message: 'Tarefa sync-historical-data enfileirada. Processando histórico bancário de 90 dias.',
       itemId: existingConn.itemId
     });
   });
@@ -419,9 +524,7 @@ async function startServer() {
   // 9. CLIENT ADVISOR WITH SERVER-SIDE GEMINI AI API PROXY
   app.post('/api/gemini/advisor', async (req, res) => {
     const { message } = req.body;
-
     const client = getGeminiClient();
-
     recalculateBudgets();
     const totalBalance = currentAccounts.reduce((sum, a) => sum + a.balanceInCents, 0);
     const totalTransactions = currentTransactions.length;
@@ -446,15 +549,13 @@ REGRAS DE CONVENÇÃO:
       const fallbackReplies = [
         "### 💡 Análise de Saúde Financeira MKS\n\nExcelente controle! Seu patrimônio atual consolidado de **R$ " + (totalBalance / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + "** demonstra excelente consistência.\n\n" +
         "#### Próximos Passos Recomendados:\n" +
-        "1. **Segurança**: Sua **Reserva de Emergência** está em **" + Math.round((currentGoals[0]?.currentInCents / currentGoals[0]?.targetInCents) * 100) + "%** do objetivo. Considere destinar o próximo aporte para fechar esse colchão de liquidez.\n" +
+        "1. **Segurança**: Sua **Reserva de Emergência** está em **" + Math.round((currentGoals[0]?.currentInCents / currentGoals[0]?.targetInCents) * 100) + "%** do objetivo.\n" +
         "2. **Ajuste de Categoria**: Você já registrou despesas na categoria **Moradia** correspondendo a maior parcela do seu orçamento fixo.\n" +
-        "3. **Open Finance Ativo**: Excelente integração com Banco Itaú e Inter. Isto garante que novos lançamentos de cartão de crédito entrarão de forma automática.",
-
-        "### 📈 Planejamento de Metas de Curto Prazo\n\nAnalisando suas economias, sua carteira possui boas frentes de investimento. \n\n" +
+        "3. **Open Finance Ativo**: Excelente integração com Banco Itaú e Inter. Isto garante que novos lançamentos entrarão de forma automática.",
+        "### 📈 Planejamento de Metas de Curto Prazo\n\nAnalisando suas economias, sua carteira possui boas frentes de investimento.\n\n" +
         "- **Meta Japão**: Atualmente com **R$ " + (currentGoals[1]?.currentInCents / 100).toLocaleString('pt-BR') + "** poupados do total de R$ " + (currentGoals[1]?.targetInCents / 100).toLocaleString('pt-BR') + ".\n" +
         "- **Sugestão de Economia Inteligente**: Se você reduzir os gastos de *Lazer* e *Alimentação em 10%* nas próximas duas semanas, poderá antecipar seu objetivo em cerca de 45 dias!",
       ];
-
       const selectedReply = message.toLowerCase().includes('viagem') || message.toLowerCase().includes('meta') ? fallbackReplies[1] : fallbackReplies[0];
       await new Promise(resolve => setTimeout(resolve, 800));
       return res.json({ reply: selectedReply, note: 'Análise processada localmente devido a chave offline' });
@@ -472,61 +573,43 @@ REGRAS DE CONVENÇÃO:
     }
   });
 
-  // 10. INTELLIGENT REGEX & GEMINI AUTO-CATEGORIZATION ENDPOINT FOR STATEMENTS
+  // 10. GEMINI AUTO-CATEGORIZATION ENDPOINT FOR STATEMENTS
   app.post('/api/gemini/categorize', async (req, res) => {
     const { merchantName } = req.body;
     if (!merchantName) {
       return res.status(400).json({ error: 'Merchant name is required' });
     }
-
     const client = getGeminiClient();
-
     if (!client) {
       const lower = merchantName.toLowerCase();
       let category = 'Outros';
       let cleanDesc = merchantName;
-
-      if (lower.includes('pao de acucar') || lower.includes('mercado') || lower.includes('burger') || lower.includes('restaurante') || lower.includes('coco bambu') || lower.includes('jantar')) {
-        category = 'Alimentação';
-      } else if (lower.includes('uber') || lower.includes('posto') || lower.includes('combustivel') || lower.includes('carro')) {
-        category = 'Transporte';
-      } else if (lower.includes('aluguel') || lower.includes('imovel') || lower.includes('loft') || lower.includes('condominio')) {
-        category = 'Moradia';
-      } else if (lower.includes('netflix') || lower.includes('cinema') || lower.includes('spotify') || lower.includes('ingresso')) {
-        category = 'Lazer';
-      } else if (lower.includes('drogaria') || lower.includes('saude') || lower.includes('farmacia') || lower.includes('medico')) {
-        category = 'Saúde';
-      } else if (lower.includes('livro') || lower.includes('curso') || lower.includes('escola') || lower.includes('ingles')) {
-        category = 'Educação';
-      }
-
+      if (lower.includes('pao de acucar') || lower.includes('mercado') || lower.includes('burger') || lower.includes('restaurante') || lower.includes('coco bambu') || lower.includes('jantar')) category = 'Alimentação';
+      else if (lower.includes('uber') || lower.includes('posto') || lower.includes('combustivel') || lower.includes('carro')) category = 'Transporte';
+      else if (lower.includes('aluguel') || lower.includes('imovel') || lower.includes('loft') || lower.includes('condominio')) category = 'Moradia';
+      else if (lower.includes('netflix') || lower.includes('cinema') || lower.includes('spotify') || lower.includes('ingresso')) category = 'Lazer';
+      else if (lower.includes('drogaria') || lower.includes('saude') || lower.includes('farmacia') || lower.includes('medico')) category = 'Saúde';
+      else if (lower.includes('livro') || lower.includes('curso') || lower.includes('escola') || lower.includes('ingles')) category = 'Educação';
       if (lower.includes('uber')) cleanDesc = 'Uber Viagem';
       else if (lower.includes('pao de acucar')) cleanDesc = 'Supermercado Pão de Açúcar';
       else if (lower.includes('coco bambu')) cleanDesc = 'Restaurante Coco Bambu';
       else if (lower.includes('netflix')) cleanDesc = 'Assinatura Mensal Netflix';
       else if (lower.includes('aluguel')) cleanDesc = 'Aluguel Loft Paulista';
       else if (lower.includes('posto ipiranga')) cleanDesc = 'Posto Ipiranga Combustível';
-
       return res.json({ cleanDescription: cleanDesc, category });
     }
-
     try {
-      const gPrompt = `Dado o nome bruto da transação bancária vinda do extrato do cartão ou Open Finance: "${merchantName}".
-Retorne uma resposta JSON válida com duas propriedades:
-"cleanDescription": nome humanizado amigável, limpo e corrigido (ex: de "PAO DE ACUCAR SP LOJAS" para "Supermercado Pão de Açúcar").
-"category": uma dessas categorias exatas: "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde", "Educação" ou "Outros".`;
-
+      const gPrompt = `Dado o nome bruto da transação bancária: "${merchantName}".
+Retorne JSON com duas propriedades:
+"cleanDescription": nome humanizado (ex: "PAO DE ACUCAR SP LOJAS" → "Supermercado Pão de Açúcar").
+"category": exatamente uma de: "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde", "Educação", "Outros".`;
       const response = await client.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: gPrompt,
         config: { responseMimeType: 'application/json', temperature: 0.1 }
       });
-
       const parsed = JSON.parse(response.text?.trim() || '{}');
-      res.json({
-        cleanDescription: parsed.cleanDescription || merchantName,
-        category: parsed.category || 'Outros'
-      });
+      res.json({ cleanDescription: parsed.cleanDescription || merchantName, category: parsed.category || 'Outros' });
     } catch {
       res.json({ cleanDescription: merchantName, category: 'Outros' });
     }
