@@ -67,6 +67,25 @@ export interface CreditCard {
   isActive: boolean;
 }
 
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export interface Recurrence {
+  id: string;
+  description: string;
+  amountInCents: number;
+  type: 'REC' | 'DES';
+  category: string;
+  accountId: string | null;
+  creditCardId: string | null;
+  frequency: RecurrenceFrequency;
+  dayOfMonth: number | null;
+  startDate: string;
+  endDate: string | null;
+  lastGeneratedDate: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface Invoice {
   id: string;
   creditCardId: string;

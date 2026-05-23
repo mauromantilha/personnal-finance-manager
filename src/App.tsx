@@ -24,6 +24,7 @@ import {
 import AuthModule from './components/AuthModule';
 import CoreFinanceModule from './components/CoreFinanceModule';
 import CreditCardModule from './components/CreditCardModule';
+import RecurrencesModule from './components/RecurrencesModule';
 import OpenFinanceModule from './components/OpenFinanceModule';
 import BudgetsModule from './components/BudgetsModule';
 import AnalyticsModule from './components/AnalyticsModule';
@@ -42,10 +43,11 @@ import {
   ChatMessage,
   Category,
   CreditCard,
-  Invoice
+  Invoice,
+  Recurrence
 } from './types';
 
-type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS';
+type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS';
 
 export default function App() {
   // Navigation tabs
@@ -73,6 +75,7 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -91,6 +94,7 @@ export default function App() {
         setCategories(data.categories || []);
         setCreditCards(data.creditCards || []);
         setInvoices(data.invoices || []);
+        setRecurrences(data.recurrences || []);
         if (data.chatHistory && data.chatHistory.length > 0) {
           setChatHistory(data.chatHistory);
         }
@@ -270,6 +274,37 @@ export default function App() {
     return false;
   };
 
+  const handleAddRecurrence = async (data: any): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/recurrences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleUpdateRecurrence = async (id: string, data: any): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/recurrences/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleDeleteRecurrence = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/recurrences/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleProcessRecurrences = async (): Promise<void> => {
+    try {
+      await fetch('/api/recurrences/process', { method: 'POST' });
+      await fetchAllData();
+    } catch (err) { console.error(err); }
+  };
+
   const handleMarkAlertRead = async (id: string) => {
     try {
       const response = await fetch('/api/alerts/read', {
@@ -390,6 +425,7 @@ export default function App() {
     setCategories([]);
     setCreditCards([]);
     setInvoices([]);
+    setRecurrences([]);
   };
 
   // Nav configuration
@@ -397,11 +433,12 @@ export default function App() {
     { id: 'DASHBOARD',    label: 'Estatísticas Gerais',         icon: Building2 },
     { id: 'AUTH',         label: 'Módulo 1: Auth & IAM',        icon: Shield },
     { id: 'CORE',         label: 'Módulo 2: Contas & Ledger',   icon: Database },
-    { id: 'CREDIT_CARDS', label: 'Módulo 3: Cartões & Faturas', icon: CreditCardIcon },
-    { id: 'OPEN_FINANCE', label: 'Módulo 4: Open Finance',      icon: Network },
-    { id: 'BUDGETS',      label: 'Módulo 5: Planejamento',      icon: Target },
-    { id: 'ANALYTICS',    label: 'Módulo 6: Relatórios',        icon: BarChart3 },
-    { id: 'NOTIFICATIONS',label: 'Módulo 7: Notificações',      icon: Bell, badge: unreadAlertsCount },
+    { id: 'CREDIT_CARDS', label: 'Módulo 3: Cartões & Faturas',  icon: CreditCardIcon },
+    { id: 'RECURRENCES',  label: 'Módulo 4: Recorrências',      icon: RefreshCw },
+    { id: 'OPEN_FINANCE', label: 'Módulo 5: Open Finance',      icon: Network },
+    { id: 'BUDGETS',      label: 'Módulo 6: Planejamento',      icon: Target },
+    { id: 'ANALYTICS',    label: 'Módulo 7: Relatórios',        icon: BarChart3 },
+    { id: 'NOTIFICATIONS',label: 'Módulo 8: Notificações',      icon: Bell, badge: unreadAlertsCount },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -656,6 +693,44 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Upcoming recurrences widget */}
+                  {recurrences.length > 0 && (() => {
+                    const today = new Date(); today.setHours(0,0,0,0);
+                    const upcoming = recurrences
+                      .filter(r => {
+                        if (!r.isActive) return false;
+                        const last = r.lastGeneratedDate ? new Date(r.lastGeneratedDate) : new Date(r.startDate);
+                        last.setDate(last.getDate() - 1);
+                        const next = new Date(last);
+                        if (r.frequency === 'monthly') { next.setMonth(next.getMonth()+1); if (r.dayOfMonth) next.setDate(r.dayOfMonth); }
+                        else if (r.frequency === 'weekly') next.setDate(next.getDate()+7);
+                        else if (r.frequency === 'daily') next.setDate(next.getDate()+1);
+                        else next.setFullYear(next.getFullYear()+1);
+                        const diff = Math.ceil((next.getTime()-today.getTime())/86400000);
+                        return diff <= 7;
+                      })
+                      .slice(0, 4);
+                    if (!upcoming.length) return null;
+                    return (
+                      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                        <h3 className="font-semibold text-slate-800 text-xs uppercase tracking-wider flex items-center justify-between pb-2 border-b border-slate-50">
+                          <span className="flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5 text-teal-500" /> Próximos 7 dias</span>
+                          <button onClick={() => setActiveTab('RECURRENCES')} className="text-teal-600 hover:text-teal-800 text-[10px] lowercase font-bold">Ver todas →</button>
+                        </h3>
+                        <div className="space-y-2">
+                          {upcoming.map(r => (
+                            <div key={r.id} className="flex items-center justify-between text-xs">
+                              <span className="font-medium text-slate-700 truncate max-w-[140px]">{r.description}</span>
+                              <span className={`font-bold font-mono ${r.type === 'REC' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                {r.type === 'REC' ? '+' : '-'}{(r.amountInCents/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Credit cards summary widget */}
                   {creditCards.length > 0 && (
                     <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
@@ -730,6 +805,18 @@ export default function App() {
               onUpdateCard={handleUpdateCreditCard}
               onDeleteCard={handleDeleteCreditCard}
               onPayInvoice={handlePayInvoice}
+            />
+          )}
+
+          {activeTab === 'RECURRENCES' && (
+            <RecurrencesModule
+              recurrences={recurrences}
+              accounts={accounts}
+              categories={categories}
+              onAdd={handleAddRecurrence}
+              onUpdate={handleUpdateRecurrence}
+              onDelete={handleDeleteRecurrence}
+              onProcessNow={handleProcessRecurrences}
             />
           )}
 

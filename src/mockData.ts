@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FinancialAccount, Transaction, BankConnection, CategoryBudget, FinancialGoal, NotificationAlert, Category, CreditCard, Invoice } from './types';
+import { FinancialAccount, Transaction, BankConnection, CategoryBudget, FinancialGoal, NotificationAlert, Category, CreditCard, Invoice, Recurrence } from './types';
 
 export const INITIAL_ACCOUNTS: FinancialAccount[] = [
   {
@@ -300,6 +300,16 @@ export const INITIAL_INVOICES: Invoice[] = [
   { id: 'inv-cc1-2605', creditCardId: 'cc-1', month: '2026-05', totalInCents: 89740,  status: 'open', dueDate: '2026-06-19', paidAt: null, createdAt: '2026-05-01T00:00:00Z' },
   { id: 'inv-cc2-2605', creditCardId: 'cc-2', month: '2026-05', totalInCents: 245300, status: 'open', dueDate: '2026-06-27', paidAt: null, createdAt: '2026-05-01T00:00:00Z' },
   { id: 'inv-cc1-2604', creditCardId: 'cc-1', month: '2026-04', totalInCents: 112500, status: 'paid', dueDate: '2026-05-19', paidAt: '2026-05-19T10:30:00Z', createdAt: '2026-04-01T00:00:00Z' },
+];
+
+export const INITIAL_RECURRENCES: Recurrence[] = [
+  { id: 'rec-1', description: 'Salário Mensal MKS Brasil', amountInCents: 650000, type: 'REC', category: 'Receita',       accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 1,  startDate: '2026-01-01', endDate: null, lastGeneratedDate: '2026-05-01', isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rec-2', description: 'Aluguel Loft Paulista',     amountInCents: 180000, type: 'DES', category: 'Moradia',       accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 2,  startDate: '2026-01-01', endDate: null, lastGeneratedDate: '2026-05-02', isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rec-3', description: 'Netflix',                   amountInCents: 5290,   type: 'DES', category: 'Lazer',         accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 17, startDate: '2026-01-01', endDate: null, lastGeneratedDate: '2026-05-17', isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rec-4', description: 'Spotify',                   amountInCents: 2190,   type: 'DES', category: 'Lazer',         accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 20, startDate: '2026-01-01', endDate: null, lastGeneratedDate: null,          isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rec-5', description: 'Plano de Saúde Bradesco',   amountInCents: 48000,  type: 'DES', category: 'Saúde',         accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 10, startDate: '2026-01-01', endDate: null, lastGeneratedDate: '2026-05-10', isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rec-6', description: 'Condomínio',                amountInCents: 32000,  type: 'DES', category: 'Moradia',       accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 15, startDate: '2026-01-01', endDate: null, lastGeneratedDate: '2026-05-15', isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rec-7', description: 'Aporte Mensal Poupança',    amountInCents: 120000, type: 'DES', category: 'Investimentos', accountId: 'acc-2', creditCardId: null, frequency: 'monthly', dayOfMonth: 10, startDate: '2026-01-01', endDate: null, lastGeneratedDate: '2026-05-10', isActive: true, createdAt: new Date().toISOString() },
 ];
 
 export const INITIAL_ALERTS: NotificationAlert[] = [

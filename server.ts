@@ -21,7 +21,8 @@ import {
   ChatMessage,
   Category,
   CreditCard,
-  Invoice
+  Invoice,
+  Recurrence
 } from './src/types';
 import {
   INITIAL_ACCOUNTS,
@@ -131,6 +132,16 @@ function mapCreditCard(r: any): CreditCard {
 }
 function mapInvoice(r: any): Invoice {
   return { id: r.id, creditCardId: r.credit_card_id, month: r.month, totalInCents: r.total_in_cents, status: r.status, dueDate: r.due_date || null, paidAt: r.paid_at || null, createdAt: r.created_at };
+}
+function mapRecurrence(r: any): Recurrence {
+  return {
+    id: r.id, description: r.description, amountInCents: r.amount_in_cents,
+    type: r.type, category: r.category, accountId: r.account_id || null,
+    creditCardId: r.credit_card_id || null, frequency: r.frequency,
+    dayOfMonth: r.day_of_month || null, startDate: r.start_date,
+    endDate: r.end_date || null, lastGeneratedDate: r.last_generated_date || null,
+    isActive: !!r.is_active, createdAt: r.created_at,
+  };
 }
 function mapBudget(r: any): CategoryBudget {
   return { id: r.id, category: r.category, limitInCents: r.limit_in_cents, spentInCents: r.spent_in_cents };
@@ -248,6 +259,88 @@ async function checkBudgetThresholds(tx: Transaction): Promise<void> {
   }
 }
 
+// ─── Recurrence engine ────────────────────────────────────────────────────────
+
+function nextOccurrence(rec: Recurrence, afterDate: Date): Date | null {
+  const d = new Date(afterDate);
+  switch (rec.frequency) {
+    case 'daily':
+      d.setDate(d.getDate() + 1);
+      break;
+    case 'weekly':
+      d.setDate(d.getDate() + 7);
+      break;
+    case 'monthly': {
+      d.setMonth(d.getMonth() + 1);
+      if (rec.dayOfMonth) d.setDate(Math.min(rec.dayOfMonth, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+      break;
+    }
+    case 'yearly':
+      d.setFullYear(d.getFullYear() + 1);
+      break;
+  }
+  if (rec.endDate && d > new Date(rec.endDate)) return null;
+  return d;
+}
+
+async function processRecurrences(): Promise<void> {
+  const rows = await d1q<any>('SELECT * FROM recurrences WHERE is_active = 1');
+  if (!rows.length) return;
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+
+  for (const row of rows) {
+    const rec = mapRecurrence(row);
+    const startDate = new Date(rec.startDate);
+    if (startDate > today) continue;
+
+    // Determine the last date we generated a transaction from
+    let cursor = rec.lastGeneratedDate ? new Date(rec.lastGeneratedDate) : new Date(startDate);
+    cursor.setHours(0, 0, 0, 0);
+
+    // For monthly recurrences with a specific day, start cursor at the correct day
+    if (!rec.lastGeneratedDate) {
+      // First run: set cursor to one period before startDate so startDate itself gets generated
+      cursor = new Date(startDate);
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    let generated = 0;
+    // Generate all due occurrences up to today (max 12 at once to avoid runaway)
+    while (generated < 12) {
+      const next = nextOccurrence(rec, cursor);
+      if (!next || next > today) break;
+
+      const txDate = next.toISOString().split('T')[0];
+      const txId = `tx-rec-${rec.id}-${txDate.replace(/-/g, '')}`;
+
+      // Check if already generated (idempotent via id)
+      const exists = await d1q<any>('SELECT id FROM transactions WHERE id = ?', [txId]);
+      if (!exists.length) {
+        stmts.push({
+          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,NULL,0)',
+          params: [txId, rec.amountInCents, txDate, rec.type, rec.category, rec.description, rec.accountId]
+        });
+        if (rec.type === 'DES' && rec.accountId) {
+          stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [rec.amountInCents, rec.accountId] });
+        } else if (rec.type === 'REC' && rec.accountId) {
+          stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [rec.amountInCents, rec.accountId] });
+        }
+      }
+
+      stmts.push({ sql: 'UPDATE recurrences SET last_generated_date = ? WHERE id = ?', params: [txDate, rec.id] });
+      cursor = next;
+      generated++;
+    }
+  }
+
+  if (stmts.length) {
+    await d1exec(stmts);
+    await recalculateBudgets();
+  }
+}
+
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 const VALID_TX_TYPES = ['REC', 'DES', 'TRANS'] as const;
@@ -289,8 +382,9 @@ async function startServer() {
 
   app.get('/api/data', async (_req, res) => {
     try {
+      await processRecurrences();
       await recalculateBudgets();
-      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices] = await Promise.all([
+      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences] = await Promise.all([
         d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
         d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
         d1q<any>('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction)),
@@ -301,8 +395,9 @@ async function startServer() {
         d1q<any>('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC').then(r => r.map(mapCategory)),
         d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1').then(r => r.map(mapCreditCard)),
         d1q<any>('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice)),
+        d1q<any>('SELECT * FROM recurrences WHERE is_active = 1 ORDER BY day_of_month ASC').then(r => r.map(mapRecurrence)),
       ]);
-      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices });
+      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences });
     } catch (e: any) {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -713,6 +808,65 @@ async function startServer() {
         { sql: 'UPDATE invoices SET status = ?, paid_at = ? WHERE id = ?', params: ['paid', paidAt, id] },
         { sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [inv.totalInCents, accountId] },
       ]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── RECURRENCES ───────────────────────────────────────────────────────────
+
+  app.get('/api/recurrences', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT * FROM recurrences ORDER BY day_of_month ASC');
+      res.json(rows.map(mapRecurrence));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/recurrences', async (req, res) => {
+    const { description, amountInCents, type, category, accountId, creditCardId, frequency, dayOfMonth, startDate, endDate } = req.body;
+    if (!description || !amountInCents || !type || !category || !frequency || !startDate)
+      return res.status(400).json({ error: 'Campos obrigatórios: description, amountInCents, type, category, frequency, startDate.' });
+    if (!VALID_TX_TYPES.includes(type))
+      return res.status(400).json({ error: 'Tipo inválido. Use REC ou DES.' });
+    const amount = parseInt(amountInCents, 10);
+    if (isNaN(amount) || amount <= 0)
+      return res.status(400).json({ error: 'Valor deve ser inteiro positivo em centavos.' });
+    const id = `rec-usr-${Date.now()}`;
+    try {
+      await d1q(
+        'INSERT INTO recurrences (id,description,amount_in_cents,type,category,account_id,credit_card_id,frequency,day_of_month,start_date,end_date,is_active) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)',
+        [id, description, amount, type, category, accountId || null, creditCardId || null, frequency, dayOfMonth || null, startDate, endDate || null]
+      );
+      res.status(201).json({ id });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.put('/api/recurrences/:id', async (req, res) => {
+    const { id } = req.params;
+    const { description, amountInCents, type, category, accountId, creditCardId, frequency, dayOfMonth, startDate, endDate, isActive } = req.body;
+    try {
+      const rows = await d1q('SELECT id FROM recurrences WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Recorrência não encontrada.' });
+      await d1q(
+        'UPDATE recurrences SET description=?,amount_in_cents=?,type=?,category=?,account_id=?,credit_card_id=?,frequency=?,day_of_month=?,start_date=?,end_date=?,is_active=? WHERE id=?',
+        [description, parseInt(amountInCents, 10), type, category, accountId || null, creditCardId || null, frequency, dayOfMonth || null, startDate, endDate || null, isActive ? 1 : 0, id]
+      );
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/recurrences/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      await d1q('UPDATE recurrences SET is_active = 0 WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // Force-generate pending recurrences now
+  app.post('/api/recurrences/process', async (_req, res) => {
+    try {
+      await processRecurrences();
+      await recalculateBudgets();
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
