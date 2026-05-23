@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { CreditCard as CreditCardIcon, Plus, Trash2, CheckCircle, AlertCircle, Receipt, TrendingUp } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { CreditCard as CreditCardIcon, Plus, Trash2, CheckCircle, AlertCircle, Receipt, TrendingUp, ScanLine, X, Upload } from 'lucide-react';
 import { CreditCard, Invoice, FinancialAccount, Transaction } from '../types';
+
+interface InvoiceLineItem {
+  date: string;
+  merchant: string;
+  amountInCents: number;
+  category: string;
+  checked: boolean;
+}
 
 interface CreditCardModuleProps {
   creditCards: CreditCard[];
@@ -11,18 +19,30 @@ interface CreditCardModuleProps {
   onUpdateCard: (id: string, data: any) => Promise<boolean>;
   onDeleteCard: (id: string) => Promise<boolean>;
   onPayInvoice: (invoiceId: string, accountId: string) => Promise<boolean>;
+  onAnalyzeInvoice: (base64: string, mimeType: string, creditCardId: string) => Promise<{ lineItems?: Omit<InvoiceLineItem, 'checked'>[]; dueDate?: string; totalAmountInCents?: number }>;
+  onImportInvoice: (items: Omit<InvoiceLineItem, 'checked'>[], creditCardId: string) => Promise<{ imported: number; errors: string[] }>;
 }
 
 const CARD_COLORS = ['#6366F1', '#8B5CF6', '#0284C7', '#059669', '#DC2626', '#EA580C', '#DB2777', '#0891B2'];
+const CATEGORIES = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Educação', 'Vestuário', 'Outros'];
 
 export default function CreditCardModule({
   creditCards, invoices, accounts, transactions,
-  onAddCard, onUpdateCard, onDeleteCard, onPayInvoice
+  onAddCard, onUpdateCard, onDeleteCard, onPayInvoice,
+  onAnalyzeInvoice, onImportInvoice,
 }: CreditCardModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [editCard, setEditCard] = useState<CreditCard | null>(null);
   const [payInvoiceId, setPayInvoiceId] = useState<string | null>(null);
   const [payAccountId, setPayAccountId] = useState('');
+
+  // Invoice AI import state
+  const [importCardId, setImportCardId] = useState<string | null>(null);
+  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
+  const [analyzingInvoice, setAnalyzingInvoice] = useState(false);
+  const [importingInvoice, setImportingInvoice] = useState(false);
+  const [invoiceResult, setInvoiceResult] = useState<{ imported: number; errors: string[] } | null>(null);
+  const invoiceFileRef = useRef<HTMLInputElement>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Form fields
@@ -56,7 +76,42 @@ export default function CreditCardModule({
     setTimeout(() => setStatusMsg(null), 4000);
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleFileForInvoice = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !importCardId) return;
+    if (!file.type.startsWith('image/')) { notify('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+    setAnalyzingInvoice(true);
+    notify('IA lendo a fatura…', 'success');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      const result = await onAnalyzeInvoice(base64, file.type, importCardId);
+      const items: InvoiceLineItem[] = (result.lineItems || []).map(item => ({ ...item, checked: true }));
+      setLineItems(items);
+      setAnalyzingInvoice(false);
+      if (items.length === 0) notify('Nenhum lançamento encontrado. Tente outra imagem.', 'error');
+      else notify(`${items.length} lançamentos extraídos. Revise e confirme.`, 'success');
+    };
+    reader.readAsDataURL(file);
+    if (invoiceFileRef.current) invoiceFileRef.current.value = '';
+  };
+
+  const handleImportConfirm = async () => {
+    if (!importCardId) return;
+    const selected = lineItems.filter(i => i.checked).map(({ checked: _, ...rest }) => rest);
+    if (selected.length === 0) { notify('Selecione pelo menos um lançamento.', 'error'); return; }
+    setImportingInvoice(true);
+    const result = await onImportInvoice(selected, importCardId);
+    setInvoiceResult(result);
+    setImportingInvoice(false);
+    if (result.imported > 0) {
+      notify(`${result.imported} lançamentos importados!`, 'success');
+      setLineItems([]);
+      setImportCardId(null);
+    } else notify('Nenhum lançamento importado.', 'error');
+  };
+
+  const handleSubmit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
     const parsed = parseFloat(limitBRL.replace(',', '.'));
     if (!name || !bankName || isNaN(parsed) || parsed <= 0) {
@@ -255,7 +310,7 @@ export default function CreditCardModule({
 
               {/* Recent card transactions */}
               {cardTxs.length > 0 && (
-                <div className="px-5 pb-4">
+                <div className="px-5 pb-2">
                   <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3" /> Lançamentos do mês
                   </p>
@@ -274,6 +329,18 @@ export default function CreditCardModule({
                   </div>
                 </div>
               )}
+
+              {/* Import invoice button */}
+              <div className="px-5 pb-4 pt-2 border-t border-slate-100 mt-2">
+                <button
+                  onClick={() => { setImportCardId(card.id); setLineItems([]); setInvoiceResult(null); invoiceFileRef.current?.click(); }}
+                  disabled={analyzingInvoice && importCardId === card.id}
+                  className="w-full flex items-center justify-center gap-2 py-1.5 text-[11px] font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <ScanLine className="w-3.5 h-3.5" />
+                  {analyzingInvoice && importCardId === card.id ? 'Lendo fatura…' : 'Importar Fatura com IA'}
+                </button>
+              </div>
             </div>
           );
         })}
@@ -326,6 +393,78 @@ export default function CreditCardModule({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden file input for invoice AI */}
+      <input
+        ref={invoiceFileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleFileForInvoice}
+      />
+
+      {/* Invoice import modal */}
+      {importCardId && lineItems.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fadeIn" onClick={() => { setImportCardId(null); setLineItems([]); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-violet-500" /> Lançamentos Extraídos da Fatura
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">{lineItems.filter(i => i.checked).length} de {lineItems.length} selecionados</p>
+              </div>
+              <button onClick={() => { setImportCardId(null); setLineItems([]); }} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-2">
+              {lineItems.map((item, idx) => (
+                <div key={idx} className={`flex items-center gap-3 p-2.5 rounded-xl border transition-colors ${item.checked ? 'border-violet-200 bg-violet-50/40' : 'border-slate-200 bg-slate-50 opacity-50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={item.checked}
+                    onChange={() => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, checked: !li.checked } : li))}
+                    className="accent-violet-600 w-3.5 h-3.5 shrink-0"
+                  />
+                  <span className="text-[10px] font-mono text-slate-400 w-20 shrink-0">{item.date}</span>
+                  <span className="text-xs font-semibold text-slate-700 flex-1 truncate">{item.merchant}</span>
+                  <select
+                    value={item.category}
+                    onChange={e => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, category: e.target.value } : li))}
+                    className="text-[10px] border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none font-semibold shrink-0"
+                  >
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <span className="text-xs font-bold font-mono text-rose-600 w-24 text-right shrink-0">-{fmt(item.amountInCents)}</span>
+                </div>
+              ))}
+            </div>
+
+            {invoiceResult && (
+              <div className={`mx-6 mb-2 p-3 rounded-xl text-[11px] font-semibold flex items-center gap-2 ${invoiceResult.imported > 0 ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'}`}>
+                {invoiceResult.imported > 0 ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-red-600" />}
+                {invoiceResult.imported > 0 ? `${invoiceResult.imported} lançamentos importados com sucesso!` : 'Nenhum lançamento importado.'}
+                {invoiceResult.errors.length > 0 && <span className="ml-1 text-red-600">{invoiceResult.errors.length} erro(s).</span>}
+              </div>
+            )}
+
+            <div className="px-6 py-4 border-t border-slate-100 flex gap-3">
+              <button onClick={() => { setImportCardId(null); setLineItems([]); }} className="flex-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl py-2.5 transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={handleImportConfirm}
+                disabled={importingInvoice || lineItems.filter(i => i.checked).length === 0}
+                className="flex-1 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-xl py-2.5 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {importingInvoice ? 'Importando…' : `Lançar ${lineItems.filter(i => i.checked).length} Selecionados`}
+              </button>
+            </div>
           </div>
         </div>
       )}

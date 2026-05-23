@@ -254,6 +254,42 @@ export default function App() {
     return { imported: 0, errors: ['Erro de conexão com o servidor.'] };
   };
 
+  const handleAnalyzeDocument = async (base64: string, mimeType: string): Promise<{ description?: string; amountInCents?: number; dueDate?: string; documentKey?: string }> => {
+    try {
+      const res = await fetch('/api/documents/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mimeType, documentType: 'BILL' }),
+      });
+      if (res.ok) return await res.json();
+    } catch (err) { console.error(err); }
+    return {};
+  };
+
+  const handleAnalyzeInvoice = async (base64: string, mimeType: string, creditCardId: string): Promise<{ lineItems?: any[]; dueDate?: string; totalAmountInCents?: number }> => {
+    try {
+      const res = await fetch('/api/documents/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mimeType, documentType: 'INVOICE', creditCardId }),
+      });
+      if (res.ok) return await res.json();
+    } catch (err) { console.error(err); }
+    return {};
+  };
+
+  const handleImportInvoice = async (items: any[], creditCardId: string): Promise<{ imported: number; errors: string[] }> => {
+    try {
+      const res = await fetch('/api/import/invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, creditCardId }),
+      });
+      if (res.ok) { const data = await res.json(); await fetchAllData(); return data; }
+    } catch (err) { console.error(err); }
+    return { imported: 0, errors: ['Erro de conexão com o servidor.'] };
+  };
+
   const handleDeleteGoal = async (id: string): Promise<boolean> => {
     try {
       const response = await fetch(`/api/goals/${id}`, {
@@ -715,6 +751,7 @@ export default function App() {
                     onDeleteAccount={handleDeleteAccount}
                     onDeleteTransaction={handleDeleteTransaction}
                     onImportCSV={handleImportCSV}
+                    onAnalyzeDocument={handleAnalyzeDocument}
                   />
 
                 </div>
@@ -865,6 +902,7 @@ export default function App() {
               onDeleteAccount={handleDeleteAccount}
               onDeleteTransaction={handleDeleteTransaction}
               onImportCSV={handleImportCSV}
+              onAnalyzeDocument={handleAnalyzeDocument}
             />
           )}
 
@@ -878,6 +916,8 @@ export default function App() {
               onUpdateCard={handleUpdateCreditCard}
               onDeleteCard={handleDeleteCreditCard}
               onPayInvoice={handlePayInvoice}
+              onAnalyzeInvoice={handleAnalyzeInvoice}
+              onImportInvoice={handleImportInvoice}
             />
           )}
 

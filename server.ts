@@ -108,6 +108,43 @@ async function r2Put(key: string, body: string): Promise<void> {
   }
 }
 
+async function r2PutBinary(key: string, buffer: Buffer, contentType: string): Promise<void> {
+  try {
+    const token = await getCFToken();
+    await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects/${encodeURIComponent(key)}`,
+      { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': contentType }, body: buffer as unknown as BodyInit }
+    );
+  } catch (e) { console.error('[R2] Binary upload failed:', e); }
+}
+
+async function r2GetBinary(key: string): Promise<{ body: ArrayBuffer; contentType: string } | null> {
+  try {
+    const token = await getCFToken();
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects/${encodeURIComponent(key)}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    if (!res.ok) return null;
+    return { body: await res.arrayBuffer(), contentType: res.headers.get('content-type') || 'application/octet-stream' };
+  } catch { return null; }
+}
+
+// ─── Shared classifier ────────────────────────────────────────────────────────
+
+function classifyMerchant(desc: string): string {
+  const l = desc.toLowerCase();
+  if (/mercado|supermercado|padaria|burger|restaurante|lanche|ifood|rappi|pizza|aliment|açougue|hortifruti/.test(l)) return 'Alimentação';
+  if (/uber|99taxi|taxi|posto|combustiv|gasolina|estacion|onibus|metro|transporte|pedágio|pedagio/.test(l)) return 'Transporte';
+  if (/aluguel|imovel|condomin|agua|luz|energia|internet|telefone|gas|gás|claro|vivo|tim|oi/.test(l)) return 'Moradia';
+  if (/netflix|cinema|spotify|ingresso|streaming|lazer|viagem|hotel|airbnb|booking/.test(l)) return 'Lazer';
+  if (/farmacia|drogaria|saude|medico|clinica|plano|hospital|dentist|unimed|amil/.test(l)) return 'Saúde';
+  if (/livro|curso|escola|facul|inglês|ingles|idioma|educacao|educação|udemy|alura/.test(l)) return 'Educação';
+  if (/roupa|vestuário|vestuario|moda|fashion|zara|renner|hering|centauro|sport|academia|gym/.test(l)) return 'Vestuário';
+  if (/salario|salário|pagamento|renda|freelance|pix recebido|transferencia recebida/.test(l)) return 'Receita';
+  return 'Outros';
+}
+
 // ─── Row mappers ──────────────────────────────────────────────────────────────
 
 function mapAccount(r: any): FinancialAccount {
@@ -122,6 +159,7 @@ function mapTransaction(r: any): Transaction {
     creditCardId: r.credit_card_id || undefined, invoiceId: r.invoice_id || undefined,
     installmentNumber: r.installment_number || undefined, installmentTotal: r.installment_total || undefined,
     installmentGroupId: r.installment_group_id || undefined,
+    documentKey: r.document_key || undefined,
   };
 }
 function mapCategory(r: any): Category {
@@ -469,7 +507,7 @@ async function startServer() {
 
   app.post('/api/transactions', async (req, res) => {
     const { amountInCents, date, type, category, description, accountId, destinationAccountId,
-            creditCardId, installments } = req.body;
+            creditCardId, installments, documentKey } = req.body;
     if (!amountInCents || !date || !type || !category || !description)
       return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
     if (!VALID_TX_TYPES.includes(type))
@@ -514,16 +552,17 @@ async function startServer() {
 
           const txId = numInstallments > 1 ? `${baseId}-${i + 1}` : baseId;
           stmts.push({
-            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?)',
+            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id,document_key) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?,?)',
             params: [txId, instAmount, instDate.toISOString().split('T')[0], type, category,
               numInstallments > 1 ? `${description} (${i + 1}/${numInstallments})` : description,
-              creditCardId, invId, numInstallments > 1 ? i + 1 : null, numInstallments > 1 ? numInstallments : null, installmentGroupId]
+              creditCardId, invId, numInstallments > 1 ? i + 1 : null, numInstallments > 1 ? numInstallments : null, installmentGroupId,
+              i === 0 ? (documentKey || null) : null]
           });
         }
       } else {
         stmts.push({
-          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,?,0)',
-          params: [baseId, amount, date, type, category, description, accountId, destinationAccountId || null]
+          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced,document_key) VALUES (?,?,?,?,?,?,?,?,0,?)',
+          params: [baseId, amount, date, type, category, description, accountId, destinationAccountId || null, documentKey || null]
         });
         if (type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
         else if (type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, accountId] });
@@ -1104,6 +1143,125 @@ async function startServer() {
     }
   });
 
+  // ── DOCUMENT AI ANALYZE ────────────────────────────────────────────────────
+
+  app.post('/api/documents/analyze', express.json({ limit: '20mb' }), async (req, res) => {
+    const { base64, mimeType, documentType } = req.body;
+    if (!base64 || !mimeType || !documentType) return res.status(400).json({ error: 'base64, mimeType e documentType são obrigatórios.' });
+    if (!['BILL', 'INVOICE'].includes(documentType)) return res.status(400).json({ error: 'documentType deve ser BILL ou INVOICE.' });
+
+    const client = getGroqClient();
+
+    const billPrompt = `Você é um sistema de extração de dados de documentos financeiros brasileiros. Analise este documento (conta de luz, água, boleto, IPTU, etc.) e extraia APENAS as informações em JSON válido:
+{"description":"nome do serviço ou tipo de conta","amountInCents":número inteiro em centavos (ex 15750 para R$157,50),"dueDate":"YYYY-MM-DD","payerName":"nome do pagador se visível ou null","payerDoc":"CPF/CNPJ se visível ou null"}
+Se não conseguir extrair um campo use null. Retorne APENAS o JSON.`;
+
+    const invoicePrompt = `Você é um sistema de extração de faturas de cartão de crédito brasileiro. Analise esta fatura e extraia em JSON:
+{"dueDate":"YYYY-MM-DD","totalAmountInCents":número inteiro em centavos,"lineItems":[{"date":"YYYY-MM-DD","merchant":"nome do estabelecimento","amountInCents":número inteiro em centavos}]}
+Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
+
+    let extracted: any = {};
+
+    if (client) {
+      try {
+        const response = await client.chat.completions.create({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [{ role: 'user', content: [
+            { type: 'text', text: documentType === 'INVOICE' ? invoicePrompt : billPrompt },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } }
+          ] as any }],
+          temperature: 0.1, max_tokens: 2048,
+        });
+        const raw = response.choices[0]?.message?.content || '{}';
+        const match = raw.match(/\{[\s\S]*\}/);
+        extracted = match ? JSON.parse(match[0]) : {};
+      } catch (e: any) {
+        console.error('[Groq Vision]', e.message);
+      }
+    }
+
+    // Auto-categorize line items for invoices
+    if (documentType === 'INVOICE' && Array.isArray(extracted.lineItems)) {
+      extracted.lineItems = extracted.lineItems.map((item: any) => ({
+        ...item,
+        category: classifyMerchant(item.merchant || ''),
+      }));
+    }
+
+    // Store document in R2
+    const now = new Date();
+    const extMap: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+    const ext = extMap[mimeType] || 'jpg';
+    const docKey = `documents/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/doc-${Date.now()}.${ext}`;
+    const buffer = Buffer.from(base64, 'base64');
+    await r2PutBinary(docKey, buffer, mimeType);
+
+    res.json({ ...extracted, documentKey: docKey });
+  });
+
+  // ── INVOICE LINE ITEMS BULK IMPORT ─────────────────────────────────────────
+
+  app.post('/api/import/invoice', async (req, res) => {
+    const { items, creditCardId } = req.body;
+    if (!Array.isArray(items) || !creditCardId) return res.status(400).json({ error: 'items e creditCardId são obrigatórios.' });
+
+    const cardRows = await d1q<any>('SELECT * FROM credit_cards WHERE id = ?', [creditCardId]);
+    if (!cardRows.length) return res.status(404).json({ error: 'Cartão não encontrado.' });
+    const card = mapCreditCard(cardRows[0]);
+
+    const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+    let imported = 0;
+    const errors: string[] = [];
+
+    for (const item of items) {
+      const { date, merchant, amountInCents, category } = item;
+      if (!date || !merchant || !amountInCents) { errors.push(`Item inválido: ${JSON.stringify(item)}`); continue; }
+      const amount = Math.round(Number(amountInCents));
+      if (isNaN(amount) || amount <= 0) { errors.push(`Valor inválido: ${amountInCents}`); continue; }
+
+      const txDate = new Date(date);
+      const instMonth = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
+      const invId = `inv-${creditCardId}-${instMonth.replace('-', '')}`;
+      const dueYear = txDate.getMonth() + 1 === 12 ? txDate.getFullYear() + 1 : txDate.getFullYear();
+      const dueMonth = ((txDate.getMonth() + 1) % 12) + 1;
+      const dueDate = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(card.dueDay).padStart(2, '0')}`;
+
+      stmts.push({ sql: `INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))`, params: [invId, creditCardId, instMonth, dueDate] });
+      stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [amount, invId] });
+
+      const txId = `tx-inv-${creditCardId}-${date.replace(/-/g, '')}-${amount}-${merchant.slice(0, 8).replace(/\W/g, '')}`;
+      stmts.push({
+        sql: 'INSERT OR IGNORE INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id) VALUES (?,?,?,\'DES\',?,?,NULL,0,?,?)',
+        params: [txId, amount, date, category || classifyMerchant(merchant), merchant, creditCardId, invId]
+      });
+      imported++;
+    }
+
+    if (stmts.length) {
+      try {
+        await d1exec(stmts);
+        await recalculateBudgets();
+      } catch (e: any) {
+        return res.status(500).json({ error: 'D1 error', details: e.message });
+      }
+    }
+
+    res.json({ imported, errors });
+  });
+
+  // ── DOCUMENT PROXY (serve from R2 for iframe) ──────────────────────────────
+
+  app.get('/api/documents/*', async (req, res) => {
+    const key = (req.params as any)[0] as string;
+    if (!key) return res.status(400).json({ error: 'key obrigatória' });
+    const doc = await r2GetBinary(key);
+    if (!doc) return res.status(404).json({ error: 'Documento não encontrado.' });
+    res.setHeader('Content-Type', doc.contentType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(Buffer.from(doc.body));
+  });
+
   // ── CSV IMPORT ─────────────────────────────────────────────────────────────
 
   app.post('/api/import/csv', async (req, res) => {
@@ -1113,18 +1271,7 @@ async function startServer() {
     const accRows = await d1q<any>('SELECT * FROM accounts WHERE id = ?', [accountId]);
     if (!accRows.length) return res.status(404).json({ error: 'Conta não encontrada.' });
 
-    // Local classifier (reuse same logic as /api/groq/categorize)
-    const classify = (desc: string) => {
-      const l = desc.toLowerCase();
-      if (/mercado|supermercado|padaria|burger|restaurante|lanche|ifood|rappi|pizza/.test(l)) return 'Alimentação';
-      if (/uber|99|taxi|posto|combustiv|gasolina|estacion|onibus|metro|transporte/.test(l)) return 'Transporte';
-      if (/aluguel|imovel|condomin|agua|luz|energia|internet|telefone/.test(l)) return 'Moradia';
-      if (/netflix|cinema|spotify|ingresso|streaming|lazer|viagem|hotel/.test(l)) return 'Lazer';
-      if (/farmacia|drogaria|saude|medico|clinica|plano|hospital/.test(l)) return 'Saúde';
-      if (/livro|curso|escola|facul|inglês|idioma|educacao/.test(l)) return 'Educação';
-      if (/salario|salário|pagamento|renda|freelance|pix recebido/.test(l)) return 'Receita';
-      return 'Outros';
-    };
+    const classify = classifyMerchant;
 
     const lines = csv.split('\n').map((l: string) => l.trim()).filter(Boolean);
     const stmts: { sql: string; params: (string | number | null)[] }[] = [];

@@ -43,6 +43,7 @@ export interface Transaction {
   installmentNumber?: number;
   installmentTotal?: number;
   installmentGroupId?: string;
+  documentKey?: string;
 }
 
 export interface Category {

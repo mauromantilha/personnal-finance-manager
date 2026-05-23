@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import {
   Wallet,
   ArrowUpRight,
@@ -21,7 +21,10 @@ import {
   X,
   ChevronDown,
   Upload,
-  ClipboardList
+  ClipboardList,
+  ScanLine,
+  Paperclip,
+  Eye
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard } from '../types';
 
@@ -37,6 +40,7 @@ interface CoreFinanceModuleProps {
   onDeleteAccount: (id: string) => Promise<boolean>;
   onDeleteTransaction: (id: string) => Promise<boolean>;
   onImportCSV: (csv: string, accountId: string) => Promise<{ imported: number; errors: string[] }>;
+  onAnalyzeDocument: (base64: string, mimeType: string) => Promise<{ description?: string; amountInCents?: number; dueDate?: string; documentKey?: string }>;
 }
 
 type PeriodFilter = 'this_month' | 'last_month' | '30d' | '90d' | 'all';
@@ -55,6 +59,7 @@ export default function CoreFinanceModule({
   onDeleteAccount,
   onDeleteTransaction,
   onImportCSV,
+  onAnalyzeDocument,
 }: CoreFinanceModuleProps) {
 
   // ── Account form state ──────────────────────────────────────────────────────
@@ -92,6 +97,12 @@ export default function CoreFinanceModule({
   const [editTxCategory, setEditTxCategory] = useState('');
   const [editTxDesc, setEditTxDesc] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // ── AI Document state ───────────────────────────────────────────────────────
+  const [aiLoading, setAiLoading] = useState(false);
+  const [pendingDocKey, setPendingDocKey] = useState<string | null>(null);
+  const [viewDocKey, setViewDocKey] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── CSV import state ────────────────────────────────────────────────────────
   const [showImport, setShowImport] = useState(false);
@@ -221,6 +232,28 @@ export default function CoreFinanceModule({
     else fb('Não é possível excluir conta com transações.', 'error');
   };
 
+  // ── AI document handler ─────────────────────────────────────────────────────
+  const handleFileForAI = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { fb('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+    setAiLoading(true);
+    fb('Lendo documento com IA…', 'success');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      const result = await onAnalyzeDocument(base64, file.type);
+      if (result.description) setTxDesc(result.description);
+      if (result.amountInCents) setTxAmount((result.amountInCents / 100).toFixed(2).replace('.', ','));
+      if (result.dueDate) setTxDate(result.dueDate);
+      if (result.documentKey) setPendingDocKey(result.documentKey);
+      setAiLoading(false);
+      fb('IA extraiu os dados! Revise e confirme.', 'success');
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   // ── Transaction handlers ────────────────────────────────────────────────────
   const handleCreateTransaction = async (e: { preventDefault(): void }) => {
     e.preventDefault();
@@ -233,10 +266,11 @@ export default function CoreFinanceModule({
     const amountInCents = Math.round(parsedReal * 100);
     const cat = txType === 'REC' ? (txCategory || 'Receita') : (txCategory || defaultCategory);
     const payload: any = { amountInCents, date: txDate, type: txType, category: cat, description: txDesc };
+    if (pendingDocKey) payload.documentKey = pendingDocKey;
     if (useCard && txType === 'DES') { payload.creditCardId = txCreditCardId; payload.installments = parseInt(txInstallments, 10) || 1; }
     else { payload.accountId = txOriginAcc; if (txType === 'TRANS') payload.destinationAccountId = txDestAcc; }
     const result = await onAddTransaction(payload);
-    if (result) { fb('Transação adicionada!', 'success'); setTxAmount(''); setTxDesc(''); setTxInstallments('1'); }
+    if (result) { fb('Transação adicionada!', 'success'); setTxAmount(''); setTxDesc(''); setTxInstallments('1'); setPendingDocKey(null); }
     else fb('Falha ao processar a transação.', 'error');
   };
 
@@ -415,10 +449,35 @@ export default function CoreFinanceModule({
         {/* Transaction form */}
         <div className="lg:col-span-7">
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5 mb-4">
-              <Plus className="w-4 h-4 text-indigo-500" />
-              Lançamento Manual
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-indigo-500" />
+                Lançamento Manual
+              </h3>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={aiLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-[11px] font-bold rounded-lg transition-all disabled:opacity-50"
+              >
+                <ScanLine className="w-3.5 h-3.5" />
+                {aiLoading ? 'Lendo…' : 'Ler com IA'}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleFileForAI}
+              />
+            </div>
+            {pendingDocKey && (
+              <div className="mb-3 flex items-center gap-2 text-[11px] bg-violet-50 border border-violet-200 text-violet-700 px-3 py-2 rounded-lg font-semibold">
+                <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                Documento anexado — será vinculado ao lançamento
+                <button type="button" onClick={() => setPendingDocKey(null)} className="ml-auto text-violet-400 hover:text-violet-700"><X className="w-3 h-3" /></button>
+              </div>
+            )}
 
             <div className="mb-4 text-[11px] bg-indigo-50 text-indigo-900 border border-indigo-100 p-3 rounded-lg flex items-start gap-2">
               <HelpCircle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
@@ -755,7 +814,18 @@ export default function CoreFinanceModule({
                   <tr key={tx.id} className="hover:bg-slate-50/60 transition-colors group">
                     <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400">{tx.date}</td>
                     <td className="py-2.5 px-3">
-                      <div className="font-semibold text-slate-800 truncate max-w-[180px]">{tx.description}</div>
+                      <div className="font-semibold text-slate-800 truncate max-w-[180px] flex items-center gap-1">
+                        {tx.description}
+                        {tx.documentKey && (
+                          <button
+                            onClick={() => setViewDocKey(tx.documentKey!)}
+                            title="Ver documento"
+                            className="shrink-0 text-violet-400 hover:text-violet-700 transition-colors"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                       {tx.installmentNumber && <div className="text-[9px] text-violet-500 font-bold">{tx.installmentNumber}/{tx.installmentTotal}x</div>}
                       {tx.originalMerchantName && <div className="text-[10px] font-mono text-slate-400 truncate max-w-[180px]">{tx.originalMerchantName}</div>}
                     </td>
@@ -815,6 +885,30 @@ export default function CoreFinanceModule({
           </div>
         )}
       </div>
+
+      {/* Document viewer modal */}
+      {viewDocKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fadeIn" onClick={() => setViewDocKey(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <span className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Eye className="w-4 h-4 text-violet-500" /> Documento Anexado
+              </span>
+              <button onClick={() => setViewDocKey(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden bg-slate-100">
+              <img
+                src={`/api/documents/${viewDocKey}`}
+                alt="Documento"
+                className="w-full h-full object-contain max-h-[80vh]"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
