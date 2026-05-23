@@ -233,6 +233,18 @@ export const INITIAL_BUDGETS: CategoryBudget[] = [
     category: 'Lazer',
     limitInCents: 50000, // R$ 500,00
     spentInCents: 17290, // R$ 172,90
+  },
+  {
+    id: 'b-5',
+    category: 'Saúde',
+    limitInCents: 40000, // R$ 400,00
+    spentInCents: 18990, // R$ 189,90
+  },
+  {
+    id: 'b-6',
+    category: 'Educação',
+    limitInCents: 60000, // R$ 600,00
+    spentInCents: 45000, // R$ 450,00
   }
 ];
 
