@@ -546,6 +546,41 @@ async function startServer() {
     }
   });
 
+  // ── EDIT TRANSACTION ──────────────────────────────────────────────────────
+
+  app.put('/api/transactions/:id', async (req, res) => {
+    const { id } = req.params;
+    const { amountInCents, date, category, description } = req.body;
+    try {
+      const rows = await d1q<any>('SELECT * FROM transactions WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Transação não encontrada.' });
+      const old = mapTransaction(rows[0]);
+      const newAmount = amountInCents ? parseInt(amountInCents, 10) : old.amountInCents;
+      if (isNaN(newAmount) || newAmount <= 0) return res.status(400).json({ error: 'Valor inválido.' });
+
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [
+        { sql: 'UPDATE transactions SET amount_in_cents=?,date=?,category=?,description=? WHERE id=?', params: [newAmount, date || old.date, category || old.category, description || old.description, id] }
+      ];
+
+      // Adjust account balance for amount delta
+      const diff = newAmount - old.amountInCents;
+      if (diff !== 0 && old.accountId) {
+        if (old.type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [diff, old.accountId] });
+        else if (old.type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [diff, old.accountId] });
+        else if (old.type === 'TRANS') {
+          stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [diff, old.accountId] });
+          if (old.destinationAccountId) stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [diff, old.destinationAccountId] });
+        }
+      }
+
+      await d1exec(stmts);
+      await recalculateBudgets();
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
+
   // ── DELETE TRANSACTION ─────────────────────────────────────────────────────
 
   app.delete('/api/transactions/:id', async (req, res) => {
@@ -570,6 +605,31 @@ async function startServer() {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
     }
+  });
+
+  // ── EDIT / DELETE ACCOUNT ─────────────────────────────────────────────────
+
+  app.put('/api/accounts/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, bankName, type, color } = req.body;
+    if (!name || !bankName) return res.status(400).json({ error: 'name e bankName são obrigatórios.' });
+    if (type && !VALID_ACC_TYPES.includes(type)) return res.status(400).json({ error: 'Tipo inválido.' });
+    try {
+      const rows = await d1q('SELECT id FROM accounts WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Conta não encontrada.' });
+      await d1q('UPDATE accounts SET name=?,bank_name=?,type=?,color=? WHERE id=?', [name, bankName, type || 'CHECKING', color || '#6B7280', id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/accounts/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      const txCount = await d1q<any>('SELECT COUNT(*) as cnt FROM transactions WHERE account_id = ?', [id]);
+      if ((txCount[0]?.cnt || 0) > 0) return res.status(400).json({ error: 'Não é possível excluir conta com transações associadas.' });
+      await d1q('DELETE FROM accounts WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
 
   // ── CREATE ACCOUNT ─────────────────────────────────────────────────────────

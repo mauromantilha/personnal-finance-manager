@@ -217,13 +217,32 @@ export default function App() {
   const handleDeleteTransaction = async (id: string): Promise<boolean> => {
     try {
       const response = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
-      if (response.ok) {
-        await fetchAllData();
-        return true;
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      if (response.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleEditTransaction = async (id: string, data: any): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/transactions/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleEditAccount = async (id: string, data: any): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/accounts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleDeleteAccount = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
     return false;
   };
 
@@ -667,7 +686,10 @@ export default function App() {
                     categories={categories}
                     creditCards={creditCards}
                     onAddTransaction={handleAddTransaction}
+                    onEditTransaction={handleEditTransaction}
                     onAddAccount={handleAddAccount}
+                    onEditAccount={handleEditAccount}
+                    onDeleteAccount={handleDeleteAccount}
                     onDeleteTransaction={handleDeleteTransaction}
                   />
 
@@ -813,7 +835,10 @@ export default function App() {
               categories={categories}
               creditCards={creditCards}
               onAddTransaction={handleAddTransaction}
+              onEditTransaction={handleEditTransaction}
               onAddAccount={handleAddAccount}
+              onEditAccount={handleEditAccount}
+              onDeleteAccount={handleDeleteAccount}
               onDeleteTransaction={handleDeleteTransaction}
             />
           )}
