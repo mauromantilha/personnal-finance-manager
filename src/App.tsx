@@ -246,6 +246,14 @@ export default function App() {
     return false;
   };
 
+  const handleImportCSV = async (csv: string, accountId: string): Promise<{ imported: number; errors: string[] }> => {
+    try {
+      const res = await fetch('/api/import/csv', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv, accountId }) });
+      if (res.ok) { const data = await res.json(); await fetchAllData(); return data; }
+    } catch (err) { console.error(err); }
+    return { imported: 0, errors: ['Erro de conexão com o servidor.'] };
+  };
+
   const handleDeleteGoal = async (id: string): Promise<boolean> => {
     try {
       const response = await fetch(`/api/goals/${id}`, {
@@ -637,32 +645,47 @@ export default function App() {
           {activeTab === 'DASHBOARD' && (
             <div className="space-y-6">
               
-              {/* Top Banner Alert / Open Finance connection guide info */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 animate-fadeIn">
-                <div className="space-y-1 my-0.5">
-                  <span className="text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-700 font-black uppercase px-2 py-0.5 rounded-full">
-                    Plataforma Consolidada
-                  </span>
-                  <h2 className="text-lg font-black text-slate-800 tracking-tight">Visão Consolidada de Caixa</h2>
-                  <p className="text-xs text-slate-500 max-w-xl font-medium">
-                    Centralize contas correntes, cartões e poupanças de forma unificada no Brasil. Obtenha categorização automatizada de faturas bancárias com auxílio da inteligência analítica Gemini.
-                  </p>
-                </div>
+              {/* Dashboard KPI bar */}
+              {(() => {
+                const now = new Date();
+                const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                const monthTxs = transactions.filter(t => t.date.startsWith(monthPrefix));
+                const monthIncome = monthTxs.filter(t => t.type === 'REC').reduce((s, t) => s + t.amountInCents, 0);
+                const monthExpense = monthTxs.filter(t => t.type === 'DES').reduce((s, t) => s + t.amountInCents, 0);
+                const savingsRate = monthIncome > 0 ? ((monthIncome - monthExpense) / monthIncome) * 100 : 0;
+                const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const kpis = [
+                  { label: 'Patrimônio Líquido', value: brl(netWorthCents), color: 'text-slate-900', bg: 'bg-white', icon: '💰' },
+                  { label: 'Receita (mês)', value: brl(monthIncome), color: 'text-emerald-600', bg: 'bg-emerald-50', icon: '📈' },
+                  { label: 'Despesas (mês)', value: brl(monthExpense), color: 'text-rose-600', bg: 'bg-rose-50', icon: '📉' },
+                  { label: 'Taxa de Poupança', value: `${savingsRate.toFixed(1)}%`, color: savingsRate >= 20 ? 'text-emerald-600' : savingsRate >= 10 ? 'text-amber-600' : 'text-rose-600', bg: savingsRate >= 20 ? 'bg-emerald-50' : savingsRate >= 10 ? 'bg-amber-50' : 'bg-rose-50', icon: '🏦' },
+                ];
+                return (
+                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+                    {kpis.map(k => (
+                      <div key={k.label} className={`${k.bg} rounded-2xl border border-slate-200 p-5 shadow-sm flex items-center justify-between gap-3`}>
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{k.label}</p>
+                          <p className={`text-lg font-black font-mono mt-0.5 ${k.color}`}>{k.value}</p>
+                        </div>
+                        <span className="text-2xl shrink-0">{k.icon}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
-                <div className="flex gap-2 shrink-0">
-                  <button 
-                    onClick={() => setActiveTab('OPEN_FINANCE')}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                  >
-                    Vincular Novo Banco via Open Finance
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('CORE')}
-                    className="px-3 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold transition-all"
-                  >
-                    Fazer Lançamento Manual
-                  </button>
-                </div>
+              {/* Quick actions bar */}
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setActiveTab('CORE')} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                  + Lançamento Manual
+                </button>
+                <button onClick={() => setActiveTab('OPEN_FINANCE')} className="px-3 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold transition-all">
+                  Vincular Banco (Open Finance)
+                </button>
+                <button onClick={() => setActiveTab('ANALYTICS')} className="px-3 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold transition-all">
+                  Ver Relatórios
+                </button>
               </div>
 
               {/* Main stats layout */}
@@ -691,6 +714,7 @@ export default function App() {
                     onEditAccount={handleEditAccount}
                     onDeleteAccount={handleDeleteAccount}
                     onDeleteTransaction={handleDeleteTransaction}
+                    onImportCSV={handleImportCSV}
                   />
 
                 </div>
@@ -840,6 +864,7 @@ export default function App() {
               onEditAccount={handleEditAccount}
               onDeleteAccount={handleDeleteAccount}
               onDeleteTransaction={handleDeleteTransaction}
+              onImportCSV={handleImportCSV}
             />
           )}
 

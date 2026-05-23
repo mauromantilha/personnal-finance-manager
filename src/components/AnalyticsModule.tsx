@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, AreaChart, Area, Legend
@@ -431,38 +431,54 @@ export default function AnalyticsModule({ accounts, transactions, budgets, recur
           )}
         </div>
 
-        {/* Projection */}
-        <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-6 shadow-sm flex flex-col justify-between">
-          <div className="space-y-2">
-            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider font-extrabold">
-              Projeção — próximos 30 dias
-            </span>
-            <h4 className="text-sm font-bold">Previsão baseada em recorrências</h4>
-            <p className="text-xs text-slate-400 leading-normal">
-              Despesas fixas mensais configuradas:{' '}
-              <span className="font-bold font-mono text-white">{fmt(fixedMonthlyCost)}</span>
-            </p>
-            <p className="text-xs text-slate-400">
-              Receitas fixas mensais:{' '}
-              <span className="font-bold font-mono text-white">{fmt(fixedMonthlyIncome)}</span>
-            </p>
-          </div>
-          <div className="border-t border-slate-800 pt-4 mt-4 grid grid-cols-2 gap-4">
+        {/* Cashflow projection chart */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
             <div>
-              <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Saídas Fixas Est.</span>
-              <span className="text-sm font-bold text-rose-400 font-mono italic">-{fmt(fixedMonthlyCost)}</span>
+              <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-indigo-500" /> Cashflow Projetado — 6 meses
+              </h3>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Baseado em recorrências fixas: <span className="text-rose-600 font-bold font-mono">-{fmt(fixedMonthlyCost)}</span> / <span className="text-emerald-600 font-bold font-mono">+{fmt(fixedMonthlyIncome)}</span> / mês
+              </p>
             </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Saldo Projetado</span>
-              <span className={`text-sm font-bold font-mono italic ${(totals.netWorth - fixedMonthlyCost) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {fmt(totals.netWorth - fixedMonthlyCost)}
-              </span>
-            </div>
+            <button onClick={() => handleDownloadCSV()} disabled={downloading}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50 shrink-0">
+              <Download className="w-3 h-3" /> CSV
+            </button>
           </div>
-          <button onClick={() => handleDownloadCSV()} disabled={downloading}
-            className="mt-4 flex items-center justify-center gap-1.5 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50">
-            <Download className="w-3.5 h-3.5" /> Exportar todas as transações (CSV)
-          </button>
+          {(() => {
+            const net = fixedMonthlyIncome - fixedMonthlyCost;
+            const projData = Array.from({ length: 7 }, (_, i) => {
+              const d = new Date();
+              d.setMonth(d.getMonth() + i);
+              const label = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+              const balance = (totals.netWorth + net * i) / 100;
+              return { label, Saldo: Math.round(balance * 100) / 100 };
+            });
+            return (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={projData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="projGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={net >= 0 ? '#10B981' : '#EF4444'} stopOpacity={0.15} />
+                        <stop offset="95%" stopColor={net >= 0 ? '#10B981' : '#EF4444'} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                    <XAxis dataKey="label" stroke="#94A3B8" fontSize={10} tickLine={false} />
+                    <YAxis stroke="#94A3B8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={fmtShort} />
+                    <Tooltip
+                      formatter={v => [`R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
+                      contentStyle={{ background: '#0F172A', color: '#fff', borderRadius: '8px', fontSize: '11px', border: 'none' }}
+                    />
+                    <Area type="monotone" dataKey="Saldo" stroke={net >= 0 ? '#10B981' : '#EF4444'} strokeWidth={2} fillOpacity={1} fill="url(#projGrad)" dot={{ r: 3, fill: net >= 0 ? '#10B981' : '#EF4444' }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

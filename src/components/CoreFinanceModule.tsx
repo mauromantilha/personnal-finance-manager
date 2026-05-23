@@ -19,7 +19,9 @@ import {
   Pencil,
   Search,
   X,
-  ChevronDown
+  ChevronDown,
+  Upload,
+  ClipboardList
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard } from '../types';
 
@@ -34,6 +36,7 @@ interface CoreFinanceModuleProps {
   onEditAccount: (id: string, data: any) => Promise<boolean>;
   onDeleteAccount: (id: string) => Promise<boolean>;
   onDeleteTransaction: (id: string) => Promise<boolean>;
+  onImportCSV: (csv: string, accountId: string) => Promise<{ imported: number; errors: string[] }>;
 }
 
 type PeriodFilter = 'this_month' | 'last_month' | '30d' | '90d' | 'all';
@@ -51,6 +54,7 @@ export default function CoreFinanceModule({
   onEditAccount,
   onDeleteAccount,
   onDeleteTransaction,
+  onImportCSV,
 }: CoreFinanceModuleProps) {
 
   // ── Account form state ──────────────────────────────────────────────────────
@@ -88,6 +92,34 @@ export default function CoreFinanceModule({
   const [editTxCategory, setEditTxCategory] = useState('');
   const [editTxDesc, setEditTxDesc] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // ── CSV import state ────────────────────────────────────────────────────────
+  const [showImport, setShowImport] = useState(false);
+  const [csvText, setCsvText] = useState('');
+  const [importAccountId, setImportAccountId] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
+
+  // Preview: parse first 5 non-header lines client-side
+  const csvPreview = useMemo(() => {
+    if (!csvText) return [];
+    return csvText.split('\n').map(l => l.trim()).filter(Boolean)
+      .filter(l => !/^(data|date|dia)/i.test(l))
+      .slice(0, 5)
+      .map(line => {
+        const cols = line.replace(/^﻿/, '').split(/[,;]/).map(c => c.trim().replace(/^"|"$/g, ''));
+        return { date: cols[0] || '', desc: cols[1] || '', amount: cols[2] || '' };
+      });
+  }, [csvText]);
+
+  const handleImport = async () => {
+    if (!csvText.trim() || !importAccountId) { fb('Cole o CSV e selecione a conta.', 'error'); return; }
+    setImporting(true);
+    const result = await onImportCSV(csvText, importAccountId);
+    setImportResult(result);
+    setImporting(false);
+    if (result.imported > 0) { fb(`${result.imported} lançamentos importados com sucesso!`, 'success'); setCsvText(''); }
+  };
 
   // ── Ledger filters ──────────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
@@ -484,6 +516,104 @@ export default function CoreFinanceModule({
             </form>
           </div>
         </div>
+      </div>
+
+      {/* CSV Import panel */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <button
+          onClick={() => { setShowImport(!showImport); setImportResult(null); }}
+          className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Upload className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-semibold text-slate-800">Importar Extrato CSV</span>
+            <span className="text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-600 px-1.5 py-0.5 rounded-full font-bold uppercase">Novo</span>
+          </div>
+          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showImport ? 'rotate-180' : ''}`} />
+        </button>
+
+        {showImport && (
+          <div className="px-6 pb-6 space-y-4 border-t border-slate-100 pt-4 animate-fadeIn">
+            {/* Format guide */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-1.5">
+                <ClipboardList className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Formato aceito (CSV)</span>
+              </div>
+              <code className="block text-[10px] font-mono text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 leading-relaxed">
+                data,descricao,valor<br />
+                2026-05-01,Supermercado Extra,-245.80<br />
+                2026-05-05,Salário Maio,5000.00<br />
+                01/05/2026,Netflix,-39.90,débito
+              </code>
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                Aceita vírgula ou ponto-e-vírgula · Datas: AAAA-MM-DD ou DD/MM/AAAA · Negativo = despesa, positivo = receita · Coluna "tipo" opcional (crédito/débito) · Categorias geradas automaticamente.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cole o conteúdo CSV aqui</label>
+                <textarea
+                  value={csvText}
+                  onChange={e => { setCsvText(e.target.value); setImportResult(null); }}
+                  rows={7}
+                  placeholder={"data,descricao,valor\n2026-05-01,Supermercado,-150.00\n2026-05-05,Salário,5000.00"}
+                  className="w-full text-xs font-mono border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-400 bg-slate-50 resize-none"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">{csvText.split('\n').filter(Boolean).length} linhas detectadas</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Conta de destino</label>
+                  <select
+                    value={importAccountId}
+                    onChange={e => setImportAccountId(e.target.value)}
+                    className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-400 bg-white font-semibold"
+                  >
+                    <option value="">Selecione a conta...</option>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+
+                {/* Preview */}
+                {csvPreview.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Prévia (5 primeiras linhas)</span>
+                    <div className="space-y-1">
+                      {csvPreview.map((row, i) => (
+                        <div key={i} className="flex items-center justify-between text-[10px] bg-slate-50 rounded-lg px-2 py-1 font-mono">
+                          <span className="text-slate-500">{row.date}</span>
+                          <span className="text-slate-700 truncate max-w-[80px] mx-1">{row.desc}</span>
+                          <span className={parseFloat(row.amount.replace(',', '.')) < 0 ? 'text-rose-600 font-bold' : 'text-emerald-600 font-bold'}>{row.amount}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleImport}
+                  disabled={importing || !csvText.trim() || !importAccountId}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {importing ? 'Importando…' : 'Confirmar Importação'}
+                </button>
+
+                {importResult && (
+                  <div className={`p-3 rounded-xl text-xs border space-y-1 ${importResult.imported > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                    <p className="font-bold">{importResult.imported} lançamentos importados</p>
+                    {importResult.errors.length > 0 && (
+                      <p className="text-[10px] text-amber-700">{importResult.errors.length} linha(s) ignorada(s)</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Ledger */}

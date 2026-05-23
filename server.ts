@@ -1104,6 +1104,87 @@ async function startServer() {
     }
   });
 
+  // ── CSV IMPORT ─────────────────────────────────────────────────────────────
+
+  app.post('/api/import/csv', async (req, res) => {
+    const { csv, accountId } = req.body;
+    if (!csv || !accountId) return res.status(400).json({ error: 'csv e accountId são obrigatórios.' });
+
+    const accRows = await d1q<any>('SELECT * FROM accounts WHERE id = ?', [accountId]);
+    if (!accRows.length) return res.status(404).json({ error: 'Conta não encontrada.' });
+
+    // Local classifier (reuse same logic as /api/groq/categorize)
+    const classify = (desc: string) => {
+      const l = desc.toLowerCase();
+      if (/mercado|supermercado|padaria|burger|restaurante|lanche|ifood|rappi|pizza/.test(l)) return 'Alimentação';
+      if (/uber|99|taxi|posto|combustiv|gasolina|estacion|onibus|metro|transporte/.test(l)) return 'Transporte';
+      if (/aluguel|imovel|condomin|agua|luz|energia|internet|telefone/.test(l)) return 'Moradia';
+      if (/netflix|cinema|spotify|ingresso|streaming|lazer|viagem|hotel/.test(l)) return 'Lazer';
+      if (/farmacia|drogaria|saude|medico|clinica|plano|hospital/.test(l)) return 'Saúde';
+      if (/livro|curso|escola|facul|inglês|idioma|educacao/.test(l)) return 'Educação';
+      if (/salario|salário|pagamento|renda|freelance|pix recebido/.test(l)) return 'Receita';
+      return 'Outros';
+    };
+
+    const lines = csv.split('\n').map((l: string) => l.trim()).filter(Boolean);
+    const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+    let imported = 0;
+    const errors: string[] = [];
+    let balanceDelta = 0;
+
+    for (const line of lines) {
+      // Skip header
+      if (/^(data|date|dia)/i.test(line)) continue;
+
+      // Support comma or semicolon delimited; strip BOM
+      const cols = line.replace(/^﻿/, '').split(/[,;]/).map((c: string) => c.trim().replace(/^"|"$/g, ''));
+      if (cols.length < 3) { errors.push(`Linha ignorada (colunas insuficientes): ${line.slice(0, 60)}`); continue; }
+
+      const [rawDate, rawDesc, rawAmount, rawType] = cols;
+
+      // Date: accept YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY
+      let date = rawDate;
+      if (/^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(rawDate)) {
+        const parts = rawDate.split(/[\/\-]/);
+        date = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`Data inválida: ${rawDate}`); continue; }
+
+      const amountFloat = parseFloat(rawAmount.replace(/\./g, '').replace(',', '.'));
+      if (isNaN(amountFloat)) { errors.push(`Valor inválido: ${rawAmount}`); continue; }
+
+      const amountInCents = Math.round(Math.abs(amountFloat) * 100);
+      if (amountInCents === 0) continue;
+
+      // Determine type: explicit column, or sign of amount
+      let type: 'REC' | 'DES';
+      if (rawType) {
+        type = /crédito|credito|entrada|receita|credit/i.test(rawType) ? 'REC' : 'DES';
+      } else {
+        type = amountFloat > 0 ? 'REC' : 'DES';
+      }
+
+      const category = type === 'REC' ? 'Receita' : classify(rawDesc);
+      const txId = `tx-imp-${accountId}-${date.replace(/-/g, '')}-${Math.abs(amountInCents)}-${rawDesc.slice(0, 8).replace(/\W/g, '')}`;
+
+      stmts.push({ sql: 'INSERT OR IGNORE INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced) VALUES (?,?,?,?,?,?,?,0)', params: [txId, amountInCents, date, type, category, rawDesc, accountId] });
+      balanceDelta += type === 'REC' ? amountInCents : -amountInCents;
+      imported++;
+    }
+
+    if (stmts.length) {
+      stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [balanceDelta, accountId] });
+      try {
+        await d1exec(stmts);
+        await recalculateBudgets();
+      } catch (e: any) {
+        return res.status(500).json({ error: 'D1 error', details: e.message });
+      }
+    }
+
+    res.json({ imported, errors });
+  });
+
   // ── AI ADVISOR ─────────────────────────────────────────────────────────────
 
   app.post('/api/groq/advisor', async (req, res) => {
