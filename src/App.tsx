@@ -629,6 +629,7 @@ export default function App() {
   // Nav configuration
   const sidebarNavItems: { id: TabType; label: string; icon: React.ElementType; badge?: number }[] = [
     { id: 'DASHBOARD',    label: 'Dashboard',                    icon: Building2 },
+    { id: 'PREDICTIVE_AI', label: 'IA Preditiva',               icon: BrainCircuit },
     { id: 'CORE',         label: 'Módulo 1: Contas & Ledger',    icon: Database },
     { id: 'CREDIT_CARDS', label: 'Módulo 2: Cartões & Faturas',  icon: CreditCardIcon },
     { id: 'RECURRENCES',  label: 'Módulo 3: Recorrências',       icon: RefreshCw },
@@ -641,7 +642,6 @@ export default function App() {
     { id: 'INSTALLMENTS', label: 'Módulo 10: Parcelamentos',     icon: Layers },
     { id: 'INVESTMENTS',  label: 'Módulo 11: Investimentos',     icon: TrendingUp },
     { id: 'AUTH',         label: 'Módulo 12: Auth & IAM',        icon: Shield },
-    { id: 'PREDICTIVE_AI', label: 'IA Preditiva',               icon: BrainCircuit },
   ];
 
   if (isLoading || isAuthenticated === null) {

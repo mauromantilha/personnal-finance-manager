@@ -2255,6 +2255,8 @@ REGRAS:
       const feeds = [
         { url: 'https://www.infomoney.com.br/feed/', name: 'InfoMoney' },
         { url: 'https://g1.globo.com/rss/g1/economia/', name: 'G1 Economia' },
+        { url: 'https://valor.globo.com/financas/rss', name: 'Valor Econômico' },
+        { url: 'https://valor.globo.com/mercados/rss', name: 'Valor — Mercados' },
       ];
       const results = await Promise.allSettled(
         feeds.map(f => fetch(f.url, { headers: { 'User-Agent': 'MKSFinance/1.0' }, signal: AbortSignal.timeout(8000) })
