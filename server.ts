@@ -1890,6 +1890,175 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
     }
   });
 
+  // ── PREDICTIVE AI ANALYST ─────────────────────────────────────────────────
+
+  app.post('/api/ai/predictive', async (req, res) => {
+    const client = getGroqClient();
+    try {
+      await recalculateBudgets();
+      const now = new Date();
+      const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevPrefix = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
+      const ninetyDaysAgo = new Date(now); ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const since = ninetyDaysAgo.toISOString().split('T')[0];
+
+      const [accounts, budgets, goals, investments, creditCards, invoices, recurrences,
+        monthTxs, prevMonthTxs, topCategories] = await Promise.all([
+        d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
+        d1q<any>('SELECT * FROM budgets').then(r => r.map(mapBudget)),
+        d1q<any>('SELECT * FROM goals').then(r => r.map(mapGoal)),
+        d1q<any>('SELECT * FROM investments ORDER BY start_date DESC').then(r => r.map(mapInvestment)),
+        d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1').then(r => r.map(mapCreditCard)),
+        d1q<any>('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice)),
+        d1q<any>('SELECT * FROM recurrences WHERE is_active = 1').then(r => r.map(mapRecurrence)),
+        d1q<any>(`SELECT * FROM transactions WHERE date LIKE ? ORDER BY date DESC`, [`${monthPrefix}%`]).then(r => r.map(mapTransaction)),
+        d1q<any>(`SELECT * FROM transactions WHERE date LIKE ? ORDER BY date DESC`, [`${prevPrefix}%`]).then(r => r.map(mapTransaction)),
+        d1q<any>(`SELECT category, type, SUM(amount_in_cents) as total FROM transactions WHERE date >= ? AND type = 'DES' GROUP BY category ORDER BY total DESC LIMIT 10`, [since]),
+      ]);
+
+      const brl = (c: number) => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+      const pct = (a: number, b: number) => b > 0 ? `${((a / b) * 100).toFixed(1)}%` : 'N/A';
+
+      const netWorth = accounts.reduce((s: number, a: FinancialAccount) => s + a.balanceInCents, 0);
+      const monthIncome = monthTxs.filter((t: Transaction) => t.type === 'REC').reduce((s: number, t: Transaction) => s + t.amountInCents, 0);
+      const monthExpense = monthTxs.filter((t: Transaction) => t.type === 'DES').reduce((s: number, t: Transaction) => s + t.amountInCents, 0);
+      const prevIncome = prevMonthTxs.filter((t: Transaction) => t.type === 'REC').reduce((s: number, t: Transaction) => s + t.amountInCents, 0);
+      const prevExpense = prevMonthTxs.filter((t: Transaction) => t.type === 'DES').reduce((s: number, t: Transaction) => s + t.amountInCents, 0);
+      const savingsRate = monthIncome > 0 ? ((monthIncome - monthExpense) / monthIncome) * 100 : 0;
+      const totalInvested = investments.reduce((s: number, i: Investment) => s + i.investedInCents, 0);
+      const totalInvestValue = investments.reduce((s: number, i: Investment) => s + i.currentValueInCents, 0);
+      const totalRecurring = recurrences.filter((r: Recurrence) => r.type === 'DES').reduce((s: number, r: Recurrence) => s + r.amountInCents, 0);
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const creditUsed = creditCards.reduce((s: number, c: CreditCard) => {
+        const inv = invoices.find((i: Invoice) => i.creditCardId === c.id && i.month === currentMonth);
+        return s + (inv?.totalInCents || 0);
+      }, 0);
+      const creditLimit = creditCards.reduce((s: number, c: CreditCard) => s + c.limitInCents, 0);
+
+      const context = {
+        data_referencia: now.toLocaleDateString('pt-BR'),
+        patrimonio_liquido: brl(netWorth),
+        contas: accounts.map((a: FinancialAccount) => ({ nome: a.name, banco: a.bankName, tipo: a.type, saldo: brl(a.balanceInCents) })),
+        mes_atual: {
+          receitas: brl(monthIncome), despesas: brl(monthExpense),
+          saldo_mes: brl(monthIncome - monthExpense),
+          taxa_poupanca: `${savingsRate.toFixed(1)}%`,
+        },
+        mes_anterior: {
+          receitas: brl(prevIncome), despesas: brl(prevExpense),
+          variacao_despesa: prevExpense > 0 ? `${(((monthExpense - prevExpense) / prevExpense) * 100).toFixed(1)}%` : 'N/A',
+        },
+        orcamentos: budgets.map((b: CategoryBudget) => ({
+          categoria: b.category,
+          limite: brl(b.limitInCents),
+          gasto: brl(b.spentInCents),
+          percentual: pct(b.spentInCents, b.limitInCents),
+          status: b.spentInCents >= b.limitInCents ? 'ESTOURADO' : b.spentInCents >= b.limitInCents * 0.8 ? 'ATENCAO' : 'OK',
+        })),
+        metas: goals.map((g: FinancialGoal) => ({
+          nome: g.name,
+          meta: brl(g.targetInCents),
+          atual: brl(g.currentInCents),
+          progresso: pct(g.currentInCents, g.targetInCents),
+          data_alvo: g.targetDate,
+        })),
+        investimentos: {
+          total_aplicado: brl(totalInvested),
+          valor_atual: brl(totalInvestValue),
+          rentabilidade_total: totalInvested > 0 ? `${(((totalInvestValue - totalInvested) / totalInvested) * 100).toFixed(2)}%` : 'N/A',
+          posicoes: investments.map((i: Investment) => ({
+            nome: i.name, classe: i.assetClass, instituicao: i.institution,
+            aplicado: brl(i.investedInCents), atual: brl(i.currentValueInCents),
+            taxa_anual: i.annualRate ? `${i.annualRate}% a.a.` : null,
+          })),
+        },
+        cartoes_credito: creditCards.map((c: CreditCard) => {
+          const inv = invoices.find((i: Invoice) => i.creditCardId === c.id && i.month === currentMonth);
+          const used = inv?.totalInCents || 0;
+          return { nome: c.name, limite: brl(c.limitInCents), fatura_atual: brl(used), utilizacao: pct(used, c.limitInCents) };
+        }),
+        utilizacao_total_credito: `${creditLimit > 0 ? ((creditUsed / creditLimit) * 100).toFixed(1) : 0}%`,
+        custos_fixos_mensais: brl(totalRecurring),
+        top_categorias_despesa_90dias: topCategories.map((r: any) => ({
+          categoria: r.category, total: brl(r.total), participacao: pct(r.total, prevExpense + monthExpense),
+        })),
+      };
+
+      const systemPrompt = `Você é um Analista Financeiro Sênior e Assessor de Investimentos Certificado (CFP), especializado em finanças pessoais e planejamento patrimonial no Brasil.
+
+REGRAS ABSOLUTAS — VIOLÁ-LAS É INACEITÁVEL:
+1. Baseie TODA análise EXCLUSIVAMENTE nos dados JSON fornecidos. NUNCA invente valores, tendências ou fatos não presentes nos dados.
+2. Se dados forem insuficientes para uma conclusão, escreva explicitamente: "Dados insuficientes para análise neste item."
+3. Cada insight DEVE citar números reais do JSON (valores em R$, percentuais, nomes de contas).
+4. Responda SEMPRE em Português Brasileiro, linguagem profissional mas acessível.
+5. Retorne SOMENTE JSON válido. Nenhum texto fora do JSON.
+6. Seja preciso: sem conselhos genéricos. Toda recomendação deve ser específica ao perfil do usuário.
+7. Nível de confiança: só afirme o que os dados confirmam. Hipóteses devem ser indicadas como tal.
+
+ESTRUTURA JSON OBRIGATÓRIA DE RETORNO:
+{
+  "resumo_executivo": "string — 2 frases sobre a situação financeira atual com números reais",
+  "score_saude": {
+    "valor": 0-100,
+    "classificacao": "Excelente|Bom|Regular|Crítico",
+    "justificativa": "string baseada nos dados"
+  },
+  "alertas": [
+    { "nivel": "CRITICO|ATENCAO|INFO", "titulo": "string", "descricao": "string com números reais", "acao_sugerida": "string" }
+  ],
+  "analise_gastos": {
+    "resumo": "string",
+    "ponto_atencao": "string|null",
+    "top_categorias": [{ "categoria": "string", "valor": "string", "avaliacao": "string" }]
+  },
+  "analise_investimentos": {
+    "resumo": "string",
+    "diversificacao": "Boa|Média|Fraca|Sem investimentos",
+    "pontos": ["string"],
+    "sugestoes": ["string — baseadas nos dados, não em suposições"]
+  },
+  "recomendacoes": [
+    { "prioridade": 1, "titulo": "string", "descricao": "string com referência aos dados", "impacto": "Alto|Médio|Baixo", "prazo": "Imediato|30 dias|90 dias|Longo prazo" }
+  ],
+  "plano_acao": [
+    { "ordem": 1, "acao": "string específica", "motivo": "string baseado nos dados" }
+  ]
+}`;
+
+      if (!client) {
+        return res.json({
+          resumo_executivo: `Patrimônio líquido atual: ${brl(netWorth)}. Configure GROQ_API_KEY no .env para análise completa com IA.`,
+          score_saude: { valor: 50, classificacao: 'Regular', justificativa: 'IA não configurada — análise indisponível.' },
+          alertas: [{ nivel: 'INFO', titulo: 'IA não configurada', descricao: 'Adicione GROQ_API_KEY ao .env para habilitar análise preditiva.', acao_sugerida: 'Configure a variável de ambiente GROQ_API_KEY.' }],
+          analise_gastos: { resumo: 'IA não disponível.', ponto_atencao: null, top_categorias: [] },
+          analise_investimentos: { resumo: 'IA não disponível.', diversificacao: 'Sem investimentos', pontos: [], sugestoes: [] },
+          recomendacoes: [],
+          plano_acao: [],
+          generatedAt: now.toISOString(),
+        });
+      }
+
+      const completion = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analise estes dados financeiros e retorne o JSON conforme estrutura definida:\n\n${JSON.stringify(context, null, 2)}` },
+        ],
+        temperature: 0.2,
+        max_tokens: 3000,
+        response_format: { type: 'json_object' },
+      });
+
+      const raw = completion.choices[0]?.message?.content || '{}';
+      const analysis = JSON.parse(raw);
+      res.json({ ...analysis, generatedAt: now.toISOString() });
+    } catch (e: any) {
+      console.error('[PREDICTIVE AI]', e.message);
+      res.status(500).json({ error: 'Erro na análise preditiva.', details: e.message });
+    }
+  });
+
   // ── CATEGORIZE ─────────────────────────────────────────────────────────────
 
   app.post('/api/groq/categorize', async (req, res) => {

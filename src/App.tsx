@@ -21,7 +21,8 @@ import {
   Users,
   Tag,
   Layers,
-  TrendingUp
+  TrendingUp,
+  BrainCircuit
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -38,7 +39,7 @@ import CategoriesModule from './components/CategoriesModule';
 import InstallmentsModule from './components/InstallmentsModule';
 import InvestmentsModule from './components/InvestmentsModule';
 import HealthReport from './components/HealthReport';
-import AIAdvisor from './components/AIAdvisor';
+import PredictiveAIModule from './components/PredictiveAIModule';
 import LoginScreen from './components/LoginScreen';
 
 import {
@@ -49,7 +50,6 @@ import {
   CategoryBudget,
   FinancialGoal,
   NotificationAlert,
-  ChatMessage,
   Category,
   CreditCard,
   Invoice,
@@ -59,7 +59,7 @@ import {
   Investment
 } from './types';
 
-type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS';
+type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS' | 'PREDICTIVE_AI';
 
 export default function App() {
   // Navigation tabs
@@ -83,7 +83,6 @@ export default function App() {
   const [budgets, setBudgets] = useState<CategoryBudget[]>([]);
   const [goals, setGoals] = useState<FinancialGoal[]>([]);
   const [alerts, setAlerts] = useState<NotificationAlert[]>([]);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -113,9 +112,6 @@ export default function App() {
         setFamilyMembers(data.familyMembers || []);
         setInstallmentGroups(data.installmentGroups || []);
         setInvestments(data.investments || []);
-        if (data.chatHistory && data.chatHistory.length > 0) {
-          setChatHistory(data.chatHistory);
-        }
       }
     } catch (e) {
       console.error('Error fetching dashboard database from server:', e);
@@ -423,47 +419,6 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (text: string): Promise<string | null> => {
-    const newUserMsg: ChatMessage = {
-      id: `m-usr-${Date.now()}`,
-      sender: 'user',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setChatHistory(prev => [...prev, newUserMsg]);
-
-    try {
-      const response = await fetch('/api/groq/advisor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-      });
-      
-      if (response.ok) {
-        const body = await response.json();
-        const responseText = body.reply || "Tivemos um problema para estruturar a análise.";
-        
-        const newBotMsg: ChatMessage = {
-          id: `m-bot-${Date.now()}`,
-          sender: 'assistant',
-          text: responseText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        
-        setChatHistory(prev => [...prev, newBotMsg]);
-        return responseText;
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    return null;
-  };
-
-  const handleClearHistory = () => {
-    setChatHistory([]);
-  };
-
   const handleResetDB = async () => {
     if (confirm('Isso apagará TODOS os dados (contas, transações, metas, investimentos, etc.). Deseja continuar?')) {
       try {
@@ -548,7 +503,6 @@ export default function App() {
     setBudgets([]);
     setGoals([]);
     setAlerts([]);
-    setChatHistory([]);
     setCategories([]);
     setCreditCards([]);
     setInvoices([]);
@@ -686,6 +640,7 @@ export default function App() {
     { id: 'INSTALLMENTS', label: 'Módulo 10: Parcelamentos',     icon: Layers },
     { id: 'INVESTMENTS',  label: 'Módulo 11: Investimentos',     icon: TrendingUp },
     { id: 'AUTH',         label: 'Módulo 12: Auth & IAM',        icon: Shield },
+    { id: 'PREDICTIVE_AI', label: 'IA Preditiva',               icon: BrainCircuit },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -956,7 +911,7 @@ export default function App() {
                   + Lançamento Manual
                 </button>
                 <button onClick={() => setActiveTab('OPEN_FINANCE')} className="px-3 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold transition-all">
-                  Vincular Banco (Open Finance)
+                  Importar Extrato OFX
                 </button>
                 <button onClick={() => setActiveTab('ANALYTICS')} className="px-3 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold transition-all">
                   Ver Relatórios
@@ -1004,15 +959,26 @@ export default function App() {
 
                 </div>
 
-                {/* Right block: AI Advisor Chatbot panel & Alerts summaries */}
+                {/* Right block: Budgets, Recurrences, Credit Cards */}
                 <div className="xl:col-span-1 space-y-6">
-                  
-                  {/* AI Executive Coach Form */}
-                  <AIAdvisor 
-                    chatHistory={chatHistory}
-                    onSendMessage={handleSendMessage}
-                    onClearHistory={handleClearHistory}
-                  />
+
+                  {/* IA Preditiva teaser */}
+                  <div
+                    onClick={() => setActiveTab('PREDICTIVE_AI')}
+                    className="cursor-pointer bg-gradient-to-br from-indigo-600 to-violet-600 rounded-2xl p-5 shadow-sm text-white space-y-2 hover:from-indigo-700 hover:to-violet-700 transition-all"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BrainCircuit className="w-5 h-5 text-white/80" />
+                        <p className="text-xs font-black uppercase tracking-wider">IA Preditiva</p>
+                      </div>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-white/20 rounded-full">Novo</span>
+                    </div>
+                    <p className="text-[11px] text-white/80 leading-relaxed">
+                      Analista financeiro IA com acesso a todos os seus dados. Score de saúde, alertas e recomendações personalizadas sem alucinações.
+                    </p>
+                    <p className="text-[10px] font-bold text-white/60">Clique para abrir →</p>
+                  </div>
 
                   {/* Active budgets sliders small panel */}
                   <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
@@ -1257,6 +1223,10 @@ export default function App() {
               onUpdate={handleUpdateInvestment}
               onDelete={handleDeleteInvestment}
             />
+          )}
+
+          {activeTab === 'PREDICTIVE_AI' && (
+            <PredictiveAIModule />
           )}
 
         </main>
