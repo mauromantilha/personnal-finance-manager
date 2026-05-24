@@ -9,7 +9,7 @@
  * Requer: Node 18+, PM2 instalado globalmente, dist/server.cjs compilado
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { readdirSync } from 'fs';
 import { randomBytes, createHash } from 'crypto';
 import { execSync } from 'child_process';
@@ -404,6 +404,23 @@ async function main() {
   // ── 11. E-mail de boas-vindas com LGPD ────────────────────────────────────
   log('📧', 'Enviando e-mail de boas-vindas...');
   await sendWelcomeEmail(email, name, subdomain, tempPwd, RESEND_KEY, dryRun);
+  if (!dryRun) {
+    const quotaPath = join(CTRL, 'email-quota.json');
+    const month = new Date().toISOString().slice(0, 7);
+    let q = { month, total: 0, families: {} };
+    if (existsSync(quotaPath)) {
+      try {
+        const loaded = JSON.parse(readFileSync(quotaPath, 'utf8'));
+        if (loaded.month === month) q = loaded;
+      } catch {}
+    }
+    q.total = (q.total || 0) + 1;
+    if (!q.families[subdomain]) q.families[subdomain] = { count: 0, lastSent: null };
+    q.families[subdomain].count++;
+    q.families[subdomain].lastSent = new Date().toISOString();
+    writeFileSync(quotaPath, JSON.stringify(q, null, 2));
+    ok('Quota de e-mail atualizada');
+  }
 
   // ── Resumo ────────────────────────────────────────────────────────────────
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

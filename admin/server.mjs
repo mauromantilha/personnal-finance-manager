@@ -1,30 +1,33 @@
 #!/usr/bin/env node
 /**
- * MKS Finanças — Painel Admin (Etapa 3)
+ * MKS Finanças — Painel Admin (Etapa 3 + 4)
  * Porta: 3999 | PM2: mks-admin | URL: https://admin.mksbrasil.com
  *
  * Requer ~/.mks-control/admin.env com:
  *   ADMIN_PASSWORD=...
  *   CLOUDFLARE_API_TOKEN=...   (token com D1+R2+Tunnel+DNS)
+ *   RESEND_API_KEY=...         (para proxy de e-mail)
  *
  * Inicie com: node admin/server.mjs
  * PM2:        pm2 start admin/server.mjs --name mks-admin
  */
 
-import { createServer }             from 'http';
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname }            from 'path';
-import { fileURLToPath }            from 'url';
-import { randomBytes }              from 'crypto';
-import { spawn }                    from 'child_process';
+import { createServer }                        from 'http';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { join, dirname }                       from 'path';
+import { fileURLToPath }                       from 'url';
+import { randomBytes }                         from 'crypto';
+import { spawn }                               from 'child_process';
 
-const __dirname   = dirname(fileURLToPath(import.meta.url));
+const __dirname    = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
-const CTRL        = join(process.env.HOME, '.mks-control');
-const BASE_DOMAIN = 'mksbrasil.com';
-const CF_ACCOUNT  = '9b61f609fee4408fd1c4344feaf9b16a';
-const CF_TUNNEL   = '50e41496-a62b-452a-bd9f-d0f08c2a620d';
-const PORT        = 3999;
+const CTRL         = join(process.env.HOME, '.mks-control');
+const BASE_DOMAIN  = 'mksbrasil.com';
+const PORT         = 3999;
+
+const QUOTA_PATH    = join(CTRL, 'email-quota.json');
+const FAMILY_QUOTA  = 200;   // emails/mês por família
+const TOTAL_QUOTA   = 2000;  // emails/mês global
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -93,6 +96,28 @@ async function readBody(req) {
 function loadFamilies() {
   const p = join(CTRL, 'families.json');
   return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : [];
+}
+
+// ── Email quota ───────────────────────────────────────────────────────────────
+
+function currentMonth() { return new Date().toISOString().slice(0, 7); }
+
+function loadQuota() {
+  if (!existsSync(QUOTA_PATH)) return { month: currentMonth(), total: 0, families: {} };
+  const q = JSON.parse(readFileSync(QUOTA_PATH, 'utf8'));
+  if (q.month !== currentMonth()) return { month: currentMonth(), total: 0, families: {} };
+  return q;
+}
+
+function saveQuota(q) { writeFileSync(QUOTA_PATH, JSON.stringify(q, null, 2)); }
+
+function trackEmailSent(subdomain) {
+  const q = loadQuota();
+  q.total = (q.total || 0) + 1;
+  if (!q.families[subdomain]) q.families[subdomain] = { count: 0, lastSent: null };
+  q.families[subdomain].count++;
+  q.families[subdomain].lastSent = new Date().toISOString();
+  saveQuota(q);
 }
 
 async function checkFamilyHealth(subdomain) {
@@ -184,6 +209,10 @@ const HTML = `<!DOCTYPE html>
       <button onclick="setTab('provision')" id="tab-provision"
         class="py-3 px-2 text-sm font-medium text-slate-400 hover:text-white transition-colors border-b-2 border-transparent">
         ➕ Provisionar
+      </button>
+      <button onclick="setTab('emails')" id="tab-emails"
+        class="py-3 px-2 text-sm font-medium text-slate-400 hover:text-white transition-colors border-b-2 border-transparent">
+        📧 E-mails
       </button>
     </nav>
   </div>
@@ -286,6 +315,71 @@ const HTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Emails Pane -->
+    <div id="pane-emails" class="hidden fade-in">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-lg font-semibold text-white">Monitoramento de E-mails</h2>
+        <button onclick="loadEmailQuota()"
+          class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm px-4 py-2 rounded-lg transition-colors">
+          ↻ Atualizar
+        </button>
+      </div>
+
+      <!-- Quota global -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-medium text-white">Cota Global</h3>
+          <span id="eq-month" class="text-xs text-slate-500"></span>
+        </div>
+        <div class="flex items-center justify-between text-sm mb-2">
+          <span class="text-slate-400">Enviados este mês</span>
+          <span id="eq-total-txt" class="font-semibold text-white">—</span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-3 mb-1">
+          <div id="eq-total-bar" class="h-3 rounded-full transition-all duration-500 bg-indigo-500" style="width:0%"></div>
+        </div>
+        <p class="text-xs text-slate-500 text-right">Limite: 2 000 e-mails/mês</p>
+      </div>
+
+      <!-- Por família -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto">
+        <table class="w-full text-sm min-w-[540px]">
+          <thead>
+            <tr class="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-800">
+              <th class="text-left px-4 py-3">Família</th>
+              <th class="text-left px-4 py-3">Enviados</th>
+              <th class="text-left px-4 py-3 w-48">Uso</th>
+              <th class="text-left px-4 py-3">Último envio</th>
+            </tr>
+          </thead>
+          <tbody id="eq-tbody">
+            <tr><td colspan="4" class="px-4 py-8 text-slate-500 text-center">Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- API info -->
+      <div class="mt-6 bg-slate-900 border border-slate-800 rounded-xl p-6">
+        <h3 class="font-medium text-white mb-3">Endpoint para instâncias familiares</h3>
+        <div class="log-box text-xs leading-relaxed">POST https://admin.mksbrasil.com/api/email/send
+Authorization: Bearer {FAMILY_TOKEN}
+Content-Type: application/json
+
+{
+  "to": "usuario@email.com",
+  "subject": "Assunto",
+  "html": "&lt;p&gt;Corpo do e-mail&lt;/p&gt;"
+}
+
+// Resposta de sucesso:
+{ "ok": true, "messageId": "...", "quota": { "familyUsed": 5, "familyLimit": 200, ... } }
+
+// Erros:
+{ "ok": false, "error": "quota_exceeded" }       // 429 — limite da família (200/mês)
+{ "ok": false, "error": "total_quota_exceeded" }  // 429 — limite global (2000/mês)</div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -382,12 +476,13 @@ async function init() {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 function setTab(name) {
-  ['noc', 'families', 'provision'].forEach(t => {
+  ['noc', 'families', 'provision', 'emails'].forEach(t => {
     document.getElementById('pane-' + t).classList.toggle('hidden', t !== name);
     const btn = document.getElementById('tab-' + t);
     btn.classList.toggle('tab-active', t === name);
   });
   activeTab = name;
+  if (name === 'emails') loadEmailQuota();
 }
 
 // ── NOC ───────────────────────────────────────────────────────────────────────
@@ -602,6 +697,59 @@ function closeDeprovModal() {
   document.getElementById('modal-deprov').classList.add('hidden');
 }
 
+// ── Email Quota ────────────────────────────────────────────────────────────────
+
+async function loadEmailQuota() {
+  try {
+    const r = await fetch('/api/email/quota');
+    const d = await r.json();
+
+    document.getElementById('eq-month').textContent = 'Mês: ' + (d.month || '—');
+
+    const used  = d.total?.used  ?? 0;
+    const limit = d.total?.limit ?? 2000;
+    const pct   = Math.min(100, Math.round((used / limit) * 100));
+    const barColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-indigo-500';
+
+    document.getElementById('eq-total-txt').textContent = used + ' / ' + limit;
+    const bar = document.getElementById('eq-total-bar');
+    bar.style.width = pct + '%';
+    bar.className = 'h-3 rounded-full transition-all duration-500 ' + barColor;
+
+    const tbody = document.getElementById('eq-tbody');
+    if (!d.families?.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-slate-500 text-center">Nenhuma família ativa.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = d.families.map(f => {
+      const fpct    = Math.min(100, Math.round((f.used / f.limit) * 100));
+      const fcolor  = fpct >= 90 ? 'bg-red-500' : fpct >= 70 ? 'bg-amber-500' : 'bg-green-500';
+      const lastSent = f.lastSent
+        ? new Date(f.lastSent).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+        : '—';
+      return \`
+        <tr class="border-b border-slate-800/50 hover:bg-slate-900/50 transition-colors">
+          <td class="px-4 py-3 font-medium">\${esc(f.name)}</td>
+          <td class="px-4 py-3 text-slate-300">\${f.used} <span class="text-slate-500">/ \${f.limit}</span></td>
+          <td class="px-4 py-3">
+            <div class="flex items-center gap-2">
+              <div class="flex-1 bg-slate-800 rounded-full h-2">
+                <div class="\${fcolor} h-2 rounded-full" style="width:\${fpct}%"></div>
+              </div>
+              <span class="text-xs text-slate-500 w-8 text-right">\${fpct}%</span>
+            </div>
+          </td>
+          <td class="px-4 py-3 text-slate-500 text-xs">\${lastSent}</td>
+        </tr>
+      \`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('eq-tbody').innerHTML =
+      '<tr><td colspan="4" class="px-4 py-4 text-red-400">' + esc(e.message) + '</td></tr>';
+  }
+}
+
 // Close modal on backdrop click
 document.getElementById('modal-del').addEventListener('click', e => { if (e.target === e.currentTarget) closeDelModal(); });
 document.getElementById('modal-deprov').addEventListener('click', e => { if (e.target === e.currentTarget) closeDeprovModal(); });
@@ -749,6 +897,109 @@ const server = createServer(async (req, res) => {
       res.end();
     });
     return;
+  }
+
+  // ── POST /api/email/send — proxy autenticado por FAMILY_TOKEN ────────────
+  if (path === '/api/email/send' && req.method === 'POST') {
+    const bearerToken = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    const families    = loadFamilies();
+    const family      = families.find(f => f.familyToken === bearerToken && f.status !== 'deleted');
+
+    if (!family) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'invalid_token' }));
+    }
+
+    const q  = loadQuota();
+    const fq = q.families[family.subdomain] || { count: 0 };
+
+    if (fq.count >= FAMILY_QUOTA) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        ok: false, error: 'quota_exceeded',
+        message: `Limite de ${FAMILY_QUOTA} e-mails/mês atingido para esta família`,
+      }));
+    }
+    if ((q.total || 0) >= TOTAL_QUOTA) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        ok: false, error: 'total_quota_exceeded',
+        message: `Cota global de ${TOTAL_QUOTA} e-mails/mês atingida`,
+      }));
+    }
+
+    const body = await readBody(req);
+    const { to, subject, html, from } = body;
+    if (!to || !subject || !html) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'to, subject, html required' }));
+    }
+
+    const resendKey = ENV.RESEND_API_KEY;
+    if (!resendKey) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'resend_not_configured' }));
+    }
+
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: from || `MKS Finanças <financas@${BASE_DOMAIN}>`,
+          to: Array.isArray(to) ? to : [to],
+          subject,
+          html,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.message || `Resend HTTP ${r.status}`);
+
+      trackEmailSent(family.subdomain);
+      const updQ  = loadQuota();
+      const updFQ = updQ.families[family.subdomain] || { count: 1 };
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        ok: true,
+        messageId: data.id,
+        quota: {
+          familyUsed:      updFQ.count,
+          familyLimit:     FAMILY_QUOTA,
+          familyRemaining: FAMILY_QUOTA - updFQ.count,
+          totalUsed:       updQ.total,
+          totalLimit:      TOTAL_QUOTA,
+          totalRemaining:  TOTAL_QUOTA - updQ.total,
+        },
+      }));
+    } catch (e) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'send_failed', message: e.message }));
+    }
+  }
+
+  // ── GET /api/email/quota — admin session ──────────────────────────────────
+  if (path === '/api/email/quota' && req.method === 'GET') {
+    const q        = loadQuota();
+    const families = loadFamilies().filter(f => f.status !== 'deleted');
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      month: q.month,
+      total: { used: q.total || 0, limit: TOTAL_QUOTA, remaining: TOTAL_QUOTA - (q.total || 0) },
+      families: families.map(f => {
+        const fq = q.families[f.subdomain] || { count: 0, lastSent: null };
+        return {
+          subdomain: f.subdomain,
+          name:      f.name,
+          used:      fq.count,
+          limit:     FAMILY_QUOTA,
+          remaining: FAMILY_QUOTA - fq.count,
+          lastSent:  fq.lastSent,
+        };
+      }),
+    }));
   }
 
   // ── 404 ───────────────────────────────────────────────────────────────────
