@@ -146,3 +146,18 @@ export interface FamilyMember {
   avatarColor: string;
   createdAt: string;
 }
+
+export interface InstallmentGroup {
+  id: string;
+  description: string;
+  totalInCents: number;
+  installmentCount: number;
+  installmentAmountInCents: number;
+  category: string;
+  accountId: string | null;
+  creditCardId: string | null;
+  memberId: string | null;
+  startDate: string;
+  createdAt: string;
+  paidCount: number;
+}

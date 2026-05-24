@@ -19,7 +19,8 @@ import {
   X,
   LogOut,
   Users,
-  Tag
+  Tag,
+  Layers
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -33,6 +34,8 @@ import AnalyticsModule from './components/AnalyticsModule';
 import NotificationsModule from './components/NotificationsModule';
 import FamilyModule from './components/FamilyModule';
 import CategoriesModule from './components/CategoriesModule';
+import InstallmentsModule from './components/InstallmentsModule';
+import HealthReport from './components/HealthReport';
 import AIAdvisor from './components/AIAdvisor';
 import LoginScreen from './components/LoginScreen';
 
@@ -49,10 +52,11 @@ import {
   CreditCard,
   Invoice,
   Recurrence,
-  FamilyMember
+  FamilyMember,
+  InstallmentGroup
 } from './types';
 
-type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES';
+type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS';
 
 export default function App() {
   // Navigation tabs
@@ -82,6 +86,7 @@ export default function App() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [installmentGroups, setInstallmentGroups] = useState<InstallmentGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -102,6 +107,7 @@ export default function App() {
         setInvoices(data.invoices || []);
         setRecurrences(data.recurrences || []);
         setFamilyMembers(data.familyMembers || []);
+        setInstallmentGroups(data.installmentGroups || []);
         if (data.chatHistory && data.chatHistory.length > 0) {
           setChatHistory(data.chatHistory);
         }
@@ -519,6 +525,7 @@ export default function App() {
     setInvoices([]);
     setRecurrences([]);
     setFamilyMembers([]);
+    setInstallmentGroups([]);
   };
 
   const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
@@ -573,6 +580,29 @@ export default function App() {
     return false;
   };
 
+  const handleAddInstallment = async (data: {
+    description: string; totalInCents: number; installmentCount: number;
+    startDate: string; accountId?: string; creditCardId?: string; category: string; memberId?: string;
+  }): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/installments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleCancelInstallment = async (groupId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/installments/${groupId}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
   // Nav configuration
   const sidebarNavItems: { id: TabType; label: string; icon: React.ElementType; badge?: number }[] = [
     { id: 'DASHBOARD',    label: 'Estatísticas Gerais',         icon: Building2 },
@@ -584,8 +614,9 @@ export default function App() {
     { id: 'BUDGETS',      label: 'Módulo 6: Planejamento',      icon: Target },
     { id: 'ANALYTICS',    label: 'Módulo 7: Relatórios',        icon: BarChart3 },
     { id: 'NOTIFICATIONS',label: 'Módulo 8: Notificações',      icon: Bell, badge: unreadAlertsCount },
-    { id: 'FAMILY',       label: 'Módulo 9: Família',           icon: Users },
-    { id: 'CATEGORIES',   label: 'Módulo 10: Categorias',       icon: Tag },
+    { id: 'FAMILY',        label: 'Módulo 9: Família',           icon: Users },
+    { id: 'CATEGORIES',    label: 'Módulo 10: Categorias',       icon: Tag },
+    { id: 'INSTALLMENTS',  label: 'Módulo 11: Parcelamentos',    icon: Layers },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -792,6 +823,14 @@ export default function App() {
                 {/* 2 Blocks of analytical summaries */}
                 <div className="xl:col-span-2 space-y-6">
                   
+                  {/* Health Score Report */}
+                  <HealthReport
+                    transactions={transactions}
+                    budgets={budgets}
+                    goals={goals}
+                    accounts={accounts}
+                  />
+
                   {/* Miniature Analytics preview */}
                   <AnalyticsModule
                     accounts={accounts}
@@ -1051,6 +1090,17 @@ export default function App() {
               onAddCategory={handleAddCategory}
               onEditCategory={handleEditCategory}
               onDeleteCategory={handleDeleteCategory}
+            />
+          )}
+
+          {activeTab === 'INSTALLMENTS' && (
+            <InstallmentsModule
+              installmentGroups={installmentGroups}
+              accounts={accounts}
+              members={familyMembers}
+              categories={categories}
+              onAddInstallment={handleAddInstallment}
+              onCancelInstallment={handleCancelInstallment}
             />
           )}
 

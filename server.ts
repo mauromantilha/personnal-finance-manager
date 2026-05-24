@@ -23,7 +23,8 @@ import {
   CreditCard,
   Invoice,
   Recurrence,
-  FamilyMember
+  FamilyMember,
+  InstallmentGroup
 } from './src/types';
 import {
   INITIAL_ACCOUNTS,
@@ -200,6 +201,14 @@ function mapChat(r: any): ChatMessage {
 }
 function mapFamilyMember(r: any): FamilyMember {
   return { id: r.id, name: r.name, avatarColor: r.avatar_color, createdAt: r.created_at };
+}
+function mapInstallmentGroup(r: any, paidCount: number): InstallmentGroup {
+  return {
+    id: r.id, description: r.description, totalInCents: r.total_in_cents,
+    installmentCount: r.installment_count, installmentAmountInCents: r.installment_amount_in_cents,
+    category: r.category, accountId: r.account_id || null, creditCardId: r.credit_card_id || null,
+    memberId: r.member_id || null, startDate: r.start_date, createdAt: r.created_at, paidCount,
+  };
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -488,7 +497,7 @@ async function startServer() {
       await processRecurrences();
       await recalculateBudgets();
       await generateProactiveAlerts();
-      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers] = await Promise.all([
+      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, igRows, igCounts] = await Promise.all([
         d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
         d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
         d1q<any>('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction)),
@@ -501,8 +510,12 @@ async function startServer() {
         d1q<any>('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice)),
         d1q<any>('SELECT * FROM recurrences WHERE is_active = 1 ORDER BY day_of_month ASC').then(r => r.map(mapRecurrence)),
         d1q<any>('SELECT * FROM family_members ORDER BY created_at ASC').then(r => r.map(mapFamilyMember)),
+        d1q<any>('SELECT * FROM installment_groups ORDER BY start_date DESC'),
+        d1q<any>(`SELECT installment_group_id, COUNT(*) as cnt FROM transactions WHERE installment_group_id IS NOT NULL AND date <= date('now') GROUP BY installment_group_id`),
       ]);
-      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers });
+      const paidMap = Object.fromEntries(igCounts.map((r: any) => [r.installment_group_id, r.cnt]));
+      const installmentGroups = igRows.map((r: any) => mapInstallmentGroup(r, paidMap[r.id] || 0));
+      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, installmentGroups });
     } catch (e: any) {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -1377,6 +1390,107 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
       const rows = await d1q('SELECT id FROM categories WHERE id = ?', [id]);
       if (!rows.length) return res.status(404).json({ error: 'Categoria não encontrada.' });
       await d1q('UPDATE categories SET name=?,icon=?,color=? WHERE id=?', [name.trim(), icon || '📦', color || '#6B7280', id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── INSTALLMENTS ───────────────────────────────────────────────────────────
+
+  app.get('/api/installments', async (_req, res) => {
+    try {
+      const [rows, counts] = await Promise.all([
+        d1q<any>('SELECT * FROM installment_groups ORDER BY start_date DESC'),
+        d1q<any>(`SELECT installment_group_id, COUNT(*) as cnt FROM transactions WHERE installment_group_id IS NOT NULL AND date <= date('now') GROUP BY installment_group_id`),
+      ]);
+      const paidMap = Object.fromEntries(counts.map((r: any) => [r.installment_group_id, r.cnt]));
+      res.json(rows.map((r: any) => mapInstallmentGroup(r, paidMap[r.id] || 0)));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/installments', async (req, res) => {
+    const { description, totalInCents, installmentCount, startDate, accountId, creditCardId, category, memberId } = req.body;
+    if (!description || !totalInCents || !installmentCount || !startDate)
+      return res.status(400).json({ error: 'description, totalInCents, installmentCount e startDate são obrigatórios.' });
+    const total = parseInt(totalInCents, 10);
+    const count = Math.max(2, Math.min(48, parseInt(installmentCount, 10)));
+    if (isNaN(total) || total <= 0) return res.status(400).json({ error: 'totalInCents inválido.' });
+
+    const groupId = `ig-${Date.now()}`;
+    const installmentAmount = Math.round(total / count);
+    const cat = category || 'Compras';
+
+    try {
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [
+        {
+          sql: 'INSERT INTO installment_groups (id,description,total_in_cents,installment_count,installment_amount_in_cents,category,account_id,credit_card_id,member_id,start_date) VALUES (?,?,?,?,?,?,?,?,?,?)',
+          params: [groupId, description.trim(), total, count, installmentAmount, cat, accountId || null, creditCardId || null, memberId || null, startDate]
+        }
+      ];
+
+      for (let i = 0; i < count; i++) {
+        const d = new Date(startDate + 'T12:00:00');
+        d.setMonth(d.getMonth() + i);
+        const txDate = d.toISOString().split('T')[0];
+        const txId = `tx-inst-${groupId}-${i + 1}`;
+        const desc = `${description.trim()} (${i + 1}/${count})`;
+
+        if (creditCardId) {
+          const cardRows = await d1q<any>('SELECT * FROM credit_cards WHERE id = ?', [creditCardId]);
+          if (cardRows.length) {
+            const card = mapCreditCard(cardRows[0]);
+            const instMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const invId = `inv-${creditCardId}-${instMonth.replace('-', '')}`;
+            const dueYear = d.getMonth() + 1 === 12 ? d.getFullYear() + 1 : d.getFullYear();
+            const dueMonth = ((d.getMonth() + 1) % 12) + 1;
+            const dueDate = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(card.dueDay).padStart(2, '0')}`;
+            stmts.push({ sql: `INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))`, params: [invId, creditCardId, instMonth, dueDate] });
+            stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [installmentAmount, invId] });
+            stmts.push({
+              sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id,member_id) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?,?)',
+              params: [txId, installmentAmount, txDate, 'DES', cat, desc, creditCardId, invId, i + 1, count, groupId, memberId || null]
+            });
+          }
+        } else {
+          stmts.push({
+            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,installment_number,installment_total,installment_group_id,member_id) VALUES (?,?,?,?,?,?,?,0,?,?,?,?)',
+            params: [txId, installmentAmount, txDate, 'DES', cat, desc, accountId || null, i + 1, count, groupId, memberId || null]
+          });
+          // Debit account only for past/current installments
+          if (accountId && new Date(txDate) <= new Date()) {
+            stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [installmentAmount, accountId] });
+          }
+        }
+      }
+
+      await d1exec(stmts);
+      await recalculateBudgets();
+      res.status(201).json({ id: groupId });
+    } catch (e: any) { console.error('[D1]', e.message); res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/installments/:groupId', async (req, res) => {
+    const { groupId } = req.params;
+    try {
+      const rows = await d1q<any>('SELECT id FROM installment_groups WHERE id = ?', [groupId]);
+      if (!rows.length) return res.status(404).json({ error: 'Grupo não encontrado.' });
+      const todayStr = new Date().toISOString().split('T')[0];
+      // Reverse account balance for future installments about to be deleted
+      const futureTxs = await d1q<any>(
+        'SELECT * FROM transactions WHERE installment_group_id = ? AND date > ?', [groupId, todayStr]
+      );
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+      for (const tx of futureTxs) {
+        if (tx.account_id && tx.type === 'DES') {
+          stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [tx.amount_in_cents, tx.account_id] });
+        }
+        if (tx.invoice_id) {
+          stmts.push({ sql: 'UPDATE invoices SET total_in_cents = MAX(0, total_in_cents - ?) WHERE id = ?', params: [tx.amount_in_cents, tx.invoice_id] });
+        }
+      }
+      stmts.push({ sql: 'DELETE FROM transactions WHERE installment_group_id = ? AND date > ?', params: [groupId, todayStr] });
+      stmts.push({ sql: 'DELETE FROM installment_groups WHERE id = ?', params: [groupId] });
+      await d1exec(stmts);
+      await recalculateBudgets();
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
