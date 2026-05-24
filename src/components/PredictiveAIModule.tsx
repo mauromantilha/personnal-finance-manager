@@ -48,6 +48,7 @@ interface PlanoAcao {
   motivo: string;
 }
 interface AnalysisResult {
+  insufficient_data?: boolean;
   resumo_executivo: string;
   score_saude: ScoreSaude;
   alertas: Alerta[];
@@ -404,9 +405,11 @@ export default function PredictiveAIModule() {
               </div>
 
               {/* Score + Resumo */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <HealthGauge score={result.score_saude.valor} classificacao={result.score_saude.classificacao} />
-                <div className="md:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-3">
+              <div className={`grid gap-4 ${result.insufficient_data ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-3'}`}>
+                {!result.insufficient_data && (
+                  <HealthGauge score={result.score_saude.valor} classificacao={result.score_saude.classificacao} />
+                )}
+                <div className={`${result.insufficient_data ? '' : 'md:col-span-2'} bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-3`}>
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
                     <BrainCircuit className="w-3.5 h-3.5 text-indigo-500" /> Resumo Executivo
                   </h3>

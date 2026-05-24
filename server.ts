@@ -1917,6 +1917,21 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
         d1q<any>(`SELECT category, type, SUM(amount_in_cents) as total FROM transactions WHERE date >= ? AND type = 'DES' GROUP BY category ORDER BY total DESC LIMIT 10`, [since]),
       ]);
 
+      const hasData = accounts.length > 0 || monthTxs.length > 0 || prevMonthTxs.length > 0 || investments.length > 0;
+      if (!hasData) {
+        return res.json({
+          insufficient_data: true,
+          resumo_executivo: 'Nenhum dado financeiro encontrado. Cadastre contas e registre movimentações para receber a análise.',
+          score_saude: { valor: 0, classificacao: 'Sem dados', justificativa: 'Dados insuficientes — adicione contas, transações ou investimentos.' },
+          alertas: [{ nivel: 'INFO', titulo: 'Sistema sem dados', descricao: 'Não há contas, transações ou investimentos registrados para análise.', acao_sugerida: 'Acesse "Módulo 1: Contas & Ledger" para começar.' }],
+          analise_gastos: { resumo: 'Dados insuficientes.', ponto_atencao: null, top_categorias: [] },
+          analise_investimentos: { resumo: 'Dados insuficientes.', diversificacao: 'Sem investimentos', pontos: [], sugestoes: [] },
+          recomendacoes: [],
+          plano_acao: [],
+          generatedAt: now.toISOString(),
+        });
+      }
+
       const brl = (c: number) => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
       const pct = (a: number, b: number) => b > 0 ? `${((a / b) * 100).toFixed(1)}%` : 'N/A';
 
@@ -2028,8 +2043,9 @@ ESTRUTURA JSON OBRIGATÓRIA DE RETORNO:
 
       if (!client) {
         return res.json({
-          resumo_executivo: `Patrimônio líquido atual: ${brl(netWorth)}. Configure GROQ_API_KEY no .env para análise completa com IA.`,
-          score_saude: { valor: 50, classificacao: 'Regular', justificativa: 'IA não configurada — análise indisponível.' },
+          insufficient_data: true,
+          resumo_executivo: `Patrimônio líquido: ${brl(netWorth)}. Configure GROQ_API_KEY no .env para análise completa com IA.`,
+          score_saude: { valor: 0, classificacao: 'Sem dados', justificativa: 'IA não configurada — score indisponível.' },
           alertas: [{ nivel: 'INFO', titulo: 'IA não configurada', descricao: 'Adicione GROQ_API_KEY ao .env para habilitar análise preditiva.', acao_sugerida: 'Configure a variável de ambiente GROQ_API_KEY.' }],
           analise_gastos: { resumo: 'IA não disponível.', ponto_atencao: null, top_categorias: [] },
           analise_investimentos: { resumo: 'IA não disponível.', diversificacao: 'Sem investimentos', pontos: [], sugestoes: [] },
