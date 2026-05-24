@@ -40,6 +40,7 @@ import InstallmentsModule from './components/InstallmentsModule';
 import InvestmentsModule from './components/InvestmentsModule';
 import HealthReport from './components/HealthReport';
 import PredictiveAIModule from './components/PredictiveAIModule';
+import MarketWidget from './components/MarketWidget';
 import LoginScreen from './components/LoginScreen';
 
 import {
@@ -917,6 +918,9 @@ export default function App() {
                   Ver Relatórios
                 </button>
               </div>
+
+              {/* Market widget — full width */}
+              <MarketWidget />
 
               {/* Main stats layout */}
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

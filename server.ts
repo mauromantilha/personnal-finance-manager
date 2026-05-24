@@ -2059,6 +2059,225 @@ ESTRUTURA JSON OBRIGATÓRIA DE RETORNO:
     }
   });
 
+  // ── FINANCIAL CHAT ────────────────────────────────────────────────────────
+
+  app.post('/api/ai/financial-chat', async (req, res) => {
+    const { message, history = [] } = req.body;
+    if (!message) return res.status(400).json({ error: 'Mensagem obrigatória.' });
+    const client = getGroqClient();
+    if (!client) return res.json({ reply: 'Configure GROQ_API_KEY no .env para habilitar o chat.' });
+
+    try {
+      const now = new Date();
+      const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const [accounts, investments, creditCards, invoices, recurrences, monthTxs, budgets] = await Promise.all([
+        d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
+        d1q<any>('SELECT * FROM investments').then(r => r.map(mapInvestment)),
+        d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1').then(r => r.map(mapCreditCard)),
+        d1q<any>('SELECT * FROM invoices WHERE month = ?', [monthPrefix]).then(r => r.map(mapInvoice)),
+        d1q<any>('SELECT * FROM recurrences WHERE is_active = 1 AND type = ?', ['DES']).then(r => r.map(mapRecurrence)),
+        d1q<any>('SELECT * FROM transactions WHERE date LIKE ?', [`${monthPrefix}%`]).then(r => r.map(mapTransaction)),
+        d1q<any>('SELECT * FROM budgets').then(r => r.map(mapBudget)),
+      ]);
+
+      const brl = (c: number) => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+      const netWorth = accounts.reduce((s: number, a: FinancialAccount) => s + a.balanceInCents, 0);
+      const monthIncome = monthTxs.filter((t: Transaction) => t.type === 'REC').reduce((s: number, t: Transaction) => s + t.amountInCents, 0);
+      const monthExpense = monthTxs.filter((t: Transaction) => t.type === 'DES').reduce((s: number, t: Transaction) => s + t.amountInCents, 0);
+      const savingsRate = monthIncome > 0 ? ((monthIncome - monthExpense) / monthIncome) * 100 : 0;
+      const totalInvested = investments.reduce((s: number, i: Investment) => s + i.investedInCents, 0);
+      const totalInvestValue = investments.reduce((s: number, i: Investment) => s + i.currentValueInCents, 0);
+      const creditUsed = creditCards.reduce((s: number, c: CreditCard) => {
+        const inv = invoices.find((i: Invoice) => i.creditCardId === c.id);
+        return s + (inv?.totalInCents || 0);
+      }, 0);
+      const creditLimit = creditCards.reduce((s: number, c: CreditCard) => s + c.limitInCents, 0);
+      const fixedCosts = recurrences.reduce((s: number, r: Recurrence) => s + r.amountInCents, 0);
+      const overBudgets = budgets.filter((b: CategoryBudget) => b.spentInCents >= b.limitInCents).map((b: CategoryBudget) => b.category);
+
+      const userSummary = `=== POSIÇÃO FINANCEIRA DO USUÁRIO (${now.toLocaleDateString('pt-BR')}) ===
+Patrimônio líquido: ${brl(netWorth)}
+Receita mês atual: ${brl(monthIncome)}
+Despesa mês atual: ${brl(monthExpense)}
+Saldo do mês: ${brl(monthIncome - monthExpense)}
+Taxa de poupança: ${savingsRate.toFixed(1)}%
+Custos fixos mensais: ${brl(fixedCosts)}
+Investimentos — aplicado: ${brl(totalInvested)} | valor atual: ${brl(totalInvestValue)}${totalInvested > 0 ? ` | rentab.: ${(((totalInvestValue - totalInvested) / totalInvested) * 100).toFixed(2)}%` : ''}
+Investimentos por classe: ${investments.length === 0 ? 'nenhum registrado' : [...new Set(investments.map((i: Investment) => i.assetClass))].map((cls: string) => { const tot = investments.filter((i: Investment) => i.assetClass === cls).reduce((s: number, i: Investment) => s + i.currentValueInCents, 0); return `${cls} (${brl(tot)})`; }).join(', ')}
+Cartões de crédito: limite ${brl(creditLimit)} | fatura atual ${brl(creditUsed)} | utilização ${creditLimit > 0 ? ((creditUsed / creditLimit) * 100).toFixed(1) : 0}%
+Orçamentos estourados este mês: ${overBudgets.length === 0 ? 'nenhum' : overBudgets.join(', ')}
+Contas bancárias: ${accounts.map((a: FinancialAccount) => `${a.name} (${brl(a.balanceInCents)})`).join(', ') || 'nenhuma'}`;
+
+      const systemPrompt = `Você é um Assessor Financeiro Especialista e CFP (Certified Financial Planner) com profundo conhecimento do mercado financeiro brasileiro. Seu nome é MKS Finance AI.
+
+SUAS ESPECIALIDADES:
+- Planejamento financeiro pessoal e patrimonial
+- Renda fixa: Tesouro Direto, CDB, LCI/LCA, debêntures, CRI/CRA, FIDC
+- Renda variável: ações B3, ETFs, BDRs, análise fundamentalista e técnica
+- Fundos de investimento: FIIs, fundos de ações, multimercado, renda fixa
+- Previdência: PGBL, VGBL, regime de tributação
+- Câmbio, macroeconomia, política monetária (Copom/Selic), inflação (IPCA/IGPM)
+- Mercado de capitais: IPO, follow-on, debêntures, CRI/CRA
+- Tributação de investimentos: IR, come-cotas, isenções
+- Finanças comportamentais e educação financeira
+
+DADOS REAIS DO USUÁRIO (use sempre que relevante):
+${userSummary}
+
+REGRAS:
+1. Responda em Português Brasileiro, tom profissional mas acessível.
+2. Quando referenciar dados do usuário, cite os números reais acima.
+3. Para informações de mercado (cotações, taxas atuais), deixe claro que são dados do seu treinamento — sugira verificar fontes atualizadas.
+4. Seja específico: evite respostas genéricas. Adapte ao perfil financeiro real do usuário.
+5. Se a pergunta não tiver relação com finanças/economia, redirecione gentilmente.
+6. Máximo de 400 palavras por resposta. Se precisar de mais, estruture em tópicos.`;
+
+      const messages = [
+        { role: 'system' as const, content: systemPrompt },
+        ...history.slice(-12).map((h: any) => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+        { role: 'user' as const, content: message },
+      ];
+
+      const completion = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        temperature: 0.5,
+        max_tokens: 1500,
+      });
+
+      res.json({ reply: completion.choices[0]?.message?.content || 'Não foi possível gerar resposta.' });
+    } catch (e: any) {
+      console.error('[FINANCIAL CHAT]', e.message);
+      res.status(500).json({ error: 'Erro no chat financeiro.', details: e.message });
+    }
+  });
+
+  // ── MARKET DATA ────────────────────────────────────────────────────────────
+
+  const marketCache = new Map<string, { data: any; expires: number }>();
+
+  function getCached<T>(key: string): T | null {
+    const entry = marketCache.get(key);
+    if (entry && entry.expires > Date.now()) return entry.data as T;
+    return null;
+  }
+  function setCache(key: string, data: any, ttlMs: number) {
+    marketCache.set(key, { data, expires: Date.now() + ttlMs });
+  }
+
+  function parseRSS(xml: string): { title: string; link: string; pubDate: string; description: string; source: string }[] {
+    const items: { title: string; link: string; pubDate: string; description: string; source: string }[] = [];
+    const sourceMatch = xml.match(/<channel>[\s\S]*?<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
+    const sourceName = sourceMatch?.[1]?.replace(/<[^>]+>/g, '').trim() || 'Notícia';
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = itemRegex.exec(xml)) !== null && items.length < 8) {
+      const block = m[1];
+      const title = (block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '').trim();
+      const link = (block.match(/<link>([\s\S]*?)<\/link>/i)?.[1] || block.match(/<guid[^>]*>(https?:\/\/[^\s<]+)<\/guid>/i)?.[1] || '').trim();
+      const pubDate = (block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1] || '').trim();
+      const description = (block.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i)?.[1] || '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/gi, ' ').trim().slice(0, 180);
+      if (title && link) items.push({ title, link, pubDate, description, source: sourceName });
+    }
+    return items;
+  }
+
+  app.get('/api/market/quotes', async (_req, res) => {
+    const cached = getCached<any>('quotes');
+    if (cached) return res.json(cached);
+    try {
+      const tickers = 'IBOV,PETR4,VALE3,ITUB4,BBDC4,WEGE3,ABEV3';
+      const r = await fetch(`https://brapi.dev/api/quote/${tickers}?range=1d&interval=1d&fundamental=false`, {
+        headers: { 'User-Agent': 'MKSFinance/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) throw new Error(`brapi ${r.status}`);
+      const data = await r.json();
+      const quotes = (data.results || []).map((q: any) => ({
+        symbol: q.symbol,
+        name: q.shortName || q.longName || q.symbol,
+        price: q.regularMarketPrice,
+        change: q.regularMarketChangePercent,
+        changeAbs: q.regularMarketChange,
+        updatedAt: q.regularMarketTime,
+      }));
+      const payload = { quotes, fetchedAt: new Date().toISOString() };
+      setCache('quotes', payload, 5 * 60 * 1000);
+      res.json(payload);
+    } catch (e: any) {
+      const stale = marketCache.get('quotes');
+      if (stale) return res.json({ ...stale.data, stale: true });
+      console.error('[MARKET/QUOTES]', e.message);
+      res.json({ quotes: [], fetchedAt: null, error: e.message });
+    }
+  });
+
+  app.get('/api/market/rates', async (_req, res) => {
+    const cached = getCached<any>('rates');
+    if (cached) return res.json(cached);
+    try {
+      const [currencyRes, selicRes] = await Promise.allSettled([
+        fetch('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,BTC-BRL', { signal: AbortSignal.timeout(6000) }),
+        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json', { signal: AbortSignal.timeout(6000) }),
+      ]);
+
+      let currencies: any = {};
+      if (currencyRes.status === 'fulfilled' && currencyRes.value.ok) {
+        const d = await currencyRes.value.json();
+        currencies = {
+          USD: { bid: parseFloat(d.USDBRL?.bid || '0'), pctChange: parseFloat(d.USDBRL?.pctChange || '0') },
+          EUR: { bid: parseFloat(d.EURBRL?.bid || '0'), pctChange: parseFloat(d.EURBRL?.pctChange || '0') },
+          BTC: { bid: parseFloat(d.BTCBRL?.bid || '0'), pctChange: parseFloat(d.BTCBRL?.pctChange || '0') },
+        };
+      }
+
+      let selic = null;
+      if (selicRes.status === 'fulfilled' && selicRes.value.ok) {
+        const d = await selicRes.value.json();
+        selic = parseFloat(d[0]?.valor?.replace(',', '.') || '0');
+      }
+
+      const payload = { currencies, selic, fetchedAt: new Date().toISOString() };
+      setCache('rates', payload, 5 * 60 * 1000);
+      res.json(payload);
+    } catch (e: any) {
+      const stale = marketCache.get('rates');
+      if (stale) return res.json({ ...stale.data, stale: true });
+      console.error('[MARKET/RATES]', e.message);
+      res.json({ currencies: {}, selic: null, fetchedAt: null, error: e.message });
+    }
+  });
+
+  app.get('/api/market/news', async (_req, res) => {
+    const cached = getCached<any>('news');
+    if (cached) return res.json(cached);
+    try {
+      const feeds = [
+        { url: 'https://www.infomoney.com.br/feed/', name: 'InfoMoney' },
+        { url: 'https://g1.globo.com/rss/g1/economia/', name: 'G1 Economia' },
+      ];
+      const results = await Promise.allSettled(
+        feeds.map(f => fetch(f.url, { headers: { 'User-Agent': 'MKSFinance/1.0' }, signal: AbortSignal.timeout(8000) })
+          .then(r => r.text()).then(xml => parseRSS(xml)))
+      );
+      const allItems: any[] = [];
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          r.value.forEach(item => allItems.push({ ...item, source: feeds[i].name }));
+        }
+      });
+      allItems.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+      const payload = { items: allItems.slice(0, 10), fetchedAt: new Date().toISOString() };
+      setCache('news', payload, 15 * 60 * 1000);
+      res.json(payload);
+    } catch (e: any) {
+      const stale = marketCache.get('news');
+      if (stale) return res.json({ ...stale.data, stale: true });
+      console.error('[MARKET/NEWS]', e.message);
+      res.json({ items: [], fetchedAt: null, error: e.message });
+    }
+  });
+
   // ── CATEGORIZE ─────────────────────────────────────────────────────────────
 
   app.post('/api/groq/categorize', async (req, res) => {
