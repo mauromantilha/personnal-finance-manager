@@ -695,6 +695,32 @@ async function startServer() {
     res.json({ received: true });
   });
 
+  // ── HEALTH CHECK (public — NOC use) ──────────────────────────────────────
+  app.get('/api/health', async (_req, res) => {
+    let db = false;
+    let storage = false;
+    try {
+      await d1q('SELECT 1');
+      db = true;
+    } catch {}
+    try {
+      const cfToken = await getCFToken();
+      const r = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}`,
+        { headers: { Authorization: `Bearer ${cfToken}` }, signal: AbortSignal.timeout(5000) }
+      );
+      if (r.ok) storage = true;
+    } catch {}
+    res.json({
+      ok: db && storage,
+      db,
+      storage,
+      uptime: Math.floor(process.uptime()),
+      ts: new Date().toISOString(),
+      version: '1.0',
+    });
+  });
+
   app.use('/api', requireAuth);
 
   // ── GET ALL DATA ───────────────────────────────────────────────────────────
