@@ -26,7 +26,7 @@ import {
   Paperclip,
   Eye
 } from 'lucide-react';
-import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard } from '../types';
+import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard, FamilyMember } from '../types';
 
 interface CoreFinanceModuleProps {
   accounts: FinancialAccount[];
@@ -41,6 +41,7 @@ interface CoreFinanceModuleProps {
   onDeleteTransaction: (id: string) => Promise<boolean>;
   onImportCSV: (csv: string, accountId: string) => Promise<{ imported: number; errors: string[] }>;
   onAnalyzeDocument: (base64: string, mimeType: string) => Promise<{ description?: string; amountInCents?: number; dueDate?: string; documentKey?: string }>;
+  members: FamilyMember[];
 }
 
 type PeriodFilter = 'this_month' | 'last_month' | '30d' | '90d' | 'all';
@@ -60,6 +61,7 @@ export default function CoreFinanceModule({
   onDeleteTransaction,
   onImportCSV,
   onAnalyzeDocument,
+  members,
 }: CoreFinanceModuleProps) {
 
   // ── Account form state ──────────────────────────────────────────────────────
@@ -132,12 +134,16 @@ export default function CoreFinanceModule({
     if (result.imported > 0) { fb(`${result.imported} lançamentos importados com sucesso!`, 'success'); setCsvText(''); }
   };
 
+  // ── Transaction member ──────────────────────────────────────────────────────
+  const [txMemberId, setTxMemberId] = useState('');
+
   // ── Ledger filters ──────────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'REC' | 'DES' | 'TRANS'>('all');
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('this_month');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [accountFilter, setAccountFilter] = useState('');
+  const [memberFilter, setMemberFilter] = useState('');
   const [page, setPage] = useState(1);
 
   // ── Feedback ────────────────────────────────────────────────────────────────
@@ -190,6 +196,8 @@ export default function CoreFinanceModule({
       if (categoryFilter && tx.category !== categoryFilter) return false;
       if (accountFilter && tx.accountId !== accountFilter) return false;
       if (search && !tx.description.toLowerCase().includes(search.toLowerCase())) return false;
+      if (memberFilter === '__none__' && tx.memberId) return false;
+      if (memberFilter && memberFilter !== '__none__' && tx.memberId !== memberFilter) return false;
       if (periodFilter !== 'all') {
         if (periodBounds.from && tx.date < periodBounds.from) return false;
         if (periodBounds.to && tx.date > periodBounds.to) return false;
@@ -267,6 +275,7 @@ export default function CoreFinanceModule({
     const cat = txType === 'REC' ? (txCategory || 'Receita') : (txCategory || defaultCategory);
     const payload: any = { amountInCents, date: txDate, type: txType, category: cat, description: txDesc };
     if (pendingDocKey) payload.documentKey = pendingDocKey;
+    if (txMemberId) payload.memberId = txMemberId;
     if (useCard && txType === 'DES') { payload.creditCardId = txCreditCardId; payload.installments = parseInt(txInstallments, 10) || 1; }
     else { payload.accountId = txOriginAcc; if (txType === 'TRANS') payload.destinationAccountId = txDestAcc; }
     const result = await onAddTransaction(payload);
@@ -567,6 +576,16 @@ export default function CoreFinanceModule({
                 <input type="text" placeholder="Ex: Supermercado Pão de Açúcar" value={txDesc} onChange={e => setTxDesc(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500" />
               </div>
 
+              {members.length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Membro da família</label>
+                  <select value={txMemberId} onChange={e => setTxMemberId(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold">
+                    <option value="">— Sem atribuição —</option>
+                    {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+              )}
+
               <div className="flex justify-end pt-1">
                 <button type="submit" className="w-full md:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-md flex items-center justify-center gap-1">
                   Confirmar Lançamento
@@ -762,6 +781,22 @@ export default function CoreFinanceModule({
             </div>
           )}
 
+          {/* Member filter */}
+          {members.length > 0 && (
+            <div className="relative">
+              <select
+                value={memberFilter}
+                onChange={e => { setMemberFilter(e.target.value); setPage(1); }}
+                className="text-[10px] font-bold border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none appearance-none pr-7 text-slate-600"
+              >
+                <option value="">Todos os membros</option>
+                {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                <option value="__none__">Sem membro</option>
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none" />
+            </div>
+          )}
+
           <span className="text-[10px] text-slate-400 font-medium ml-auto">{filtered.length} lançamentos</span>
         </div>
 
@@ -840,6 +875,7 @@ export default function CoreFinanceModule({
                     <td className="py-2.5 px-3 font-semibold text-slate-500 text-[11px]">
                       {acc ? acc.name : tx.creditCardId ? '💳 Cartão' : '—'}
                       {destAcc && <span className="text-slate-400 font-normal"> → {destAcc.name}</span>}
+                      {tx.memberId && (() => { const m = members.find(mb => mb.id === tx.memberId); return m ? <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: m.avatarColor }}>{m.name.charAt(0)}</span> : null; })()}
                     </td>
                     <td className="py-2.5 px-3 text-right font-bold font-mono whitespace-nowrap">
                       {tx.type === 'REC' ? <span className="text-emerald-600">+{formatBRL(tx.amountInCents)}</span>

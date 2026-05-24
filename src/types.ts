@@ -44,6 +44,7 @@ export interface Transaction {
   installmentTotal?: number;
   installmentGroupId?: string;
   documentKey?: string;
+  memberId?: string;
 }
 
 export interface Category {
@@ -137,4 +138,11 @@ export interface ChatMessage {
   sender: 'user' | 'assistant';
   text: string;
   timestamp: string;
+}
+
+export interface FamilyMember {
+  id: string;
+  name: string;
+  avatarColor: string;
+  createdAt: string;
 }

@@ -22,7 +22,8 @@ import {
   Category,
   CreditCard,
   Invoice,
-  Recurrence
+  Recurrence,
+  FamilyMember
 } from './src/types';
 import {
   INITIAL_ACCOUNTS,
@@ -160,6 +161,7 @@ function mapTransaction(r: any): Transaction {
     installmentNumber: r.installment_number || undefined, installmentTotal: r.installment_total || undefined,
     installmentGroupId: r.installment_group_id || undefined,
     documentKey: r.document_key || undefined,
+    memberId: r.member_id || undefined,
   };
 }
 function mapCategory(r: any): Category {
@@ -195,6 +197,9 @@ function mapConnection(r: any): BankConnection {
 }
 function mapChat(r: any): ChatMessage {
   return { id: r.id, sender: r.sender, text: r.text, timestamp: r.timestamp };
+}
+function mapFamilyMember(r: any): FamilyMember {
+  return { id: r.id, name: r.name, avatarColor: r.avatar_color, createdAt: r.created_at };
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -483,7 +488,7 @@ async function startServer() {
       await processRecurrences();
       await recalculateBudgets();
       await generateProactiveAlerts();
-      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences] = await Promise.all([
+      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers] = await Promise.all([
         d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
         d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
         d1q<any>('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction)),
@@ -495,8 +500,9 @@ async function startServer() {
         d1q<any>('SELECT * FROM credit_cards WHERE is_active = 1').then(r => r.map(mapCreditCard)),
         d1q<any>('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice)),
         d1q<any>('SELECT * FROM recurrences WHERE is_active = 1 ORDER BY day_of_month ASC').then(r => r.map(mapRecurrence)),
+        d1q<any>('SELECT * FROM family_members ORDER BY created_at ASC').then(r => r.map(mapFamilyMember)),
       ]);
-      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences });
+      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers });
     } catch (e: any) {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -507,7 +513,7 @@ async function startServer() {
 
   app.post('/api/transactions', async (req, res) => {
     const { amountInCents, date, type, category, description, accountId, destinationAccountId,
-            creditCardId, installments, documentKey } = req.body;
+            creditCardId, installments, documentKey, memberId } = req.body;
     if (!amountInCents || !date || !type || !category || !description)
       return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
     if (!VALID_TX_TYPES.includes(type))
@@ -552,17 +558,17 @@ async function startServer() {
 
           const txId = numInstallments > 1 ? `${baseId}-${i + 1}` : baseId;
           stmts.push({
-            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id,document_key) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?,?)',
+            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id,document_key,member_id) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?,?,?)',
             params: [txId, instAmount, instDate.toISOString().split('T')[0], type, category,
               numInstallments > 1 ? `${description} (${i + 1}/${numInstallments})` : description,
               creditCardId, invId, numInstallments > 1 ? i + 1 : null, numInstallments > 1 ? numInstallments : null, installmentGroupId,
-              i === 0 ? (documentKey || null) : null]
+              i === 0 ? (documentKey || null) : null, i === 0 ? (memberId || null) : null]
           });
         }
       } else {
         stmts.push({
-          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced,document_key) VALUES (?,?,?,?,?,?,?,?,0,?)',
-          params: [baseId, amount, date, type, category, description, accountId, destinationAccountId || null, documentKey || null]
+          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced,document_key,member_id) VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+          params: [baseId, amount, date, type, category, description, accountId, destinationAccountId || null, documentKey || null, memberId || null]
         });
         if (type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [amount, accountId] });
         else if (type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [amount, accountId] });
@@ -1330,6 +1336,49 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
     }
 
     res.json({ imported, errors });
+  });
+
+  // ── FAMILY MEMBERS ─────────────────────────────────────────────────────────
+
+  app.get('/api/family', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT * FROM family_members ORDER BY created_at ASC');
+      res.json(rows.map(mapFamilyMember));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/family', async (req, res) => {
+    const { name, avatarColor } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name é obrigatório.' });
+    const id = `mbr-${Date.now()}`;
+    try {
+      await d1q('INSERT INTO family_members (id,name,avatar_color) VALUES (?,?,?)', [id, name.trim(), avatarColor || '#6366F1']);
+      res.status(201).json({ id });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/family/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      const txCount = await d1q<any>('SELECT COUNT(*) as cnt FROM transactions WHERE member_id = ?', [id]);
+      if ((txCount[0]?.cnt || 0) > 0) return res.status(400).json({ error: 'Não é possível excluir membro com transações associadas.' });
+      await d1q('DELETE FROM family_members WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── EDIT CATEGORY ──────────────────────────────────────────────────────────
+
+  app.put('/api/categories/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, icon, color } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name é obrigatório.' });
+    try {
+      const rows = await d1q('SELECT id FROM categories WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Categoria não encontrada.' });
+      await d1q('UPDATE categories SET name=?,icon=?,color=? WHERE id=?', [name.trim(), icon || '📦', color || '#6B7280', id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
 
   // ── AI ADVISOR ─────────────────────────────────────────────────────────────

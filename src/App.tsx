@@ -17,7 +17,9 @@ import {
   Clock,
   Menu,
   X,
-  LogOut
+  LogOut,
+  Users,
+  Tag
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -29,6 +31,8 @@ import OpenFinanceModule from './components/OpenFinanceModule';
 import BudgetsModule from './components/BudgetsModule';
 import AnalyticsModule from './components/AnalyticsModule';
 import NotificationsModule from './components/NotificationsModule';
+import FamilyModule from './components/FamilyModule';
+import CategoriesModule from './components/CategoriesModule';
 import AIAdvisor from './components/AIAdvisor';
 import LoginScreen from './components/LoginScreen';
 
@@ -44,10 +48,11 @@ import {
   Category,
   CreditCard,
   Invoice,
-  Recurrence
+  Recurrence,
+  FamilyMember
 } from './types';
 
-type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS';
+type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES';
 
 export default function App() {
   // Navigation tabs
@@ -76,6 +81,7 @@ export default function App() {
   const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -95,6 +101,7 @@ export default function App() {
         setCreditCards(data.creditCards || []);
         setInvoices(data.invoices || []);
         setRecurrences(data.recurrences || []);
+        setFamilyMembers(data.familyMembers || []);
         if (data.chatHistory && data.chatHistory.length > 0) {
           setChatHistory(data.chatHistory);
         }
@@ -511,6 +518,59 @@ export default function App() {
     setCreditCards([]);
     setInvoices([]);
     setRecurrences([]);
+    setFamilyMembers([]);
+  };
+
+  const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/family', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, avatarColor })
+      });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleDeleteFamilyMember = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/family/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleAddCategory = async (data: { name: string; icon: string; color: string; type: string; parentId?: string }): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleEditCategory = async (id: string, data: { name: string; icon: string; color: string }): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/categories/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleDeleteCategory = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/categories/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
   };
 
   // Nav configuration
@@ -524,6 +584,8 @@ export default function App() {
     { id: 'BUDGETS',      label: 'Módulo 6: Planejamento',      icon: Target },
     { id: 'ANALYTICS',    label: 'Módulo 7: Relatórios',        icon: BarChart3 },
     { id: 'NOTIFICATIONS',label: 'Módulo 8: Notificações',      icon: Bell, badge: unreadAlertsCount },
+    { id: 'FAMILY',       label: 'Módulo 9: Família',           icon: Users },
+    { id: 'CATEGORIES',   label: 'Módulo 10: Categorias',       icon: Tag },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -744,6 +806,7 @@ export default function App() {
                     transactions={transactions}
                     categories={categories}
                     creditCards={creditCards}
+                    members={familyMembers}
                     onAddTransaction={handleAddTransaction}
                     onEditTransaction={handleEditTransaction}
                     onAddAccount={handleAddAccount}
@@ -895,6 +958,7 @@ export default function App() {
               transactions={transactions}
               categories={categories}
               creditCards={creditCards}
+              members={familyMembers}
               onAddTransaction={handleAddTransaction}
               onEditTransaction={handleEditTransaction}
               onAddAccount={handleAddAccount}
@@ -969,6 +1033,24 @@ export default function App() {
               onMarkAsRead={handleMarkAlertRead}
               onMarkAllRead={handleMarkAllAlertsRead}
               onClearRead={handleClearReadAlerts}
+            />
+          )}
+
+          {activeTab === 'FAMILY' && (
+            <FamilyModule
+              members={familyMembers}
+              transactions={transactions}
+              onAddMember={handleAddFamilyMember}
+              onDeleteMember={handleDeleteFamilyMember}
+            />
+          )}
+
+          {activeTab === 'CATEGORIES' && (
+            <CategoriesModule
+              categories={categories}
+              onAddCategory={handleAddCategory}
+              onEditCategory={handleEditCategory}
+              onDeleteCategory={handleDeleteCategory}
             />
           )}
 
