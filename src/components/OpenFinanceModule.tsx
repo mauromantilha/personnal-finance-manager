@@ -3,388 +3,299 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { 
-  Network, 
-  RotateCw, 
-  Plus, 
-  CheckCircle, 
-  Clock, 
-  Smartphone, 
-  AlertTriangle, 
-  Layers, 
-  Cpu, 
-  Terminal, 
-  X,
-  CreditCard
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Network,
+  RotateCw,
+  Plus,
+  CheckCircle,
+  AlertTriangle,
+  Unlink,
+  RefreshCw,
+  ExternalLink,
+  Info,
 } from 'lucide-react';
 import { BankConnection } from '../types';
 
+declare global {
+  interface Window {
+    PluggyConnect: new (opts: {
+      connectToken: string;
+      onSuccess: (data: { item: { id: string; connector: { name: string; imageUrl?: string } } }) => void;
+      onError: (data: { message: string }) => void;
+      onClose: () => void;
+    }) => { init: () => void };
+  }
+}
+
 interface OpenFinanceModuleProps {
   connections: BankConnection[];
-  onTriggerSync: (bankName: string) => Promise<any>;
+  onConnectItem: (itemId: string, institutionName: string, logo: string) => Promise<any>;
+  onSyncItem: (itemId: string) => Promise<void>;
+  onDeleteConnection: (itemId: string) => Promise<void>;
   onRefreshAllData: () => void;
 }
 
-export default function OpenFinanceModule({ 
-  connections, 
-  onTriggerSync, 
-  onRefreshAllData 
+const PLUGGY_SDK_URL = 'https://cdn.pluggy.ai/pluggy-connect/v2.1.1/pluggy-connect.js';
+
+export default function OpenFinanceModule({
+  connections,
+  onConnectItem,
+  onSyncItem,
+  onDeleteConnection,
+  onRefreshAllData,
 }: OpenFinanceModuleProps) {
-  const [showConnectWidget, setShowConnectWidget] = useState(false);
-  const [selectedBank, setSelectedBank] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [widgetLoading, setWidgetLoading] = useState(false);
+  const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
-  // Sync state machine
-  const [activeSyncingBank, setActiveSyncingBank] = useState<string | null>(null);
-  const [syncStep, setSyncStep] = useState(0);
-  const [syncLogs, setSyncLogs] = useState<string[]>([]);
-  const [syncProgress, setSyncProgress] = useState(0);
-
-  // Available bank presets in Brazil / Latin America
-  const BANK_PRESETS = [
-    { name: 'Banco Itaú', logo: '🏦', theme: 'bg-orange-500 text-white', desc: 'Líder em Open Finance com suporte a PIX e cartões Black.' },
-    { name: 'Banco Inter', logo: '🍊', theme: 'bg-orange-600 text-white', desc: 'Conta digital completa com integração de investimentos.' },
-    { name: 'XP Investimentos', logo: '📈', theme: 'bg-yellow-500 text-black', desc: 'Sincronização imediata de saldos e relatórios patrimoniais.' },
-    { name: 'Banco Bradesco', logo: '🔴', theme: 'bg-red-600 text-white', desc: 'Garante o fluxo de todas as faturas Visa/Mastercard.' },
-    { name: 'Nubank', logo: '🟣', theme: 'bg-purple-600 text-white', desc: 'Sincronize o roxinho instantaneamente via canais digitais.' }
-  ];
-
-  // Steps labels
-  const STEPS_LABELS = [
-    'Conectando com o gateway Pluggy / Belvo API...',
-    'Estabelecendo conexão SSL criptografada com canal bancário...',
-    'Enfileirando tarefa [sync-historical-data] no Redis Queue...',
-    'Baixando extratos contábeis e faturas dos últimos 90 dias...',
-    'Invocando Inteligência Artificial (Gemini SDK) para normalização mercantil...',
-    'Inserindo novos registros no PostgreSQL Ledger e atualizando orçamentos...',
-    'Concluído! Notificação em tempo real enviada via WebSockets.'
-  ];
-
-  const handleOpenConnect = (bankName: string) => {
-    setSelectedBank(bankName);
-    setShowConnectWidget(true);
-  };
-
-  const handleSubmitConnect = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username || !password) return;
-
-    setIsFormSubmitting(true);
-    
-    // Step 1: Open Finance gateway simulation
-    setTimeout(async () => {
-      setIsFormSubmitting(false);
-      setShowConnectWidget(false);
-      
-      // Start background sync
-      setActiveSyncingBank(selectedBank);
-      setSyncStep(0);
-      setSyncProgress(5);
-      setSyncLogs([`[Client] Solicitando conexão para ${selectedBank}`]);
-      
-      // Hit actual server connection sync endpoint!
-      try {
-        const responseData = await onTriggerSync(selectedBank);
-        if (responseData && responseData.success) {
-          // Success triggered
-        }
-      } catch (err) {
-        console.error(err);
-      }
-
-      setUsername('');
-      setPassword('');
-    }, 1500);
-  };
-
-  // Run the visual step machine simulation linked with logs
   useEffect(() => {
-    if (!activeSyncingBank) return;
+    fetch('/api/open-finance/configured')
+      .then(r => r.json())
+      .then((d: { configured: boolean }) => setConfigured(d.configured))
+      .catch(() => setConfigured(false));
+  }, []);
 
-    const interval = setInterval(() => {
-      setSyncStep(prev => {
-        const next = prev + 1;
-        if (next >= STEPS_LABELS.length) {
-          clearInterval(interval);
-          setActiveSyncingBank(null);
-          // Auto-trigger clean parent reload to fetch new items
+  const loadPluggySdk = useCallback((): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (window.PluggyConnect) { resolve(); return; }
+      const existing = document.getElementById('pluggy-sdk');
+      if (existing) { existing.addEventListener('load', () => resolve()); return; }
+      const script = document.createElement('script');
+      script.id = 'pluggy-sdk';
+      script.src = PLUGGY_SDK_URL;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Falha ao carregar Pluggy SDK'));
+      document.head.appendChild(script);
+    });
+  }, []);
+
+  const handleOpenWidget = async () => {
+    setWidgetLoading(true);
+    try {
+      const [tokenResp] = await Promise.all([
+        fetch('/api/open-finance/connect-token', { method: 'POST' }).then(r => r.json()),
+        loadPluggySdk(),
+      ]);
+      if (tokenResp.error) {
+        alert(`Erro: ${tokenResp.error}`);
+        return;
+      }
+      const widget = new window.PluggyConnect({
+        connectToken: tokenResp.connectToken,
+        onSuccess: async ({ item }) => {
+          await onConnectItem(item.id, item.connector.name, item.connector.imageUrl || '🏦');
           onRefreshAllData();
-          return prev;
-        }
-
-        // Add matching server lookalike logging rows
-        setSyncLogs(logs => [
-          ...logs,
-          `[Redis Job] ${new Date().toLocaleTimeString()} - Task sync-historical-data step ${next}: ${STEPS_LABELS[next]}`,
-          `[Server] Guardando referências no DB com item_id gerado.`
-        ]);
-
-        setSyncProgress(next * 16.6);
-        return next;
+        },
+        onError: ({ message }) => console.error('[Pluggy]', message),
+        onClose: () => {},
       });
-    }, 1200);
+      widget.init();
+    } catch (e: any) {
+      alert(`Erro ao abrir widget: ${e.message}`);
+    } finally {
+      setWidgetLoading(false);
+    }
+  };
 
-    return () => clearInterval(interval);
-  }, [activeSyncingBank]);
+  const handleSync = async (itemId: string) => {
+    setSyncingItemId(itemId);
+    try {
+      await onSyncItem(itemId);
+      setTimeout(() => { onRefreshAllData(); setSyncingItemId(null); }, 5000);
+    } catch { setSyncingItemId(null); }
+  };
+
+  const handleDelete = async (itemId: string, name: string) => {
+    if (!confirm(`Desconectar "${name}"? As transações já importadas serão mantidas.`)) return;
+    setDeletingItemId(itemId);
+    try {
+      await onDeleteConnection(itemId);
+      onRefreshAllData();
+    } finally {
+      setDeletingItemId(null);
+    }
+  };
+
+  const statusBadge = (conn: BankConnection) => {
+    if (syncingItemId === conn.itemId || conn.status === 'SYNCING') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
+          <RotateCw className="w-2.5 h-2.5 animate-spin" /> Sincronizando
+        </span>
+      );
+    }
+    if (conn.status === 'CONNECTED') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-teal-50 text-teal-700 border border-teal-200">
+          <CheckCircle className="w-2.5 h-2.5" /> Conectado
+        </span>
+      );
+    }
+    if (conn.status === 'ERROR') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-red-50 text-red-700 border border-red-200">
+          <AlertTriangle className="w-2.5 h-2.5" /> Erro
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-slate-50 text-slate-400 border border-slate-200">
+        Desconectado
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             <Network className="w-5 h-5 text-indigo-600" />
-            Módulo 3: Integração e Conciliação Bancária (Open Finance)
+            Módulo 4: Open Finance (Pluggy)
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Conexão automatizada multi-bancos. Centralize extratos, poupança e faturas eliminando lançamentos manuais repetitivos.
+            Conecte seus bancos via Open Finance Brasil. Extratos e saldos são importados automaticamente.
           </p>
         </div>
-
-        <button 
+        <button
           onClick={onRefreshAllData}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-lg text-xs font-bold transition-all shadow-xs"
         >
-          <RotateCw className="w-3.5 h-3.5" /> Forçar Varredura Total
+          <RefreshCw className="w-3.5 h-3.5" /> Atualizar
         </button>
       </div>
 
-      {/* Grid of banks connection status */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {BANK_PRESETS.map(bank => {
-          const activeConn = connections.find(c => c.institutionName.toLowerCase() === bank.name.toLowerCase());
-          return (
-            <div key={bank.name} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between space-y-4">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-slate-50 flex items-center justify-center text-xl border border-slate-200">
-                    {bank.logo}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-800 text-xs">{bank.name}</h3>
-                    <p className="text-[10px] text-slate-400 font-medium leading-none">LatAm Open Finance</p>
-                  </div>
-                </div>
-
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
-                  activeConn?.status === 'CONNECTED' 
-                    ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                    : activeConn?.status === 'SYNCING' || activeSyncingBank === bank.name
-                    ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
-                    : 'bg-slate-50 text-slate-400 border border-slate-200'
-                }`}>
-                  {activeSyncingBank === bank.name ? 'Sincronizando' : activeConn?.status || 'Não Conectado'}
-                </span>
-              </div>
-
-              <p className="text-[11px] text-slate-500 leading-tight">
-                {bank.desc}
-              </p>
-
-              <div className="pt-2 border-t border-slate-105 flex items-center justify-between">
-                <span className="text-[9px] text-slate-400 font-medium font-mono">
-                  {activeConn?.lastSyncedAt 
-                    ? `Sinc: ${new Date(activeConn.lastSyncedAt).toLocaleDateString()}` 
-                    : 'Nunca conectado'}
-                </span>
-
-                {activeConn?.status === 'CONNECTED' ? (
-                  <button 
-                    onClick={() => handleOpenConnect(bank.name)}
-                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold"
-                  >
-                    Reconectar
-                  </button>
-                ) : (
-                  <button 
-                    disabled={activeSyncingBank !== null}
-                    onClick={() => handleOpenConnect(bank.name)}
-                    className="inline-flex items-center gap-1 text-[10px] bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold px-2.5 py-1.5 rounded-lg transition-colors"
-                  >
-                    <Plus className="w-3 h-3" /> Conectar
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Sync simulation execution and logs panel */}
-      {activeSyncingBank && (
-        <div className="bg-slate-950 text-slate-100 rounded-2xl p-6 shadow-md border border-slate-800 space-y-4 animate-slideDown">
-          <div className="first-letter:flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-indigo-400 animate-spin" />
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-indigo-300">Background Worker Ativo</span>
-                <h4 className="text-[11px] text-slate-400">Processando fila no Redis: <code className="font-mono text-white bg-slate-900 px-1 py-0.5 rounded">sync-historical-data</code> de {activeSyncingBank}</h4>
-              </div>
-            </div>
-            
-            <span className="text-xs font-mono font-bold text-indigo-400">{Math.round(syncProgress)}%</span>
-          </div>
-
-          {/* Progress bar container */}
-          <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-            <div 
-              style={{ width: `${syncProgress}%` }}
-              className="bg-indigo-500 h-full transition-all duration-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-            {/* Steps feedback list */}
-            <div className="md:col-span-7 space-y-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 block">Etapas de Consolidação</span>
-              <div className="space-y-1.5">
-                {STEPS_LABELS.map((stepLabel, idx) => {
-                  const isCurrent = idx === syncStep;
-                  const isPassed = idx < syncStep;
-                  return (
-                    <div 
-                      key={idx} 
-                      className={`text-[11px] flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all ${
-                        isCurrent 
-                          ? 'bg-indigo-950/40 border-indigo-500 text-indigo-100 font-semibold'
-                          : isPassed
-                          ? 'bg-slate-900 border-transparent text-emerald-400'
-                          : 'border-transparent text-slate-600'
-                      }`}
-                    >
-                      {isPassed ? (
-                        <CheckCircle className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-                      ) : isCurrent ? (
-                        <RotateCw className="w-3.5 h-3.5 animate-spin shrink-0 text-indigo-400" />
-                      ) : (
-                        <Clock className="w-3.5 h-3.5 shrink-0 text-slate-700" />
-                      )}
-                      <span>{stepLabel}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Simulated Server Console Shell */}
-            <div className="md:col-span-5 bg-slate-900 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between">
-              <div className="space-y-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5" /> Terminal de Eventos do Monólito NestJS
-                </span>
-                
-                <div className="font-mono text-[9px] text-slate-400 space-y-1 max-h-[160px] overflow-y-auto leading-normal">
-                  <div className="text-slate-500">// Redis queue client inicializado</div>
-                  {syncLogs.map((logLine, idx) => (
-                    <div key={idx} className={logLine.includes('[Client]') ? 'text-indigo-300' : 'text-slate-400'}>
-                      {logLine}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 p-2.5 rounded text-[10px] font-semibold text-slate-300 flex items-center gap-2 mt-2">
-                <Smartphone className="w-4 h-4 text-slate-400" />
-                <span>WebHook Status: <code className="text-emerald-400 font-mono">Listening on port 3000</code></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Connect Bank Credentials overlay simulation model */}
-      {showConnectWidget && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-zoomIn">
-            {/* Header bank identity */}
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded bg-white flex items-center justify-center text-lg shadow-sm font-bold text-slate-900">
-                  ⚡
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm">Widget de Conexão Segura</h3>
-                  <p className="text-[10px] text-slate-400 font-medium">Pluggy Intermediador Open Finance</p>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => setShowConnectWidget(false)}
-                className="text-slate-400 hover:text-white transition-colors"
+      {/* Not configured warning */}
+      {configured === false && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex gap-4">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-2">
+            <p className="text-sm font-bold text-amber-900">Credenciais Pluggy não configuradas</p>
+            <p className="text-xs text-amber-800 leading-relaxed">
+              Para usar o Open Finance real, registre-se em{' '}
+              <a
+                href="https://dashboard.pluggy.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-semibold inline-flex items-center gap-0.5"
               >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Widget layout forms */}
-            <form onSubmit={handleSubmitConnect} className="p-6 space-y-4">
-              <div className="text-center space-y-1">
-                <h4 className="font-bold text-slate-800 text-xs">Autorize o compartilhamento para o MKS Finanças</h4>
-                <p className="text-[11px] text-slate-500">Insira suas credenciais comuns de internet banking para o parceiro <span className="font-bold text-slate-800">{selectedBank}</span> de forma isolada.</p>
-              </div>
-
-              <div className="bg-emerald-50 text-emerald-900 border border-emerald-100 rounded-lg p-3 text-[10px] space-y-1 flex items-start gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-bold">Protocolo Seguro Ativo:</span> Suas senhas são transmitidas via criptografia AES-256 fim-a-fim. O MKS Finanças só possui permissões de leitura do extrato contábil, sem qualquer capacidade de transferências ou saques.
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Usuário / CPF de Acesso</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. 123.456.789-00" 
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    required
-                    className="w-full text-xs font-semibold border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Chave / Assinatura Eletrônica</label>
-                  <input 
-                    type="password" 
-                    placeholder="••••••••" 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2 flex gap-3">
-                <button 
-                  type="button" 
-                  onClick={() => setShowConnectWidget(false)}
-                  className="w-1/2 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-all"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit"
-                  disabled={isFormSubmitting}
-                  className="w-1/2 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-lg transition-all shadow-md flex items-center justify-center gap-1.5"
-                >
-                  {isFormSubmitting ? (
-                    <>
-                      <RotateCw className="w-3.5 h-3.5 animate-spin" /> Conectando...
-                    </>
-                  ) : (
-                    <>
-                      Autorizar Conexão
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+                dashboard.pluggy.ai <ExternalLink className="w-3 h-3" />
+              </a>{' '}
+              (sandbox gratuito), crie um App e adicione as credenciais no <code className="bg-amber-100 px-1 rounded font-mono">.env</code>:
+            </p>
+            <pre className="bg-amber-100 text-amber-900 text-[11px] font-mono rounded-lg p-3 leading-relaxed">
+{`PLUGGY_CLIENT_ID=seu_client_id
+PLUGGY_CLIENT_SECRET=seu_client_secret`}
+            </pre>
+            <p className="text-xs text-amber-700">Reinicie o servidor após salvar o <code className="font-mono">.env</code>.</p>
           </div>
         </div>
       )}
+
+      {/* Configured: connect button */}
+      {configured === true && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+              <Plus className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-800">Conectar Nova Instituição</p>
+              <p className="text-xs text-slate-500">Abrirá o widget Pluggy para autenticação segura com seu banco.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleOpenWidget}
+            disabled={widgetLoading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors shadow-sm"
+          >
+            {widgetLoading ? (
+              <><RotateCw className="w-3.5 h-3.5 animate-spin" /> Carregando...</>
+            ) : (
+              <><Plus className="w-3.5 h-3.5" /> Conectar Banco</>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Connected institutions */}
+      {connections.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Instituições Conectadas</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {connections.map(conn => (
+              <div
+                key={conn.id}
+                className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">
+                      {conn.logo || '🏦'}
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{conn.institutionName}</p>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        {conn.lastSyncedAt
+                          ? `Sinc: ${new Date(conn.lastSyncedAt).toLocaleString('pt-BR')}`
+                          : 'Aguardando sincronização'}
+                      </p>
+                    </div>
+                  </div>
+                  {statusBadge(conn)}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                  <button
+                    onClick={() => handleSync(conn.itemId!)}
+                    disabled={syncingItemId === conn.itemId || conn.status === 'SYNCING'}
+                    className="inline-flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 disabled:opacity-40 font-bold px-2.5 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingItemId === conn.itemId ? 'animate-spin' : ''}`} />
+                    Sincronizar
+                  </button>
+                  <button
+                    onClick={() => handleDelete(conn.itemId!, conn.institutionName)}
+                    disabled={deletingItemId === conn.itemId}
+                    className="inline-flex items-center gap-1 text-[10px] text-red-500 hover:text-red-700 disabled:opacity-40 font-bold px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    <Unlink className="w-3 h-3" />
+                    Desconectar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {connections.length === 0 && configured !== false && (
+        <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
+          <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center">
+            <Network className="w-6 h-6 text-slate-300" />
+          </div>
+          <p className="text-sm font-bold text-slate-500">Nenhum banco conectado</p>
+          <p className="text-xs text-slate-400 max-w-xs">
+            Clique em "Conectar Banco" para autenticar via Pluggy e importar seu extrato automaticamente.
+          </p>
+        </div>
+      )}
+
+      {/* Info footer */}
+      <div className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-xl p-4">
+        <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          A conexão é intermediada pela{' '}
+          <a href="https://pluggy.ai" target="_blank" rel="noopener noreferrer" className="underline font-semibold">
+            Pluggy
+          </a>{' '}
+          — provedor de Open Finance Brasil regulamentado pelo Banco Central. Suas credenciais bancárias nunca são armazenadas neste servidor.
+        </p>
+      </div>
     </div>
   );
 }

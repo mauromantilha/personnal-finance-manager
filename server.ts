@@ -27,14 +27,6 @@ import {
   InstallmentGroup,
   Investment
 } from './src/types';
-import {
-  INITIAL_ACCOUNTS,
-  INITIAL_CONNECTIONS,
-  INITIAL_TRANSACTIONS,
-  INITIAL_BUDGETS,
-  INITIAL_GOALS,
-  INITIAL_ALERTS
-} from './src/mockData';
 
 // ─── Cloudflare D1 + R2 ──────────────────────────────────────────────────────
 
@@ -131,6 +123,93 @@ async function r2GetBinary(key: string): Promise<{ body: ArrayBuffer; contentTyp
     if (!res.ok) return null;
     return { body: await res.arrayBuffer(), contentType: res.headers.get('content-type') || 'application/octet-stream' };
   } catch { return null; }
+}
+
+// ─── Pluggy Open Finance ──────────────────────────────────────────────────────
+
+const PLUGGY_CLIENT_ID = process.env.PLUGGY_CLIENT_ID || '';
+const PLUGGY_CLIENT_SECRET = process.env.PLUGGY_CLIENT_SECRET || '';
+const APP_URL = process.env.APP_URL || 'https://financas.mksbrasil.com';
+
+let _pluggyApiKey: string | null = null;
+let _pluggyApiKeyExpiry = 0;
+
+async function getPluggyApiKey(): Promise<string> {
+  if (_pluggyApiKey && Date.now() < _pluggyApiKeyExpiry) return _pluggyApiKey;
+  const resp = await fetch('https://api.pluggy.ai/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: PLUGGY_CLIENT_ID, clientSecret: PLUGGY_CLIENT_SECRET }),
+  });
+  if (!resp.ok) throw new Error(`Pluggy auth failed: ${resp.status} ${await resp.text()}`);
+  const data = await resp.json() as { apiKey: string };
+  _pluggyApiKey = data.apiKey;
+  _pluggyApiKeyExpiry = Date.now() + 90 * 60 * 1000; // 90 min (TTL is 2h)
+  return _pluggyApiKey;
+}
+
+async function pluggyReq<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const apiKey = await getPluggyApiKey();
+  const resp = await fetch(`https://api.pluggy.ai${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-KEY': apiKey,
+      ...(opts.headers || {}),
+    },
+  });
+  if (!resp.ok) throw new Error(`Pluggy API ${resp.status}: ${await resp.text()}`);
+  return resp.json() as Promise<T>;
+}
+
+async function syncPluggyItem(itemId: string, connId: string): Promise<void> {
+  const item = await pluggyReq<any>(`/items/${itemId}`);
+  const { results: accs = [] } = await pluggyReq<any>(`/accounts?itemId=${itemId}`);
+
+  for (const acc of accs) {
+    const localAccId = `acc-plg-${acc.id}`;
+    const existing = await d1q<any>('SELECT id FROM accounts WHERE id = ?', [localAccId]);
+    const balanceCents = Math.round((acc.balance || 0) * 100);
+    const accName = acc.name || item.connector?.name || 'Conta Open Finance';
+    const bankName = item.connector?.name || 'Pluggy';
+
+    if (!existing.length) {
+      await d1q('INSERT INTO accounts VALUES (?,?,?,?,?,?,?)',
+        [localAccId, accName, 'CHECKING', bankName, balanceCents, '#3B82F6', 1]);
+    } else {
+      await d1q('UPDATE accounts SET balance_in_cents = ?, is_linked = 1 WHERE id = ?', [balanceCents, localAccId]);
+    }
+
+    const { results: txns = [] } = await pluggyReq<any>(`/transactions?accountId=${acc.id}&pageSize=100`);
+    const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+    for (const tx of txns) {
+      const txId = `tx-plg-${tx.id}`;
+      const dup = await d1q<any>('SELECT id FROM transactions WHERE id = ?', [txId]);
+      if (dup.length) continue;
+      const txType = tx.type === 'CREDIT' ? 'REC' : 'DES';
+      const amtCents = Math.round(Math.abs(tx.amount || 0) * 100);
+      const txDate = (tx.date || tx.operationDate || new Date().toISOString()).split('T')[0];
+      const desc = tx.description || tx.merchant?.name || 'Transação';
+      const cat = tx.category?.description || classifyMerchant(desc);
+      const merchant = tx.merchant?.name || null;
+      stmts.push({
+        sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,original_merchant_name) VALUES (?,?,?,?,?,?,?,1,?)',
+        params: [txId, amtCents, txDate, txType, cat, desc, localAccId, merchant],
+      });
+    }
+    if (stmts.length) await d1exec(stmts);
+  }
+
+  await d1q('UPDATE connections SET status = ?, last_synced_at = ? WHERE id = ?',
+    ['CONNECTED', new Date().toISOString(), connId]);
+  const institutionName = item.connector?.name || 'Banco';
+  await d1q('INSERT OR IGNORE INTO alerts VALUES (?,?,?,?,?,?)', [
+    `alert-plg-${Date.now()}`, 'SUCCESS',
+    `🔗 Sincronização Concluída: ${institutionName}`,
+    `${accs.length} conta(s) importada(s) via Pluggy Open Finance.`,
+    new Date().toISOString(), 0,
+  ]);
+  await recalculateBudgets();
 }
 
 // ─── Shared classifier ────────────────────────────────────────────────────────
@@ -498,6 +577,19 @@ async function startServer() {
     res.json({ authenticated: !!(token && verifyToken(token)) });
   });
 
+  // ── Pluggy webhook (public — no auth) ────────────────────────────────────
+  app.post('/api/webhooks/pluggy', async (req, res) => {
+    const { event, itemId } = req.body || {};
+    if (event === 'item/updated' && itemId) {
+      const conn = await d1q<any>('SELECT id FROM connections WHERE item_id = ?', [itemId]);
+      if (conn.length) {
+        d1q('UPDATE connections SET status = ? WHERE id = ?', ['SYNCING', conn[0].id]).catch(() => {});
+        syncPluggyItem(itemId, conn[0].id).catch(console.error);
+      }
+    }
+    res.json({ received: true });
+  });
+
   app.use('/api', requireAuth);
 
   // ── GET ALL DATA ───────────────────────────────────────────────────────────
@@ -725,19 +817,21 @@ async function startServer() {
 
   app.post('/api/reset', async (_req, res) => {
     try {
-      const stmts: { sql: string; params?: (string | number | null)[] }[] = [
-        { sql: 'DELETE FROM transactions' }, { sql: 'DELETE FROM accounts' },
-        { sql: 'DELETE FROM connections' }, { sql: 'DELETE FROM budgets' },
-        { sql: 'DELETE FROM goals' }, { sql: 'DELETE FROM alerts' }, { sql: 'DELETE FROM chat_history' }
-      ];
-      for (const a of INITIAL_ACCOUNTS) stmts.push({ sql: 'INSERT INTO accounts VALUES (?,?,?,?,?,?,?)', params: [a.id, a.name, a.type, a.bankName, a.balanceInCents, a.color, a.isLinked ? 1 : 0] });
-      for (const c of INITIAL_CONNECTIONS) stmts.push({ sql: 'INSERT INTO connections VALUES (?,?,?,?,?,?)', params: [c.id, c.institutionName, c.logo || '🏦', c.status, c.itemId || null, c.lastSyncedAt || null] });
-      for (const t of INITIAL_TRANSACTIONS) stmts.push({ sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced,original_merchant_name) VALUES (?,?,?,?,?,?,?,?,?,?)', params: [t.id, t.amountInCents, t.date, t.type, t.category, t.description, t.accountId, t.destinationAccountId || null, t.isSynced ? 1 : 0, t.originalMerchantName || null] });
-      for (const b of INITIAL_BUDGETS) stmts.push({ sql: 'INSERT INTO budgets VALUES (?,?,?,?)', params: [b.id, b.category, b.limitInCents, b.spentInCents] });
-      for (const g of INITIAL_GOALS) stmts.push({ sql: 'INSERT INTO goals VALUES (?,?,?,?,?,?)', params: [g.id, g.name, g.targetInCents, g.currentInCents, g.targetDate, g.color] });
-      for (const a of INITIAL_ALERTS) stmts.push({ sql: 'INSERT INTO alerts VALUES (?,?,?,?,?,?)', params: [a.id, a.type, a.title, a.message, a.date, a.isRead ? 1 : 0] });
-      stmts.push({ sql: 'INSERT INTO alerts VALUES (?,?,?,?,?,?)', params: [`alt-reset-${Date.now()}`, 'SUCCESS', 'Restaurado para Estado Inicial', 'Dados reiniciados com sucesso para os valores padrão.', new Date().toISOString(), 0] });
-      await d1exec(stmts);
+      await d1exec([
+        { sql: 'DELETE FROM transactions' },
+        { sql: 'DELETE FROM accounts' },
+        { sql: 'DELETE FROM connections' },
+        { sql: 'DELETE FROM budgets' },
+        { sql: 'DELETE FROM goals' },
+        { sql: 'DELETE FROM alerts' },
+        { sql: 'DELETE FROM chat_history' },
+        { sql: 'DELETE FROM credit_cards' },
+        { sql: 'DELETE FROM invoices' },
+        { sql: 'DELETE FROM recurrences' },
+        { sql: 'DELETE FROM family_members' },
+        { sql: 'DELETE FROM installment_groups' },
+        { sql: 'DELETE FROM investments' },
+      ]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -847,60 +941,72 @@ async function startServer() {
     }
   });
 
-  // ── OPEN FINANCE SYNC ──────────────────────────────────────────────────────
+  // ── OPEN FINANCE (Pluggy) ──────────────────────────────────────────────────
 
-  app.post('/api/open-finance/connect', async (req, res) => {
-    const { bankName } = req.body;
-    if (!bankName) return res.status(400).json({ error: 'Selecione uma instituição bancária.' });
+  app.get('/api/open-finance/configured', (_req, res) => {
+    res.json({ configured: !!(PLUGGY_CLIENT_ID && PLUGGY_CLIENT_SECRET) });
+  });
+
+  app.post('/api/open-finance/connect-token', async (_req, res) => {
+    if (!PLUGGY_CLIENT_ID || !PLUGGY_CLIENT_SECRET) {
+      return res.status(400).json({ error: 'Pluggy não configurado. Adicione PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET no .env e reinicie o servidor.' });
+    }
     try {
-      const existing = await d1q<any>('SELECT * FROM connections WHERE LOWER(institution_name) = LOWER(?)', [bankName]);
+      const data = await pluggyReq<{ accessToken: string }>('/connect_token', {
+        method: 'POST',
+        body: JSON.stringify({ clientUserId: 'mks-user', webhookUrl: `${APP_URL}/api/webhooks/pluggy` }),
+      });
+      res.json({ connectToken: data.accessToken });
+    } catch (e: any) {
+      res.status(500).json({ error: 'Pluggy connect token error', details: e.message });
+    }
+  });
+
+  // Register item after Pluggy widget success
+  app.post('/api/open-finance/connect', async (req, res) => {
+    const { itemId, institutionName, logo } = req.body;
+    if (!itemId) return res.status(400).json({ error: 'itemId é obrigatório' });
+    try {
+      const existing = await d1q<any>('SELECT id FROM connections WHERE item_id = ?', [itemId]);
       let connId: string;
-      let itemId: string;
       if (existing.length) {
         connId = existing[0].id;
-        itemId = existing[0].item_id || `plg_${bankName.replace(/\s+/g, '').toLowerCase()}_${Math.floor(1000 + Math.random() * 9000)}`;
         await d1q('UPDATE connections SET status = ? WHERE id = ?', ['SYNCING', connId]);
       } else {
-        connId = `conn-bank-${Date.now()}`;
-        itemId = `plg_${bankName.replace(/\s+/g, '').toLowerCase()}_${Math.floor(1000 + Math.random() * 9000)}`;
-        await d1q('INSERT INTO connections VALUES (?,?,?,?,?,?)', [connId, bankName, '⚡', 'SYNCING', itemId, null]);
+        connId = `conn-plg-${Date.now()}`;
+        await d1q('INSERT INTO connections VALUES (?,?,?,?,?,?)',
+          [connId, institutionName || 'Banco', logo || '🏦', 'SYNCING', itemId, null]);
       }
+      res.json({ success: true, status: 'SYNCING', connId });
+      syncPluggyItem(itemId, connId).catch(console.error);
+    } catch (e: any) {
+      res.status(500).json({ error: 'D1 error', details: e.message });
+    }
+  });
 
-      const mockTxns = [
-        { desc: 'RESTAURANTE ASSIS BURGER', amount: 8450, category: 'Alimentação' },
-        { desc: 'AUTO POSTO IPIRANGA', amount: 15000, category: 'Transporte' },
-        { desc: 'MERCADO DISTRITO LTDA', amount: 21020, category: 'Alimentação' },
-        { desc: 'CORTE FEITO BARBEARIA', amount: 6500, category: 'Outros' },
-        { desc: 'CURSO INGLÊS COMPLETO', amount: 18000, category: 'Educação' },
-      ];
+  // Manual re-sync
+  app.post('/api/open-finance/sync/:itemId', async (req, res) => {
+    const { itemId } = req.params;
+    try {
+      const conn = await d1q<any>('SELECT id FROM connections WHERE item_id = ?', [itemId]);
+      if (!conn.length) return res.status(404).json({ error: 'Conexão não encontrada' });
+      await d1q('UPDATE connections SET status = ? WHERE id = ?', ['SYNCING', conn[0].id]);
+      res.json({ success: true, status: 'SYNCING' });
+      syncPluggyItem(itemId, conn[0].id).catch(console.error);
+    } catch (e: any) {
+      res.status(500).json({ error: 'Sync error', details: e.message });
+    }
+  });
 
-      setTimeout(async () => {
-        try {
-          await d1q('UPDATE connections SET status = ?, last_synced_at = ? WHERE id = ?', ['CONNECTED', new Date().toISOString(), connId]);
-          const accRows = await d1q<any>('SELECT * FROM accounts WHERE LOWER(bank_name) = LOWER(?)', [bankName]);
-          let targetAccId: string;
-          if (accRows.length) {
-            targetAccId = accRows[0].id;
-            await d1q('UPDATE accounts SET is_linked = 1 WHERE id = ?', [targetAccId]);
-          } else {
-            targetAccId = `acc-auto-${Date.now()}`;
-            await d1q('INSERT INTO accounts VALUES (?,?,?,?,?,?,1)', [targetAccId, `Conta Corrente ${bankName}`, 'CHECKING', bankName, 1200000, '#3B82F6']);
-          }
-          const stmts: { sql: string; params: (string | number | null)[] }[] = [];
-          for (const item of mockTxns) {
-            const d = new Date();
-            d.setDate(d.getDate() - Math.floor(Math.random() * 10));
-            const txId = `tx-sync-${Math.random().toString(36).slice(2, 11)}`;
-            stmts.push({ sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,original_merchant_name) VALUES (?,?,?,?,?,?,?,1,?)', params: [txId, item.amount, d.toISOString().split('T')[0], 'DES', item.category, item.desc, targetAccId, item.desc] });
-            stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [item.amount, targetAccId] });
-          }
-          stmts.push({ sql: 'INSERT INTO alerts VALUES (?,?,?,?,?,?)', params: [`alert-conn-${Date.now()}`, 'SUCCESS', `🔗 Conexão Bem-sucedida: ${bankName}`, `${mockTxns.length} transações sincronizadas com sucesso.`, new Date().toISOString(), 0] });
-          await d1exec(stmts);
-          await recalculateBudgets();
-        } catch (e) { console.error('[SYNC]', e); }
-      }, 4000);
-
-      res.json({ success: true, status: 'SYNCING', itemId });
+  // Disconnect
+  app.delete('/api/open-finance/connections/:itemId', async (req, res) => {
+    const { itemId } = req.params;
+    if (PLUGGY_CLIENT_ID && PLUGGY_CLIENT_SECRET) {
+      pluggyReq(`/items/${itemId}`, { method: 'DELETE' }).catch(() => {});
+    }
+    try {
+      await d1q('DELETE FROM connections WHERE item_id = ?', [itemId]);
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: 'D1 error', details: e.message });
     }

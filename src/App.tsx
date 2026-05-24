@@ -423,23 +423,44 @@ export default function App() {
     }
   };
 
-  const handleTriggerSync = async (bankName: string) => {
+  const handleConnectItem = async (itemId: string, institutionName: string, logo: string) => {
     try {
       const response = await fetch('/api/open-finance/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bankName })
+        body: JSON.stringify({ itemId, institutionName, logo }),
       });
       if (response.ok) {
         const body = await response.json();
-        // Update connections state instantly to syncing
-        setConnections(prev => prev.map(c => c.institutionName.toLowerCase() === bankName.toLowerCase() ? { ...c, status: 'SYNCING' } : c));
+        setConnections(prev => {
+          const exists = prev.find(c => c.itemId === itemId);
+          if (exists) return prev.map(c => c.itemId === itemId ? { ...c, status: 'SYNCING' } : c);
+          return [...prev, { id: body.connId, institutionName, logo, status: 'SYNCING', itemId } as any];
+        });
         return body;
       }
     } catch (err) {
       console.error(err);
     }
     return null;
+  };
+
+  const handleSyncItem = async (itemId: string) => {
+    setConnections(prev => prev.map(c => c.itemId === itemId ? { ...c, status: 'SYNCING' } : c));
+    try {
+      await fetch(`/api/open-finance/sync/${itemId}`, { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteConnection = async (itemId: string) => {
+    try {
+      await fetch(`/api/open-finance/connections/${itemId}`, { method: 'DELETE' });
+      setConnections(prev => prev.filter(c => c.itemId !== itemId));
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleSendMessage = async (text: string): Promise<string | null> => {
@@ -484,7 +505,7 @@ export default function App() {
   };
 
   const handleResetDB = async () => {
-    if (confirm('Deseja reiniciar todas as contas do ledger para o estado original?')) {
+    if (confirm('Isso apagará TODOS os dados (contas, transações, metas, investimentos, etc.). Deseja continuar?')) {
       try {
         const response = await fetch('/api/reset', { method: 'POST' });
         if (response.ok) {
@@ -649,19 +670,19 @@ export default function App() {
 
   // Nav configuration
   const sidebarNavItems: { id: TabType; label: string; icon: React.ElementType; badge?: number }[] = [
-    { id: 'DASHBOARD',    label: 'Estatísticas Gerais',         icon: Building2 },
-    { id: 'AUTH',         label: 'Módulo 1: Auth & IAM',        icon: Shield },
-    { id: 'CORE',         label: 'Módulo 2: Contas & Ledger',   icon: Database },
-    { id: 'CREDIT_CARDS', label: 'Módulo 3: Cartões & Faturas',  icon: CreditCardIcon },
-    { id: 'RECURRENCES',  label: 'Módulo 4: Recorrências',      icon: RefreshCw },
-    { id: 'OPEN_FINANCE', label: 'Módulo 5: Open Finance',      icon: Network },
-    { id: 'BUDGETS',      label: 'Módulo 6: Planejamento',      icon: Target },
-    { id: 'ANALYTICS',    label: 'Módulo 7: Relatórios',        icon: BarChart3 },
-    { id: 'NOTIFICATIONS',label: 'Módulo 8: Notificações',      icon: Bell, badge: unreadAlertsCount },
-    { id: 'FAMILY',        label: 'Módulo 9: Família',           icon: Users },
-    { id: 'CATEGORIES',    label: 'Módulo 10: Categorias',       icon: Tag },
-    { id: 'INSTALLMENTS',  label: 'Módulo 11: Parcelamentos',    icon: Layers },
-    { id: 'INVESTMENTS',   label: 'Módulo 12: Investimentos',    icon: TrendingUp },
+    { id: 'DASHBOARD',    label: 'Dashboard',                    icon: Building2 },
+    { id: 'CORE',         label: 'Módulo 1: Contas & Ledger',    icon: Database },
+    { id: 'CREDIT_CARDS', label: 'Módulo 2: Cartões & Faturas',  icon: CreditCardIcon },
+    { id: 'RECURRENCES',  label: 'Módulo 3: Recorrências',       icon: RefreshCw },
+    { id: 'OPEN_FINANCE', label: 'Módulo 4: Open Finance',       icon: Network },
+    { id: 'BUDGETS',      label: 'Módulo 5: Planejamento',       icon: Target },
+    { id: 'ANALYTICS',    label: 'Módulo 6: Relatórios',         icon: BarChart3 },
+    { id: 'NOTIFICATIONS',label: 'Módulo 7: Notificações',       icon: Bell, badge: unreadAlertsCount },
+    { id: 'FAMILY',       label: 'Módulo 8: Família',            icon: Users },
+    { id: 'CATEGORIES',   label: 'Módulo 9: Categorias',         icon: Tag },
+    { id: 'INSTALLMENTS', label: 'Módulo 10: Parcelamentos',     icon: Layers },
+    { id: 'INVESTMENTS',  label: 'Módulo 11: Investimentos',     icon: TrendingUp },
+    { id: 'AUTH',         label: 'Módulo 12: Auth & IAM',        icon: Shield },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -807,7 +828,7 @@ export default function App() {
               onClick={handleResetDB}
               className="w-full text-left text-[10px] font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-3 py-1.5 rounded-lg transition-all uppercase tracking-widest"
             >
-              Excluir Lançamentos Manuais
+              Limpar Todos os Dados
             </button>
           </div>
         </aside>
@@ -1082,9 +1103,11 @@ export default function App() {
           )}
 
           {activeTab === 'OPEN_FINANCE' && (
-            <OpenFinanceModule 
+            <OpenFinanceModule
               connections={connections}
-              onTriggerSync={handleTriggerSync}
+              onConnectItem={handleConnectItem}
+              onSyncItem={handleSyncItem}
+              onDeleteConnection={handleDeleteConnection}
               onRefreshAllData={fetchAllData}
             />
           )}
