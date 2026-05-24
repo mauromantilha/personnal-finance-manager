@@ -24,7 +24,8 @@ import {
   Invoice,
   Recurrence,
   FamilyMember,
-  InstallmentGroup
+  InstallmentGroup,
+  Investment
 } from './src/types';
 import {
   INITIAL_ACCOUNTS,
@@ -201,6 +202,15 @@ function mapChat(r: any): ChatMessage {
 }
 function mapFamilyMember(r: any): FamilyMember {
   return { id: r.id, name: r.name, avatarColor: r.avatar_color, createdAt: r.created_at };
+}
+function mapInvestment(r: any): Investment {
+  return {
+    id: r.id, name: r.name, ticker: r.ticker || null, assetClass: r.asset_class,
+    institution: r.institution, investedInCents: r.invested_in_cents,
+    currentValueInCents: r.current_value_in_cents, annualRate: r.annual_rate ?? null,
+    startDate: r.start_date, maturityDate: r.maturity_date || null,
+    accountId: r.account_id || null, notes: r.notes || null, createdAt: r.created_at,
+  };
 }
 function mapInstallmentGroup(r: any, paidCount: number): InstallmentGroup {
   return {
@@ -497,7 +507,7 @@ async function startServer() {
       await processRecurrences();
       await recalculateBudgets();
       await generateProactiveAlerts();
-      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, igRows, igCounts] = await Promise.all([
+      const [accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, igRows, igCounts, investments] = await Promise.all([
         d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
         d1q<any>('SELECT * FROM connections').then(r => r.map(mapConnection)),
         d1q<any>('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction)),
@@ -512,10 +522,11 @@ async function startServer() {
         d1q<any>('SELECT * FROM family_members ORDER BY created_at ASC').then(r => r.map(mapFamilyMember)),
         d1q<any>('SELECT * FROM installment_groups ORDER BY start_date DESC'),
         d1q<any>(`SELECT installment_group_id, COUNT(*) as cnt FROM transactions WHERE installment_group_id IS NOT NULL AND date <= date('now') GROUP BY installment_group_id`),
+        d1q<any>('SELECT * FROM investments ORDER BY start_date DESC').then(r => r.map(mapInvestment)),
       ]);
       const paidMap = Object.fromEntries(igCounts.map((r: any) => [r.installment_group_id, r.cnt]));
       const installmentGroups = igRows.map((r: any) => mapInstallmentGroup(r, paidMap[r.id] || 0));
-      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, installmentGroups });
+      res.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, installmentGroups, investments });
     } catch (e: any) {
       console.error('[D1]', e.message);
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -1491,6 +1502,59 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
       stmts.push({ sql: 'DELETE FROM installment_groups WHERE id = ?', params: [groupId] });
       await d1exec(stmts);
       await recalculateBudgets();
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── INVESTMENTS ────────────────────────────────────────────────────────────
+
+  app.get('/api/investments', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT * FROM investments ORDER BY start_date DESC');
+      res.json(rows.map(mapInvestment));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/investments', async (req, res) => {
+    const { name, ticker, assetClass, institution, investedInCents, currentValueInCents, annualRate, startDate, maturityDate, accountId, notes } = req.body;
+    if (!name || !institution || !startDate)
+      return res.status(400).json({ error: 'name, institution e startDate são obrigatórios.' });
+    const invested = parseInt(investedInCents, 10) || 0;
+    const current = parseInt(currentValueInCents, 10) || invested;
+    const id = `inv-${Date.now()}`;
+    const VALID_CLASSES = ['fixed_income', 'stocks', 'fii', 'crypto', 'international', 'other'];
+    const cls = VALID_CLASSES.includes(assetClass) ? assetClass : 'other';
+    try {
+      await d1q(
+        'INSERT INTO investments (id,name,ticker,asset_class,institution,invested_in_cents,current_value_in_cents,annual_rate,start_date,maturity_date,account_id,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        [id, name.trim(), ticker?.trim() || null, cls, institution.trim(), invested, current, annualRate ?? null, startDate, maturityDate || null, accountId || null, notes?.trim() || null]
+      );
+      res.status(201).json({ id });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.put('/api/investments/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, ticker, institution, currentValueInCents, annualRate, maturityDate, notes } = req.body;
+    try {
+      const rows = await d1q('SELECT id FROM investments WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Investimento não encontrado.' });
+      await d1q(
+        'UPDATE investments SET name=COALESCE(?,name), ticker=COALESCE(?,ticker), institution=COALESCE(?,institution), current_value_in_cents=COALESCE(?,current_value_in_cents), annual_rate=COALESCE(?,annual_rate), maturity_date=COALESCE(?,maturity_date), notes=COALESCE(?,notes) WHERE id=?',
+        [name?.trim() || null, ticker?.trim() || null, institution?.trim() || null,
+         currentValueInCents !== undefined ? parseInt(currentValueInCents, 10) : null,
+         annualRate !== undefined ? annualRate : null, maturityDate || null, notes?.trim() || null, id]
+      );
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/investments/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      const rows = await d1q('SELECT id FROM investments WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Investimento não encontrado.' });
+      await d1q('DELETE FROM investments WHERE id = ?', [id]);
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });

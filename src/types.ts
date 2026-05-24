@@ -140,6 +140,24 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export type AssetClass = 'fixed_income' | 'stocks' | 'fii' | 'crypto' | 'international' | 'other';
+
+export interface Investment {
+  id: string;
+  name: string;
+  ticker: string | null;
+  assetClass: AssetClass;
+  institution: string;
+  investedInCents: number;
+  currentValueInCents: number;
+  annualRate: number | null;
+  startDate: string;
+  maturityDate: string | null;
+  accountId: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
 export interface FamilyMember {
   id: string;
   name: string;

@@ -20,7 +20,8 @@ import {
   LogOut,
   Users,
   Tag,
-  Layers
+  Layers,
+  TrendingUp
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -35,6 +36,7 @@ import NotificationsModule from './components/NotificationsModule';
 import FamilyModule from './components/FamilyModule';
 import CategoriesModule from './components/CategoriesModule';
 import InstallmentsModule from './components/InstallmentsModule';
+import InvestmentsModule from './components/InvestmentsModule';
 import HealthReport from './components/HealthReport';
 import AIAdvisor from './components/AIAdvisor';
 import LoginScreen from './components/LoginScreen';
@@ -53,10 +55,11 @@ import {
   Invoice,
   Recurrence,
   FamilyMember,
-  InstallmentGroup
+  InstallmentGroup,
+  Investment
 } from './types';
 
-type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS';
+type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS';
 
 export default function App() {
   // Navigation tabs
@@ -87,6 +90,7 @@ export default function App() {
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [installmentGroups, setInstallmentGroups] = useState<InstallmentGroup[]>([]);
+  const [investments, setInvestments] = useState<Investment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -108,6 +112,7 @@ export default function App() {
         setRecurrences(data.recurrences || []);
         setFamilyMembers(data.familyMembers || []);
         setInstallmentGroups(data.installmentGroups || []);
+        setInvestments(data.investments || []);
         if (data.chatHistory && data.chatHistory.length > 0) {
           setChatHistory(data.chatHistory);
         }
@@ -526,6 +531,7 @@ export default function App() {
     setRecurrences([]);
     setFamilyMembers([]);
     setInstallmentGroups([]);
+    setInvestments([]);
   };
 
   const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
@@ -603,6 +609,44 @@ export default function App() {
     return false;
   };
 
+  const handleAddInvestment = async (data: Omit<Investment, 'id' | 'createdAt'>): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/investments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: data.name, ticker: data.ticker, assetClass: data.assetClass,
+          institution: data.institution, investedInCents: data.investedInCents,
+          currentValueInCents: data.currentValueInCents, annualRate: data.annualRate,
+          startDate: data.startDate, maturityDate: data.maturityDate,
+          accountId: data.accountId, notes: data.notes,
+        })
+      });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleUpdateInvestment = async (id: string, data: Partial<Investment>): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/investments/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
+  const handleDeleteInvestment = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/investments/${id}`, { method: 'DELETE' });
+      if (res.ok) { await fetchAllData(); return true; }
+    } catch (err) { console.error(err); }
+    return false;
+  };
+
   // Nav configuration
   const sidebarNavItems: { id: TabType; label: string; icon: React.ElementType; badge?: number }[] = [
     { id: 'DASHBOARD',    label: 'Estatísticas Gerais',         icon: Building2 },
@@ -617,6 +661,7 @@ export default function App() {
     { id: 'FAMILY',        label: 'Módulo 9: Família',           icon: Users },
     { id: 'CATEGORIES',    label: 'Módulo 10: Categorias',       icon: Tag },
     { id: 'INSTALLMENTS',  label: 'Módulo 11: Parcelamentos',    icon: Layers },
+    { id: 'INVESTMENTS',   label: 'Módulo 12: Investimentos',    icon: TrendingUp },
   ];
 
   if (isLoading || isAuthenticated === null) {
@@ -1101,6 +1146,16 @@ export default function App() {
               categories={categories}
               onAddInstallment={handleAddInstallment}
               onCancelInstallment={handleCancelInstallment}
+            />
+          )}
+
+          {activeTab === 'INVESTMENTS' && (
+            <InvestmentsModule
+              investments={investments}
+              accounts={accounts}
+              onAdd={handleAddInvestment}
+              onUpdate={handleUpdateInvestment}
+              onDelete={handleDeleteInvestment}
             />
           )}
 
