@@ -85,6 +85,50 @@ node scripts/deprovision.mjs --subdomain silva --force
 
 ---
 
+---
+
+## Painel Admin (Etapa 3)
+
+O painel roda em `admin/server.mjs` na porta **3999** e é acessado em `https://admin.mksbrasil.com`.
+
+### Setup inicial (executar uma única vez)
+
+```bash
+node admin/setup.mjs
+```
+
+O script irá:
+1. Pedir uma senha para o painel (salva em `~/.mks-control/admin.env`)
+2. Copiar o `CLOUDFLARE_API_TOKEN` do `.env` principal
+3. Adicionar rota no Cloudflare Tunnel: `admin.mksbrasil.com → localhost:3999`
+4. Criar CNAME DNS *(requer token com Zone:DNS:Edit)*
+5. Iniciar processo PM2 `mks-admin`
+
+### DNS manual (se o token não tiver Zone:DNS:Edit)
+
+No Cloudflare Dashboard → DNS → Records, adicione:
+```
+CNAME  admin.mksbrasil.com  →  50e41496-a62b-452a-bd9f-d0f08c2a620d.cfargotunnel.com  (proxied)
+```
+
+### Funcionalidades do painel
+
+| Aba | Descrição |
+|---|---|
+| **NOC** | Cards de status por família — D1 ✅/❌, R2 ✅/❌, uptime. Auto-refresh a cada 5 min |
+| **Famílias** | Tabela com todas as famílias, link para abrir e botão de destruir |
+| **Provisionar** | Formulário que executa `provision.mjs` com log em tempo real |
+
+### Gerenciar processo PM2
+
+```bash
+pm2 status mks-admin
+pm2 logs mks-admin
+pm2 restart mks-admin
+```
+
+---
+
 ## Listar famílias
 
 ```bash
