@@ -29,7 +29,7 @@ import AuthModule from './components/AuthModule';
 import CoreFinanceModule from './components/CoreFinanceModule';
 import CreditCardModule from './components/CreditCardModule';
 import RecurrencesModule from './components/RecurrencesModule';
-import OpenFinanceModule from './components/OpenFinanceModule';
+import OFXImportModule from './components/OFXImportModule';
 import BudgetsModule from './components/BudgetsModule';
 import AnalyticsModule from './components/AnalyticsModule';
 import NotificationsModule from './components/NotificationsModule';
@@ -423,46 +423,6 @@ export default function App() {
     }
   };
 
-  const handleConnectItem = async (itemId: string, institutionName: string, logo: string) => {
-    try {
-      const response = await fetch('/api/open-finance/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemId, institutionName, logo }),
-      });
-      if (response.ok) {
-        const body = await response.json();
-        setConnections(prev => {
-          const exists = prev.find(c => c.itemId === itemId);
-          if (exists) return prev.map(c => c.itemId === itemId ? { ...c, status: 'SYNCING' } : c);
-          return [...prev, { id: body.connId, institutionName, logo, status: 'SYNCING', itemId } as any];
-        });
-        return body;
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    return null;
-  };
-
-  const handleSyncItem = async (itemId: string) => {
-    setConnections(prev => prev.map(c => c.itemId === itemId ? { ...c, status: 'SYNCING' } : c));
-    try {
-      await fetch(`/api/open-finance/sync/${itemId}`, { method: 'POST' });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleDeleteConnection = async (itemId: string) => {
-    try {
-      await fetch(`/api/open-finance/connections/${itemId}`, { method: 'DELETE' });
-      setConnections(prev => prev.filter(c => c.itemId !== itemId));
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleSendMessage = async (text: string): Promise<string | null> => {
     const newUserMsg: ChatMessage = {
       id: `m-usr-${Date.now()}`,
@@ -518,22 +478,65 @@ export default function App() {
     }
   };
 
-  const handleLogin = async (password: string): Promise<boolean> => {
+  const handleLogin = async (email: string, password: string, totpCode?: string): Promise<{ ok: boolean; requiresTOTP?: boolean; error?: string }> => {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ email: email || undefined, password, totpCode }),
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (data.requiresTOTP) return { ok: false, requiresTOTP: true };
+      if (res.ok && data.success) {
         setIsAuthenticated(true);
         await fetchAllData();
-        return true;
+        return { ok: true };
       }
+      return { ok: false, error: data.error };
     } catch {
-      // ignore network errors
+      return { ok: false, error: 'Erro de conexão.' };
     }
-    return false;
+  };
+
+  // Invite overlay state — check ?invite=token on load
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [inviteData, setInviteData] = useState<{ name: string; email: string; has2fa: boolean; qrDataUrl: string | null } | null>(null);
+  const [invitePassword, setInvitePassword] = useState('');
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteDone, setInviteDone] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('invite');
+    if (!token) return;
+    setInviteToken(token);
+    fetch(`/api/invite/${token}`)
+      .then(r => r.json())
+      .then(d => { if (!d.error) setInviteData(d); else setInviteError(d.error); })
+      .catch(() => setInviteError('Convite inválido.'));
+  }, []);
+
+  const handleCompleteInvite = async (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    if (!invitePassword || invitePassword.length < 8) { setInviteError('Senha deve ter no mínimo 8 caracteres.'); return; }
+    setInviteSubmitting(true);
+    try {
+      const res = await fetch(`/api/invite/${inviteToken}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: invitePassword }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setInviteDone(true);
+        window.history.replaceState({}, '', '/');
+      } else {
+        setInviteError(data.error || 'Erro ao definir senha.');
+      }
+    } finally {
+      setInviteSubmitting(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -674,7 +677,7 @@ export default function App() {
     { id: 'CORE',         label: 'Módulo 1: Contas & Ledger',    icon: Database },
     { id: 'CREDIT_CARDS', label: 'Módulo 2: Cartões & Faturas',  icon: CreditCardIcon },
     { id: 'RECURRENCES',  label: 'Módulo 3: Recorrências',       icon: RefreshCw },
-    { id: 'OPEN_FINANCE', label: 'Módulo 4: Open Finance',       icon: Network },
+    { id: 'OPEN_FINANCE', label: 'Módulo 4: Importar OFX',       icon: Network },
     { id: 'BUDGETS',      label: 'Módulo 5: Planejamento',       icon: Target },
     { id: 'ANALYTICS',    label: 'Módulo 6: Relatórios',         icon: BarChart3 },
     { id: 'NOTIFICATIONS',label: 'Módulo 7: Notificações',       icon: Bell, badge: unreadAlertsCount },
@@ -694,6 +697,83 @@ export default function App() {
             <h1 className="font-extrabold text-slate-800 text-lg tracking-tight">Consolidando MKS Open Finance</h1>
             <p className="text-xs text-slate-400 font-medium">Buscando livros contábeis em centavos no servidor...</p>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Invite completion overlay ────────────────────────────────────────────
+  if (inviteToken) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+          <div className="flex flex-col items-center gap-3">
+            <span className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xl font-bold shadow-sm">M</span>
+            <div className="text-center">
+              <h1 className="font-black text-sm tracking-widest text-indigo-600 uppercase">MKS Finanças</h1>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">Ativar Conta</p>
+            </div>
+          </div>
+
+          {inviteDone ? (
+            <div className="text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-teal-50 border border-teal-200 flex items-center justify-center mx-auto">
+                <span className="text-2xl">✓</span>
+              </div>
+              <p className="text-sm font-bold text-slate-800">Senha criada com sucesso!</p>
+              <p className="text-xs text-slate-500">Agora você pode fazer login com seu email e senha.</p>
+              <button
+                onClick={() => { setInviteToken(null); setInviteData(null); setInviteDone(false); }}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold"
+              >Ir para o Login</button>
+            </div>
+          ) : inviteError ? (
+            <div className="text-center space-y-3">
+              <p className="text-sm text-red-600 font-medium">{inviteError}</p>
+              <p className="text-xs text-slate-400">O convite pode ter expirado. Solicite um novo ao administrador.</p>
+            </div>
+          ) : inviteData ? (
+            <form onSubmit={handleCompleteInvite} className="space-y-4">
+              <p className="text-sm text-slate-700">Olá, <strong>{inviteData.name}</strong>! Defina sua senha para ativar o acesso.</p>
+
+              {inviteData.has2fa && inviteData.qrDataUrl && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-600">Configure o autenticador (2FA):</p>
+                  <div className="flex justify-center p-3 bg-white border border-slate-200 rounded-xl">
+                    <img src={inviteData.qrDataUrl} alt="QR Code 2FA" className="w-44 h-44" />
+                  </div>
+                  <p className="text-[11px] text-slate-500 text-center">Escaneie este QR Code no Google Authenticator ou Authy antes de continuar.</p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nova Senha</label>
+                <input
+                  type="password"
+                  value={invitePassword}
+                  onChange={e => setInvitePassword(e.target.value)}
+                  placeholder="Mínimo 8 caracteres"
+                  required
+                  minLength={8}
+                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {inviteError && <p className="text-xs text-red-600 font-medium">{inviteError}</p>}
+
+              <button
+                type="submit"
+                disabled={inviteSubmitting || invitePassword.length < 8}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold"
+              >
+                {inviteSubmitting ? 'Salvando...' : 'Ativar Conta'}
+              </button>
+            </form>
+          ) : (
+            <div className="flex justify-center py-6">
+              <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1054,7 +1134,7 @@ export default function App() {
 
           {/* Tab Route Selection pages */}
           {activeTab === 'AUTH' && (
-            <AuthModule user={user} onUpdateUser={setUser} />
+            <AuthModule />
           )}
 
           {activeTab === 'CORE' && (
@@ -1103,11 +1183,8 @@ export default function App() {
           )}
 
           {activeTab === 'OPEN_FINANCE' && (
-            <OpenFinanceModule
-              connections={connections}
-              onConnectItem={handleConnectItem}
-              onSyncItem={handleSyncItem}
-              onDeleteConnection={handleDeleteConnection}
+            <OFXImportModule
+              accounts={accounts}
               onRefreshAllData={fetchAllData}
             />
           )}

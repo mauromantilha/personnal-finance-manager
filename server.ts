@@ -5,12 +5,17 @@
 
 import 'dotenv/config';
 import crypto from 'crypto';
+import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import Groq from 'groq-sdk';
+import * as otplib from 'otplib';
+import QRCode from 'qrcode';
+
+const scryptAsync = promisify(crypto.scrypt);
 import {
   FinancialAccount,
   Transaction,
@@ -357,6 +362,47 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   next();
 }
 
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const EMAIL_FROM = 'financas@mksbrasil.com';
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${hash.toString('hex')}`;
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  try {
+    const [salt, hash] = stored.split(':');
+    const hashBuf = Buffer.from(hash, 'hex');
+    const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+    return crypto.timingSafeEqual(hashBuf, derived);
+  } catch { return false; }
+}
+
+async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+  if (!RESEND_API_KEY) { console.warn('[EMAIL] RESEND_API_KEY não configurado.'); return; }
+  const resp = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: EMAIL_FROM, to, subject, html }),
+  });
+  if (!resp.ok) console.error('[EMAIL] Resend error:', resp.status, await resp.text());
+}
+
+function buildInviteEmail(name: string, inviteUrl: string, with2fa: boolean): string {
+  return `
+    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px">
+      <h2 style="color:#1e293b;margin-bottom:8px">Bem-vindo ao MKS Finanças, ${name}!</h2>
+      <p style="color:#475569">Você foi convidado para acessar o sistema financeiro MKS.</p>
+      ${with2fa ? '<p style="color:#475569">Sua conta inclui <strong>autenticação de dois fatores (2FA)</strong>. Após definir sua senha você receberá o QR Code para configurar o autenticador.</p>' : ''}
+      <a href="${inviteUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">
+        Criar minha senha →
+      </a>
+      <p style="margin-top:24px;color:#94a3b8;font-size:12px">Este link expira em 7 dias. Se você não esperava este e-mail, ignore-o.</p>
+    </div>`;
+}
+
 // ─── Groq ─────────────────────────────────────────────────────────────────────
 
 let groqClient: Groq | null = null;
@@ -556,15 +602,44 @@ async function startServer() {
 
   // ── Auth (public) ──────────────────────────────────────────────────────────
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente em 15 minutos.' });
-    const { password } = req.body;
-    if (!password || password !== APP_PASSWORD) return res.status(401).json({ error: 'Senha incorreta.' });
-    const token = createToken();
+    const { email, password, totpCode } = req.body;
+    if (!password) return res.status(401).json({ error: 'Senha obrigatória.' });
+
     const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-    res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${secure}`);
-    res.json({ success: true });
+    const setSession = () => {
+      const token = createToken();
+      res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${secure}`);
+    };
+
+    // Admin login — no email required
+    if (!email && password === APP_PASSWORD) {
+      setSession();
+      return res.json({ success: true, role: 'admin' });
+    }
+
+    // User login — email + password
+    if (email) {
+      try {
+        const rows = await d1q<any>('SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND is_active = 1', [email]);
+        if (!rows.length || !rows[0].password_hash) return res.status(401).json({ error: 'Credenciais inválidas.' });
+        const user = rows[0];
+        if (!(await verifyPassword(password, user.password_hash))) return res.status(401).json({ error: 'Credenciais inválidas.' });
+        if (user.totp_secret) {
+          if (!totpCode) return res.status(200).json({ requiresTOTP: true });
+          const result = otplib.verifySync({ token: totpCode, secret: user.totp_secret });
+          if (!result || (typeof result === 'object' && !result.valid)) return res.status(401).json({ error: 'Código 2FA inválido.' });
+        }
+        setSession();
+        return res.json({ success: true, role: 'user', name: user.name });
+      } catch (e: any) {
+        return res.status(500).json({ error: 'Erro interno.', details: e.message });
+      }
+    }
+
+    return res.status(401).json({ error: 'Credenciais inválidas.' });
   });
 
   app.post('/api/auth/logout', (_req, res) => {
@@ -575,6 +650,36 @@ async function startServer() {
   app.get('/api/auth/status', (req, res) => {
     const token = parseCookies(req)[COOKIE_NAME];
     res.json({ authenticated: !!(token && verifyToken(token)) });
+  });
+
+  // ── Invite completion (public — no auth) ─────────────────────────────────
+
+  app.get('/api/invite/:token', async (req, res) => {
+    const rows = await d1q<any>(`
+      SELECT i.token, i.expires_at, i.used_at, u.name, u.email, u.totp_secret
+      FROM invites i JOIN users u ON u.id = i.user_id WHERE i.token = ?`, [req.params.token]);
+    if (!rows.length) return res.status(404).json({ error: 'Convite inválido.' });
+    const inv = rows[0];
+    if (inv.used_at) return res.status(410).json({ error: 'Este convite já foi utilizado.' });
+    if (new Date(inv.expires_at) < new Date()) return res.status(410).json({ error: 'Convite expirado.' });
+    let qrDataUrl: string | null = null;
+    if (inv.totp_secret) {
+      const uri = otplib.generateURI({ secret: inv.totp_secret, label: inv.email, issuer: 'MKS Finanças' });
+      qrDataUrl = await QRCode.toDataURL(uri, { width: 240 });
+    }
+    res.json({ name: inv.name, email: inv.email, has2fa: !!inv.totp_secret, qrDataUrl });
+  });
+
+  app.post('/api/invite/:token/complete', async (req, res) => {
+    const { password } = req.body;
+    if (!password || password.length < 8) return res.status(400).json({ error: 'Senha deve ter no mínimo 8 caracteres.' });
+    const rows = await d1q<any>('SELECT i.*, u.id as user_id FROM invites i JOIN users u ON u.id = i.user_id WHERE i.token = ?', [req.params.token]);
+    if (!rows.length || rows[0].used_at) return res.status(410).json({ error: 'Convite inválido ou já utilizado.' });
+    if (new Date(rows[0].expires_at) < new Date()) return res.status(410).json({ error: 'Convite expirado.' });
+    const hash = await hashPassword(password);
+    await d1q('UPDATE users SET password_hash = ? WHERE id = ?', [hash, rows[0].user_id]);
+    await d1q('UPDATE invites SET used_at = ? WHERE token = ?', [new Date().toISOString(), req.params.token]);
+    res.json({ success: true });
   });
 
   // ── Pluggy webhook (public — no auth) ────────────────────────────────────
@@ -831,11 +936,62 @@ async function startServer() {
         { sql: 'DELETE FROM family_members' },
         { sql: 'DELETE FROM installment_groups' },
         { sql: 'DELETE FROM investments' },
+        { sql: 'DELETE FROM invites' },
+        { sql: 'DELETE FROM users' },
       ]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: 'D1 error', details: e.message });
     }
+  });
+
+  // ── USERS (Auth module) ────────────────────────────────────────────────────
+
+  app.get('/api/users', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT id, name, email, is_active, (totp_secret IS NOT NULL) as has_2fa, created_at FROM users ORDER BY created_at DESC');
+      res.json(rows.map(u => ({ id: u.id, name: u.name, email: u.email, isActive: !!u.is_active, has2fa: !!u.has_2fa, createdAt: u.created_at })));
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/users', async (req, res) => {
+    const { name, email, with2fa } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Nome e email são obrigatórios.' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Email inválido.' });
+    try {
+      const dup = await d1q<any>('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]);
+      if (dup.length) return res.status(409).json({ error: 'Usuário com este email já existe.' });
+
+      let totpSecret: string | null = null;
+      let qrDataUrl: string | null = null;
+      if (with2fa) {
+        totpSecret = otplib.generateSecret();
+        const uri = otplib.generateURI({ secret: totpSecret, label: email, issuer: 'MKS Finanças' });
+        qrDataUrl = await QRCode.toDataURL(uri, { width: 240 });
+      }
+
+      const userId = `user-${Date.now()}`;
+      await d1q('INSERT INTO users (id,name,email,password_hash,totp_secret,is_active,created_at) VALUES (?,?,?,NULL,?,1,?)',
+        [userId, name, email, totpSecret, new Date().toISOString()]);
+
+      const inviteToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await d1q('INSERT INTO invites (token,user_id,expires_at,used_at,created_at) VALUES (?,?,?,NULL,?)',
+        [inviteToken, userId, expiresAt, new Date().toISOString()]);
+
+      const inviteUrl = `${APP_URL}/?invite=${inviteToken}`;
+      sendEmail(email, 'Convite — MKS Finanças', buildInviteEmail(name, inviteUrl, !!with2fa)).catch(console.error);
+
+      res.json({ success: true, userId, qrDataUrl });
+    } catch (e: any) { res.status(500).json({ error: 'Erro ao criar usuário.', details: e.message }); }
+  });
+
+  app.delete('/api/users/:id', async (req, res) => {
+    try {
+      await d1q('DELETE FROM invites WHERE user_id = ?', [req.params.id]);
+      await d1q('DELETE FROM users WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
 
   // ── UPDATE BUDGET ──────────────────────────────────────────────────────────
@@ -1396,6 +1552,42 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
     res.setHeader('Content-Disposition', 'inline');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(Buffer.from(doc.body));
+  });
+
+  // ── OFX IMPORT ────────────────────────────────────────────────────────────
+
+  app.post('/api/import/ofx', async (req, res) => {
+    const { transactions, accountId } = req.body;
+    if (!accountId || !Array.isArray(transactions) || !transactions.length)
+      return res.status(400).json({ error: 'accountId e transactions[] são obrigatórios.' });
+    try {
+      const accRows = await d1q<any>('SELECT id FROM accounts WHERE id = ?', [accountId]);
+      if (!accRows.length) return res.status(404).json({ error: 'Conta não encontrada.' });
+
+      const stmts: { sql: string; params: (string | number | null)[] }[] = [];
+      let imported = 0;
+      let skipped = 0;
+
+      for (const tx of transactions) {
+        const txId = `tx-ofx-${tx.fitid}`;
+        const dup = await d1q<any>('SELECT id FROM transactions WHERE id = ?', [txId]);
+        if (dup.length) { skipped++; continue; }
+        const txType = tx.type === 'CREDIT' ? 'REC' : 'DES';
+        const cat = classifyMerchant(tx.memo || '');
+        stmts.push({
+          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,original_merchant_name) VALUES (?,?,?,?,?,?,?,1,?)',
+          params: [txId, tx.amountCents, tx.date, txType, cat, tx.memo, accountId, tx.memo],
+        });
+        const balDelta = txType === 'REC' ? tx.amountCents : -tx.amountCents;
+        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [balDelta, accountId] });
+        imported++;
+      }
+      if (stmts.length) {
+        await d1exec(stmts);
+        await recalculateBudgets();
+      }
+      res.json({ success: true, imported, skipped });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
 
   // ── CSV IMPORT ─────────────────────────────────────────────────────────────
