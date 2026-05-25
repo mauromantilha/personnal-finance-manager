@@ -17,7 +17,7 @@ import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join, dirname }                       from 'path';
 import { fileURLToPath }                       from 'url';
 import { randomBytes }                         from 'crypto';
-import { spawn }                               from 'child_process';
+import { spawn, execSync }                      from 'child_process';
 
 const __dirname    = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
@@ -96,6 +96,10 @@ async function readBody(req) {
 function loadFamilies() {
   const p = join(CTRL, 'families.json');
   return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : [];
+}
+
+function saveFamilies(list) {
+  writeFileSync(join(CTRL, 'families.json'), JSON.stringify(list, null, 2));
 }
 
 // ── Email quota ───────────────────────────────────────────────────────────────
@@ -566,18 +570,19 @@ async function refreshHealth() {
     document.getElementById('hdr-stat').classList.remove('hidden');
 
     grid.innerHTML = active.map(f => {
-      const h = f.health || {};
-      const ok = h.ok === true;
-      const statusColor = ok ? 'text-green-400' : 'text-red-400';
-      const borderColor = ok ? 'border-green-900/40' : 'border-red-900/40';
-      const dotColor    = ok ? 'bg-green-500' : 'bg-red-500';
-      const statusText  = ok ? 'Online' : 'Offline';
+      const h          = f.health || {};
+      const suspended  = h.suspended === true;
+      const ok         = h.ok === true;
+      const statusColor = suspended ? 'text-slate-400' : ok ? 'text-green-400' : 'text-red-400';
+      const borderColor = suspended ? 'border-slate-700'  : ok ? 'border-green-900/40' : 'border-red-900/40';
+      const dotColor    = suspended ? 'bg-slate-500'      : ok ? 'bg-green-500'        : 'bg-red-500';
+      const statusText  = suspended ? 'Suspensa'          : ok ? 'Online'              : 'Offline';
       const uptime      = h.uptime != null ? fmtUptime(h.uptime) : '—';
-      const lgpdBadge   = h.lgpd_accepted === true
+      const lgpdBadge   = suspended ? '' : (h.lgpd_accepted === true
         ? '<span class="text-xs bg-green-950 text-green-400 border border-green-900/50 px-1.5 py-0.5 rounded">LGPD ✓</span>'
-        : '<span class="text-xs bg-amber-950 text-amber-400 border border-amber-900/50 px-1.5 py-0.5 rounded">LGPD ⏳</span>';
+        : '<span class="text-xs bg-amber-950 text-amber-400 border border-amber-900/50 px-1.5 py-0.5 rounded">LGPD ⏳</span>');
       return \`
-        <div class="bg-slate-900 border \${borderColor} rounded-xl p-5 transition-all hover:border-slate-600">
+        <div class="bg-slate-900 border \${borderColor} rounded-xl p-5 transition-all hover:border-slate-600 \${suspended ? 'opacity-60' : ''}">
           <div class="flex items-start justify-between mb-2">
             <h3 class="font-semibold text-white">\${esc(f.name)}</h3>
             <span class="flex items-center gap-1.5 text-xs \${statusColor}">
@@ -585,17 +590,17 @@ async function refreshHealth() {
               \${statusText}
             </span>
           </div>
-          <div class="mb-3">\${lgpdBadge}</div>
+          \${lgpdBadge ? '<div class="mb-3">' + lgpdBadge + '</div>' : '<div class="mb-3"></div>'}
           <p class="text-xs text-slate-400 mb-1">🌐 \${esc(f.subdomain)}.mksbrasil.com</p>
           <p class="text-xs text-slate-500 mb-4">⚙️ porta \${f.port || '—'}</p>
           <div class="grid grid-cols-3 gap-2 text-center">
             <div class="bg-slate-800 rounded-lg py-2">
               <div class="text-xs text-slate-500 mb-1">D1</div>
-              <div>\${h.db ? '✅' : (ok === false ? '❌' : '–')}</div>
+              <div>\${suspended ? '⏸' : h.db ? '✅' : (ok === false ? '❌' : '–')}</div>
             </div>
             <div class="bg-slate-800 rounded-lg py-2">
               <div class="text-xs text-slate-500 mb-1">R2</div>
-              <div>\${h.storage ? '✅' : (ok === false ? '❌' : '–')}</div>
+              <div>\${suspended ? '⏸' : h.storage ? '✅' : (ok === false ? '❌' : '–')}</div>
             </div>
             <div class="bg-slate-800 rounded-lg py-2">
               <div class="text-xs text-slate-500 mb-1">Uptime</div>
@@ -631,20 +636,31 @@ async function loadFamilies() {
     }
 
     tbody.innerHTML = data.map(f => {
-      const deleted  = f.status === 'deleted';
-      const badge    = deleted
+      const deleted   = f.status === 'deleted';
+      const suspended = f.status === 'suspended';
+      const badge = deleted
         ? '<span class="bg-slate-800 text-slate-500 text-xs px-2 py-1 rounded-full">Deletada</span>'
-        : '<span class="bg-green-950 text-green-400 border border-green-900/50 text-xs px-2 py-1 rounded-full">Ativa</span>';
-      const actions  = deleted ? '<span class="text-slate-600">—</span>' : \`
-        <a href="https://\${esc(f.subdomain)}.mksbrasil.com" target="_blank" rel="noopener"
-           class="text-indigo-400 hover:text-indigo-300 text-xs mr-3 transition-colors">↗ Abrir</a>
-        <button onclick="startDelete('\${esc(f.subdomain)}')"
-           class="text-red-400 hover:text-red-300 text-xs transition-colors">🗑 Destruir</button>
-      \`;
+        : suspended
+          ? '<span class="bg-slate-800 text-slate-400 border border-slate-700 text-xs px-2 py-1 rounded-full">⏸ Suspensa</span>'
+          : '<span class="bg-green-950 text-green-400 border border-green-900/50 text-xs px-2 py-1 rounded-full">Ativa</span>';
+      const actions = deleted ? '<span class="text-slate-600">—</span>'
+        : suspended ? \`
+          <button onclick="doReactivate('\${esc(f.subdomain)}')"
+             class="text-green-400 hover:text-green-300 text-xs mr-3 transition-colors">▶ Reativar</button>
+          <button onclick="startDelete('\${esc(f.subdomain)}')"
+             class="text-red-400 hover:text-red-300 text-xs transition-colors">🗑 Destruir</button>
+        \` : \`
+          <a href="https://\${esc(f.subdomain)}.mksbrasil.com" target="_blank" rel="noopener"
+             class="text-indigo-400 hover:text-indigo-300 text-xs mr-3 transition-colors">↗ Abrir</a>
+          <button onclick="doSuspend('\${esc(f.subdomain)}')"
+             class="text-amber-400 hover:text-amber-300 text-xs mr-3 transition-colors">⏸ Suspender</button>
+          <button onclick="startDelete('\${esc(f.subdomain)}')"
+             class="text-red-400 hover:text-red-300 text-xs transition-colors">🗑 Destruir</button>
+        \`;
       const created = f.createdAt ? new Date(f.createdAt).toLocaleDateString('pt-BR') : '—';
       const suffix  = f.deletedAt ? ' <span class="text-slate-600">(del. ' + new Date(f.deletedAt).toLocaleDateString('pt-BR') + ')</span>' : '';
       return \`
-        <tr class="border-b border-slate-800/50 \${deleted ? 'opacity-40' : 'hover:bg-slate-900/50'} transition-colors">
+        <tr class="border-b border-slate-800/50 \${deleted ? 'opacity-40' : suspended ? 'opacity-60' : 'hover:bg-slate-900/50'} transition-colors">
           <td class="px-4 py-3 font-medium">\${esc(f.name)}</td>
           <td class="px-4 py-3 text-slate-400">\${esc(f.subdomain)}\${suffix}</td>
           <td class="px-4 py-3 text-slate-500">\${f.port || '—'}</td>
@@ -706,6 +722,19 @@ async function doProvision(dryRun) {
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────────
+
+async function doSuspend(subdomain) {
+  if (!confirm('Suspender "' + subdomain + '"? O processo PM2 será parado mas os dados ficam intactos.')) return;
+  const r = await fetch('/api/families/' + subdomain + '/suspend', { method: 'POST' });
+  if (r.ok) { await Promise.all([loadFamilies(), refreshHealth()]); }
+  else { alert('Erro ao suspender: ' + (await r.json()).error); }
+}
+
+async function doReactivate(subdomain) {
+  const r = await fetch('/api/families/' + subdomain + '/reactivate', { method: 'POST' });
+  if (r.ok) { await Promise.all([loadFamilies(), refreshHealth()]); }
+  else { alert('Erro ao reativar: ' + (await r.json()).error); }
+}
 
 function startDelete(subdomain) {
   pendingDelete = subdomain;
@@ -947,16 +976,20 @@ const server = createServer(async (req, res) => {
 
   // ── GET /api/health/all ───────────────────────────────────────────────────
   if (path === '/api/health/all' && req.method === 'GET') {
-    const all     = loadFamilies();
-    const active  = all.filter(f => f.status !== 'deleted');
-    const deleted = all.filter(f => f.status === 'deleted');
+    const all        = loadFamilies();
+    const active     = all.filter(f => f.status === 'active');
+    const suspended  = all.filter(f => f.status === 'suspended');
+    const deleted    = all.filter(f => f.status === 'deleted');
 
     const results = await Promise.all(
       active.map(async f => ({ ...f, health: await checkFamilyHealth(f.subdomain) }))
     );
+    const suspendedWithStatus = suspended.map(f => ({
+      ...f, health: { ok: false, suspended: true },
+    }));
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify([...results, ...deleted]));
+    return res.end(JSON.stringify([...results, ...suspendedWithStatus, ...deleted]));
   }
 
   // ── POST /api/provision (streaming stdout) ────────────────────────────────
@@ -1149,6 +1182,49 @@ const server = createServer(async (req, res) => {
         };
       }),
     }));
+  }
+
+  // ── POST /api/families/:subdomain/suspend ────────────────────────────────
+  const suspendMatch = path.match(/^\/api\/families\/([a-z0-9-]{1,40})\/suspend$/);
+  if (suspendMatch && req.method === 'POST') {
+    const subdomain = suspendMatch[1];
+    const families  = loadFamilies();
+    const idx       = families.findIndex(f => f.subdomain === subdomain && f.status === 'active');
+    if (idx === -1) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Família ativa não encontrada' }));
+    }
+    try {
+      execSync(`pm2 stop ${families[idx].pm2Name} 2>/dev/null || true`, { stdio: 'pipe' });
+      execSync('pm2 save', { stdio: 'pipe' });
+    } catch {}
+    families[idx].status      = 'suspended';
+    families[idx].suspendedAt = new Date().toISOString();
+    saveFamilies(families);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
+  }
+
+  // ── POST /api/families/:subdomain/reactivate ──────────────────────────────
+  const reactivateMatch = path.match(/^\/api\/families\/([a-z0-9-]{1,40})\/reactivate$/);
+  if (reactivateMatch && req.method === 'POST') {
+    const subdomain = reactivateMatch[1];
+    const families  = loadFamilies();
+    const idx       = families.findIndex(f => f.subdomain === subdomain && f.status === 'suspended');
+    if (idx === -1) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Família suspensa não encontrada' }));
+    }
+    const ecoPath = join(CTRL, 'ecosystems', `${families[idx].pm2Name}.config.cjs`);
+    try {
+      execSync(`pm2 start "${ecoPath}" 2>/dev/null || pm2 restart ${families[idx].pm2Name}`, { stdio: 'pipe' });
+      execSync('pm2 save', { stdio: 'pipe' });
+    } catch {}
+    families[idx].status      = 'active';
+    families[idx].suspendedAt = null;
+    saveFamilies(families);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
   }
 
   // ── 404 ───────────────────────────────────────────────────────────────────
