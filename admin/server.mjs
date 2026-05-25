@@ -214,6 +214,10 @@ const HTML = `<!DOCTYPE html>
         class="py-3 px-2 text-sm font-medium text-slate-400 hover:text-white transition-colors border-b-2 border-transparent">
         📧 E-mails
       </button>
+      <button onclick="setTab('lgpd')" id="tab-lgpd"
+        class="py-3 px-2 text-sm font-medium text-slate-400 hover:text-white transition-colors border-b-2 border-transparent">
+        ⚖️ LGPD
+      </button>
     </nav>
   </div>
 
@@ -380,6 +384,60 @@ Content-Type: application/json
       </div>
     </div>
 
+    <!-- LGPD Pane -->
+    <div id="pane-lgpd" class="hidden fade-in">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Registro de Aceite LGPD</h2>
+          <p class="text-xs text-slate-500 mt-1">Lei nº 13.709/2018 — Política v1.0 · MKS Brasil CNPJ 64.293.212/0001-97</p>
+        </div>
+        <button onclick="loadLGPD()"
+          class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm px-4 py-2 rounded-lg transition-colors">
+          ↻ Atualizar
+        </button>
+      </div>
+
+      <!-- Resumo -->
+      <div id="lgpd-summary" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"></div>
+
+      <!-- Tabela -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto mb-6">
+        <table class="w-full text-sm min-w-[600px]">
+          <thead>
+            <tr class="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-800">
+              <th class="text-left px-4 py-3">Família</th>
+              <th class="text-left px-4 py-3">Subdomínio</th>
+              <th class="text-left px-4 py-3">Status</th>
+              <th class="text-left px-4 py-3">Versão</th>
+              <th class="text-left px-4 py-3">Data do Aceite</th>
+              <th class="text-left px-4 py-3">Instância</th>
+            </tr>
+          </thead>
+          <tbody id="lgpd-tbody">
+            <tr><td colspan="6" class="px-4 py-8 text-slate-500 text-center">Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Nota legal -->
+      <div class="bg-slate-900 border border-slate-700 rounded-xl p-5 text-xs text-slate-400 leading-relaxed space-y-2">
+        <p class="font-semibold text-slate-300">⚖️ Nota de Conformidade LGPD</p>
+        <p>
+          O aceite é registrado diretamente no banco D1 de cada família com <strong class="text-slate-300">timestamp, IP de acesso
+          e user-agent</strong> — evidência auditável exigida pelo Art. 8 § 1º da LGPD como prova de que o consentimento
+          foi dado de forma livre, informada e inequívoca.
+        </p>
+        <p>
+          O painel admin <strong class="text-slate-300">não acessa dados financeiros</strong> das famílias — consulta apenas
+          o endpoint público <code class="text-indigo-400">/api/lgpd/status</code> de cada instância.
+        </p>
+        <p>
+          DPO / Encarregado: <a href="mailto:privacidade@mksbrasil.com" class="text-indigo-400 hover:text-indigo-300">privacidade@mksbrasil.com</a>
+          · Prazo de resposta: até 15 dias corridos.
+        </p>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -476,13 +534,14 @@ async function init() {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 function setTab(name) {
-  ['noc', 'families', 'provision', 'emails'].forEach(t => {
+  ['noc', 'families', 'provision', 'emails', 'lgpd'].forEach(t => {
     document.getElementById('pane-' + t).classList.toggle('hidden', t !== name);
     const btn = document.getElementById('tab-' + t);
     btn.classList.toggle('tab-active', t === name);
   });
   activeTab = name;
   if (name === 'emails') loadEmailQuota();
+  if (name === 'lgpd')   loadLGPD();
 }
 
 // ── NOC ───────────────────────────────────────────────────────────────────────
@@ -754,6 +813,72 @@ async function loadEmailQuota() {
   }
 }
 
+// ── LGPD ─────────────────────────────────────────────────────────────────────
+
+async function loadLGPD() {
+  const summary = document.getElementById('lgpd-summary');
+  const tbody   = document.getElementById('lgpd-tbody');
+  summary.innerHTML = '';
+  tbody.innerHTML   = '<tr><td colspan="6" class="px-4 py-8 text-slate-500 text-center">Consultando instâncias...</td></tr>';
+
+  try {
+    const r    = await fetch('/api/lgpd/all');
+    const data = await r.json();
+
+    const total    = data.length;
+    const accepted = data.filter(f => f.lgpd?.accepted).length;
+    const pending  = total - accepted;
+
+    // Resumo cards
+    summary.innerHTML = \`
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 text-center">
+        <div class="text-3xl font-bold text-white mb-1">\${total}</div>
+        <div class="text-xs text-slate-400">Famílias ativas</div>
+      </div>
+      <div class="bg-slate-900 border border-green-900/40 rounded-xl p-5 text-center">
+        <div class="text-3xl font-bold text-green-400 mb-1">\${accepted}</div>
+        <div class="text-xs text-slate-400">Aceite registrado</div>
+      </div>
+      <div class="bg-slate-900 border \${pending > 0 ? 'border-amber-900/40' : 'border-slate-800'} rounded-xl p-5 text-center">
+        <div class="text-3xl font-bold \${pending > 0 ? 'text-amber-400' : 'text-slate-600'} mb-1">\${pending}</div>
+        <div class="text-xs text-slate-400">Aguardando aceite</div>
+      </div>
+    \`;
+
+    if (data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-slate-500 text-center">Nenhuma família ativa.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map(f => {
+      const lgpd     = f.lgpd || {};
+      const ok       = lgpd.accepted === true;
+      const badge    = ok
+        ? '<span class="bg-green-950 text-green-400 border border-green-900/50 text-xs px-2 py-1 rounded-full">✅ Aceite</span>'
+        : '<span class="bg-amber-950 text-amber-400 border border-amber-900/50 text-xs px-2 py-1 rounded-full">⏳ Pendente</span>';
+      const acceptedAt = lgpd.acceptedAt
+        ? new Date(lgpd.acceptedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+        : '—';
+      const version = lgpd.version || (ok ? '1.0' : '—');
+      const link    = \`<a href="https://\${esc(f.subdomain)}.mksbrasil.com" target="_blank" rel="noopener"
+                          class="text-indigo-400 hover:text-indigo-300 text-xs transition-colors">↗ Abrir</a>\`;
+      return \`
+        <tr class="border-b border-slate-800/50 hover:bg-slate-900/50 transition-colors \${!ok ? 'bg-amber-950/5' : ''}">
+          <td class="px-4 py-3 font-medium text-white">\${esc(f.name)}</td>
+          <td class="px-4 py-3 text-slate-400">\${esc(f.subdomain)}</td>
+          <td class="px-4 py-3">\${badge}</td>
+          <td class="px-4 py-3 text-slate-500">\${version}</td>
+          <td class="px-4 py-3 text-slate-400">\${acceptedAt}</td>
+          <td class="px-4 py-3">\${link}</td>
+        </tr>
+      \`;
+    }).join('');
+  } catch (e) {
+    summary.innerHTML = '';
+    tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-4 text-red-400">' + esc(e.message) + '</td></tr>';
+  }
+}
+
 // Close modal on backdrop click
 document.getElementById('modal-del').addEventListener('click', e => { if (e.target === e.currentTarget) closeDelModal(); });
 document.getElementById('modal-deprov').addEventListener('click', e => { if (e.target === e.currentTarget) closeDeprovModal(); });
@@ -981,6 +1106,26 @@ const server = createServer(async (req, res) => {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: false, error: 'send_failed', message: e.message }));
     }
+  }
+
+  // ── GET /api/lgpd/all — consulta status LGPD de cada família ─────────────
+  if (path === '/api/lgpd/all' && req.method === 'GET') {
+    const families = loadFamilies().filter(f => f.status !== 'deleted');
+
+    const results = await Promise.all(families.map(async f => {
+      try {
+        const r = await fetch(`https://${f.subdomain}.${BASE_DOMAIN}/api/lgpd/status`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        const lgpd = r.ok ? await r.json() : { accepted: false, version: null, acceptedAt: null };
+        return { ...f, lgpd };
+      } catch {
+        return { ...f, lgpd: { accepted: false, version: null, acceptedAt: null, unreachable: true } };
+      }
+    }));
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(results));
   }
 
   // ── GET /api/email/quota — admin session ──────────────────────────────────
