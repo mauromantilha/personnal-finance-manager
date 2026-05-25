@@ -35,9 +35,9 @@ import {
 
 // ─── Cloudflare D1 + R2 ──────────────────────────────────────────────────────
 
-const CF_ACCOUNT_ID = '9b61f609fee4408fd1c4344feaf9b16a';
-const D1_DATABASE_ID = '06790b84-c635-4111-918d-cbdad49a2f29';
-const R2_BUCKET = 'mks-finance-storage';
+const CF_ACCOUNT_ID  = '9b61f609fee4408fd1c4344feaf9b16a';
+const D1_DATABASE_ID = process.env.D1_DATABASE_ID  || '06790b84-c635-4111-918d-cbdad49a2f29';
+const R2_BUCKET      = process.env.R2_BUCKET       || 'mks-finance-storage';
 const WRANGLER_CONFIG = path.join(os.homedir(), '.config/.wrangler/config/default.toml');
 
 let tokenCache: { value: string; expiresAt: number } | null = null;
@@ -1959,7 +1959,7 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
 
   // ── PREDICTIVE AI ANALYST ─────────────────────────────────────────────────
 
-  app.post('/api/ai/predictive', async (req, res) => {
+  app.post('/api/ai/predictive', async (_req, res) => {
     const client = getGroqClient();
     try {
       await recalculateBudgets();

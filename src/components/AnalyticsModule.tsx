@@ -63,9 +63,9 @@ export default function AnalyticsModule({ accounts, transactions, budgets, recur
   // Fetch 6-month summary from server
   useEffect(() => {
     fetch('/api/reports/monthly-summary?months=6')
-      .then(r => r.json())
-      .then(data => setMonthlySummary(data))
-      .catch(() => {/* silently ignore if not yet available */});
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => { if (Array.isArray(data)) setMonthlySummary(data); })
+      .catch(() => {});
   }, [transactions]);
 
   const filtered = useMemo(

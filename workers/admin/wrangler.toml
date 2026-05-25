@@ -1,0 +1,38 @@
+name            = "mks-admin"
+main            = "src/index.ts"
+compatibility_date = "2025-05-25"
+
+routes = [
+  { pattern = "admin.mksbrasil.com/*", zone_name = "mksbrasil.com" }
+]
+
+# Importa arquivos .sql como strings para o migrations runner
+[[rules]]
+type  = "Text"
+globs = ["**/*.sql"]
+
+[[kv_namespaces]]
+binding = "MKS_TENANTS"
+id      = "6017e7ceeaa84a0fa7d7c798ce22bce8"
+
+[[kv_namespaces]]
+binding = "MKS_ADMIN"
+id      = "593f7fe311e843df848bcb8c755e86c4"
+
+[vars]
+CF_ACCOUNT_ID  = "9b61f609fee4408fd1c4344feaf9b16a"
+CF_ZONE_ID     = "9d58d8832a461d6e64a17307de32b553"
+CF_TUNNEL_ID   = "50e41496-a62b-452a-bd9f-d0f08c2a620d"
+CF_TEAM_DOMAIN = "mks-personnal-finance-manager"
+BASE_DOMAIN    = "mksbrasil.com"
+D1_FREE_LIMIT  = "10"
+D1_PAID_LIMIT  = "50000"
+ZT_FREE_LIMIT  = "50"
+
+# Secrets — registrar com: wrangler secret put <NOME>
+# CF_API_TOKEN
+# ADMIN_PASSWORD
+# RESEND_API_KEY
+
+[observability]
+enabled = true

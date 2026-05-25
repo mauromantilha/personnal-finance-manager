@@ -1,0 +1,205 @@
+import { Hono }      from 'hono';
+import { getCookie } from 'hono/cookie';
+
+import { verifyAccessJWT }       from './lib/access';
+import { D1Client }              from './lib/d1';
+import { mapUser, DbUser, User } from './lib/mappers';
+
+const LGPD_CURRENT_VERSION = '1.0';
+
+// ── Env bindings ──────────────────────────────────────────────────────────────
+export interface Env {
+  MKS_TENANTS: KVNamespace;
+  MKS_CACHE:   KVNamespace;
+  CF_ACCOUNT_ID:    string;
+  CF_ZONE_ID:       string;
+  CF_TEAM_DOMAIN:   string;
+  BASE_DOMAIN:      string;
+  CF_API_TOKEN:       string;
+  GROQ_API_KEY:       string;
+  RESEND_API_KEY:     string;
+  PLUGGY_CLIENT_ID:   string;
+  PLUGGY_CLIENT_SECRET: string;
+  APP_SECRET:         string;
+}
+
+// ── Tenant (lido do KV MKS_TENANTS) ─────────────────────────────────────────
+export interface Tenant {
+  name:           string;
+  subdomain:      string;
+  familyId:       string;
+  tier:           1 | 2;
+  d1DatabaseId:   string;
+  r2Bucket:       string;
+  r2Prefix:       string;
+  accessAppId:    string;
+  accessAppAud:   string;   // AUD do CF Access Application desta família
+  accessPolicyId: string;
+  ownerEmailHash: string;
+  status:         'active' | 'suspended' | 'deleted';
+  createdAt:      string;
+}
+
+// ── Variáveis de contexto Hono ────────────────────────────────────────────────
+interface Variables {
+  tenant:   Tenant;
+  db:       D1Client;
+  email:    string;
+  familyId: string;
+  userId:   string;
+  user:     User;
+  lgpdOk:   boolean;
+}
+
+const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// ── Middleware 1: Tenant resolution ───────────────────────────────────────────
+app.use('*', async (c, next) => {
+  const host      = c.req.header('host') ?? '';
+  const subdomain = host.split('.')[0];
+
+  const tenant = await c.env.MKS_TENANTS.get(`tenant:${subdomain}`, 'json') as Tenant | null;
+
+  if (!tenant)                        return c.json({ error: 'Tenant não encontrado' },  404);
+  if (tenant.status === 'suspended')  return c.json({ error: 'Conta suspensa.' },         403);
+  if (tenant.status === 'deleted')    return c.json({ error: 'Conta encerrada.' },         410);
+
+  if (!tenant.d1DatabaseId) {
+    return c.json({ error: 'Banco de dados não configurado. Aguarde o provisionamento.' }, 503);
+  }
+
+  c.set('tenant',   tenant);
+  c.set('familyId', tenant.familyId);
+  c.set('db', new D1Client(c.env.CF_ACCOUNT_ID, tenant.d1DatabaseId, c.env.CF_API_TOKEN));
+  return next();
+});
+
+// ── Rota pública: health ──────────────────────────────────────────────────────
+app.get('/api/health', (c) => {
+  const tenant = c.get('tenant');
+  return c.json({
+    ok:        true,
+    subdomain: tenant.subdomain,
+    familyId:  tenant.familyId,
+    status:    tenant.status,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ── Middleware 2: CF Access JWT verification ───────────────────────────────────
+app.use('/api/*', async (c, next) => {
+  const jwt = c.req.header('Cf-Access-Jwt-Assertion')
+            ?? getCookie(c, 'CF_Authorization');
+
+  if (!jwt) return c.json({ error: 'Não autenticado', code: 'NO_JWT' }, 401);
+
+  try {
+    const tenant = c.get('tenant');
+    // Valida AUD apenas se já provisionado (Sprint 4 preenche accessAppAud)
+    const expectedAud = tenant.accessAppAud || undefined;
+    const claims = await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, expectedAud);
+    c.set('email', claims.email);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'JWT inválido';
+    return c.json({ error: msg, code: 'INVALID_JWT' }, 401);
+  }
+
+  return next();
+});
+
+// ── Middleware 3: User lookup / first-access creation ─────────────────────────
+app.use('/api/*', async (c, next) => {
+  const db    = c.get('db');
+  const email = c.get('email');
+
+  let dbUser = await db.first<DbUser>(
+    'SELECT * FROM users WHERE email = ? AND is_active = 1',
+    [email],
+  );
+
+  if (!dbUser) {
+    // Primeiro acesso: cria usuário
+    const isFirst = await db.first<{ cnt: number }>(
+      'SELECT COUNT(*) as cnt FROM users WHERE is_active = 1',
+      [],
+    );
+    const role = (isFirst?.cnt ?? 0) === 0 ? 'owner' : 'member';
+    const id   = crypto.randomUUID();
+    const name = email.split('@')[0];
+
+    await db.exec(
+      `INSERT INTO users (id, name, email, role, is_active, created_at)
+       VALUES (?, ?, ?, ?, 1, datetime('now'))`,
+      [id, name, email, role],
+    );
+
+    dbUser = await db.first<DbUser>('SELECT * FROM users WHERE id = ?', [id]);
+  }
+
+  if (!dbUser) return c.json({ error: 'Falha ao inicializar usuário' }, 500);
+
+  const user = mapUser(dbUser);
+  c.set('userId', user.id);
+  c.set('user', user);
+  c.set('lgpdOk', user.lgpdPolicyVersion === LGPD_CURRENT_VERSION);
+
+  return next();
+});
+
+// ── GET /api/auth/status ──────────────────────────────────────────────────────
+app.get('/api/auth/status', (c) => {
+  const user   = c.get('user');
+  const lgpdOk = c.get('lgpdOk');
+
+  return c.json({
+    ok:           true,
+    lgpdRequired: !lgpdOk,
+    user: {
+      id:       user.id,
+      name:     user.name,
+      email:    user.email,
+      role:     user.role,
+      memberId: user.memberId,
+    },
+  });
+});
+
+// ── POST /api/lgpd/accept ─────────────────────────────────────────────────────
+app.post('/api/lgpd/accept', async (c) => {
+  const user = c.get('user');
+  const db   = c.get('db');
+
+  if (c.get('lgpdOk')) {
+    return c.json({ ok: true, message: 'LGPD já aceita' });
+  }
+
+  const ip        = c.req.header('CF-Connecting-IP') ?? null;
+  const userAgent = c.req.header('user-agent') ?? null;
+
+  await db.exec(
+    `INSERT INTO lgpd_aceites (policy_version, user_id, ip_address, user_agent, accepted_at)
+     VALUES (?, ?, ?, ?, datetime('now'))`,
+    [LGPD_CURRENT_VERSION, user.id, ip, userAgent],
+  );
+
+  await db.exec(
+    `UPDATE users SET lgpd_accepted_at = datetime('now'), lgpd_policy_version = ? WHERE id = ?`,
+    [LGPD_CURRENT_VERSION, user.id],
+  );
+
+  return c.json({ ok: true });
+});
+
+// ── Middleware: LGPD obrigatória para rotas de dados ─────────────────────────
+// Aplicado a /api/data/* em Sprint 2+
+app.use('/api/data/*', async (c, next) => {
+  if (!c.get('lgpdOk')) {
+    return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
+  }
+  return next();
+});
+
+// ── 404 ───────────────────────────────────────────────────────────────────────
+app.all('*', (c) => c.json({ error: 'Rota não encontrada' }, 404));
+
+export default app;

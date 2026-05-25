@@ -172,8 +172,8 @@ const HTML = `<!DOCTYPE html>
     <input id="pw" type="password" placeholder="Senha do painel"
       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500
              focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4" />
-    <button onclick="doLogin()"
-      class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg px-4 py-3 transition-colors">
+    <button id="login-btn" onclick="doLogin()"
+      class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-3 transition-colors">
       Entrar
     </button>
     <p id="login-err" class="text-red-400 text-sm text-center mt-3 hidden">Senha incorreta</p>
@@ -554,19 +554,31 @@ let pollTimer = null;
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 async function doLogin() {
-  const pw = document.getElementById('pw').value;
-  const r = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: pw }),
-  });
-  if (r.ok) {
-    document.getElementById('login').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    await init();
-  } else {
+  const pw  = document.getElementById('pw').value;
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  btn.textContent = 'Entrando…';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (r.ok) {
+      document.getElementById('login').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      await init();
+    } else {
+      document.getElementById('login-err').classList.remove('hidden');
+      setTimeout(() => document.getElementById('login-err').classList.add('hidden'), 3000);
+    }
+  } catch (e) {
+    document.getElementById('login-err').textContent = 'Erro de conexão';
     document.getElementById('login-err').classList.remove('hidden');
     setTimeout(() => document.getElementById('login-err').classList.add('hidden'), 3000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Entrar';
   }
 }
 
@@ -942,7 +954,7 @@ async function runMigrations(dryRun) {
   const btn     = document.getElementById('btn-mig');
 
   logWrap.classList.remove('hidden');
-  logEl.textContent = dryRun ? '[DRY-RUN]\n\n' : '';
+  logEl.textContent = dryRun ? '[DRY-RUN]\\n\\n' : '';
   spinner.classList.remove('hidden');
   btn.disabled = true;
   btn.textContent = '⏳ Rodando...';
@@ -962,7 +974,7 @@ async function runMigrations(dryRun) {
       logEl.scrollTop = logEl.scrollHeight;
     }
   } catch (e) {
-    logEl.textContent += '\n❌ Erro: ' + e.message;
+    logEl.textContent += '\\n❌ Erro: ' + e.message;
   } finally {
     spinner.classList.add('hidden');
     btn.disabled = false;
@@ -1070,7 +1082,9 @@ const server = createServer(async (req, res) => {
     const body = await readBody(req);
     if (body.password && body.password === ADMIN_PW) {
       const token = createSession();
-      res.setHeader('Set-Cookie', `mks-admin=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800`);
+      const isHttps = req.headers['x-forwarded-proto'] === 'https';
+      const secureFl = isHttps ? '; Secure' : '';
+      res.setHeader('Set-Cookie', `mks-admin=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${secureFl}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: true }));
     }

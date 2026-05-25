@@ -1,0 +1,34 @@
+name            = "mks-finance"
+main            = "src/index.ts"
+compatibility_date = "2025-05-25"
+
+# Serve *.mksbrasil.com/api/* — CF Pages serve o frontend estático
+routes = [
+  { pattern = "*.mksbrasil.com/api/*", zone_name = "mksbrasil.com" },
+  { pattern = "financas.mksbrasil.com/api/*", zone_name = "mksbrasil.com" }
+]
+
+[[kv_namespaces]]
+binding = "MKS_TENANTS"
+id      = "6017e7ceeaa84a0fa7d7c798ce22bce8"
+
+[[kv_namespaces]]
+binding = "MKS_CACHE"
+id      = "f21654ee37724befa85449a4cc1af3be"
+
+[vars]
+CF_ACCOUNT_ID  = "9b61f609fee4408fd1c4344feaf9b16a"
+CF_ZONE_ID     = "9d58d8832a461d6e64a17307de32b553"
+CF_TEAM_DOMAIN = "mks-personnal-finance-manager"
+BASE_DOMAIN    = "mksbrasil.com"
+
+# Secrets — registrar com: wrangler secret put <NOME>
+# CF_API_TOKEN
+# GROQ_API_KEY
+# RESEND_API_KEY
+# PLUGGY_CLIENT_ID
+# PLUGGY_CLIENT_SECRET
+# APP_SECRET
+
+[observability]
+enabled = true

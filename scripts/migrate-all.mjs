@@ -35,6 +35,7 @@ const args      = process.argv.slice(2);
 const get       = f => { const i = args.indexOf(f); return i !== -1 ? args[i + 1] : null; };
 const onlySub   = get('--subdomain')?.toLowerCase();
 const dryRun    = args.includes('--dry-run');
+const mainMode  = args.includes('--main');
 
 function log(icon, msg) { process.stdout.write(`\n${icon}  ${msg}\n`); }
 function ok(msg)        { process.stdout.write(`   ✓ ${msg}\n`); }
@@ -149,12 +150,37 @@ async function migrateFamily({ name, subdomain, d1DatabaseId }, token) {
 async function main() {
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('  MKS Finanças — Migration Runner');
-  if (dryRun) console.log('  [DRY-RUN — nenhuma alteração real]');
+  if (dryRun)    console.log('  [DRY-RUN — nenhuma alteração real]');
+  if (mainMode)  console.log('  [MODO --main — instância principal]');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
+  // ── Modo --main: migra o D1 da instância principal (root .env) ────────────
+  if (mainMode) {
+    const mainEnv = parseEnvFile(join(ROOT, '.env'));
+    const token   = mainEnv.CLOUDFLARE_API_TOKEN;
+    const dbId    = mainEnv.D1_DATABASE_ID;
+    if (!token) fail('CLOUDFLARE_API_TOKEN não encontrado no .env principal.');
+    if (!dbId)  fail('D1_DATABASE_ID não encontrado no .env principal.');
+
+    const migrations = loadMigrationFiles();
+    console.log(`\n  D1: ${dbId}`);
+    console.log(`  Migrations no repositório: ${migrations.length}`);
+    console.log(`  Último arquivo: ${migrations.at(-1)?.version ?? '—'}\n`);
+
+    const r = await migrateFamily({ name: 'Instância principal', subdomain: 'main', d1DatabaseId: dbId }, token);
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`  ✅  Concluído`);
+    console.log(`  Aplicadas: ${r.applied}  Puladas: ${r.skipped}  Erros: ${r.errors}`);
+    if (dryRun) console.log('\n  ⚠️  Dry-run — nenhuma alteração foi aplicada.');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    if (r.errors > 0) process.exit(1);
+    return;
+  }
+
+  // ── Modo normal: famílias do control plane ────────────────────────────────
   const allFamilies = loadFamilies().filter(f => f.status === 'active');
 
-  if (allFamilies.length === 0) fail('Nenhuma família ativa encontrada.');
+  if (allFamilies.length === 0) fail('Nenhuma família ativa encontrada. Use --main para a instância principal.');
 
   const targets = onlySub
     ? allFamilies.filter(f => f.subdomain === onlySub)
@@ -170,7 +196,6 @@ async function main() {
   const totals = { applied: 0, skipped: 0, errors: 0 };
 
   for (const family of targets) {
-    // CF token da instância (está no .env da família)
     const envPath = join(CTRL, 'envs', `${family.subdomain}.env`);
     const env     = parseEnvFile(envPath);
     const token   = env.CLOUDFLARE_API_TOKEN;
