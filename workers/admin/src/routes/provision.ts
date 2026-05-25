@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { createD1Database, execD1, createAccessApp, createAccessPolicy } from '../lib/cf-api';
+import { createD1Database, execD1, createAccessApp, createAccessPolicy, addPagesDomain } from '../lib/cf-api';
 import { sendWelcomeEmail } from '../lib/resend';
 // @ts-ignore — wrangler Text rule imports .sql as string
 import SCHEMA_SQL from '../schema.sql';
@@ -21,7 +21,7 @@ router.post('/provision', async (c) => {
   const existing = await c.env.MKS_TENANTS.get(`tenant:${subdomain}`);
   if (existing) return c.json({ error: `Subdomínio "${subdomain}" já está em uso.` }, 409);
 
-  const { CF_ACCOUNT_ID, CF_API_TOKEN, BASE_DOMAIN, RESEND_API_KEY, ZT_OTP_IDP_ID } = c.env;
+  const { CF_ACCOUNT_ID, CF_API_TOKEN, BASE_DOMAIN, RESEND_API_KEY, ZT_OTP_IDP_ID, CF_PAGES_PROJECT } = c.env;
   const familyId = `fam-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 
   // Step 1: Create D1 database
@@ -91,8 +91,13 @@ router.post('/provision', async (c) => {
     c.env.MKS_TENANTS.put('tenants:count', String(index.length)),
   ]);
 
-  // Step 6: Send welcome email (best-effort, non-blocking)
-  c.executionCtx.waitUntil(sendWelcomeEmail(RESEND_API_KEY, ownerEmail, name, subdomain, BASE_DOMAIN));
+  // Step 6: Add CF Pages custom domain + send welcome email (best-effort, non-blocking)
+  c.executionCtx.waitUntil(Promise.all([
+    CF_PAGES_PROJECT
+      ? addPagesDomain(CF_ACCOUNT_ID, CF_API_TOKEN, CF_PAGES_PROJECT, `${subdomain}.${BASE_DOMAIN}`)
+      : Promise.resolve(),
+    sendWelcomeEmail(RESEND_API_KEY, ownerEmail, name, subdomain, BASE_DOMAIN),
+  ]));
 
   return c.json({ success: true, tenant });
 });

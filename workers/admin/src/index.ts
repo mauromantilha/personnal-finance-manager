@@ -20,6 +20,7 @@ export interface Env {
   BASE_DOMAIN:      string;
   ZT_OTP_IDP_ID:    string;
   ZT_ADMIN_APP_AUD: string;
+  CF_PAGES_PROJECT: string;
   D1_FREE_LIMIT:    string;
   D1_PAID_LIMIT:    string;
   ZT_FREE_LIMIT:    string;

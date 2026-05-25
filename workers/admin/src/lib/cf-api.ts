@@ -88,6 +88,17 @@ export async function deleteAccessApp(accountId: string, token: string, appId: s
   });
 }
 
+// Add custom domain to CF Pages project (so each family's subdomain serves the SPA)
+export async function addPagesDomain(
+  accountId: string, token: string, projectName: string, domain: string,
+): Promise<void> {
+  await fetch(`${CF}/accounts/${accountId}/pages/projects/${projectName}/domains`, {
+    method: 'POST',
+    headers: h(token),
+    body: JSON.stringify({ name: domain }),
+  }).catch(() => {}); // best-effort
+}
+
 export async function countZTUsers(accountId: string, token: string): Promise<number> {
   try {
     const res = await fetch(`${CF}/accounts/${accountId}/access/users?per_page=1`, {

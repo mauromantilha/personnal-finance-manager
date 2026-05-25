@@ -6,7 +6,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Building2,
-  Shield,
   Database,
   Network,
   Target,
@@ -26,7 +25,6 @@ import {
 } from 'lucide-react';
 
 // Subcomponents imports
-import AuthModule from './components/AuthModule';
 import CoreFinanceModule from './components/CoreFinanceModule';
 import CreditCardModule from './components/CreditCardModule';
 import RecurrencesModule from './components/RecurrencesModule';
@@ -41,7 +39,6 @@ import InvestmentsModule from './components/InvestmentsModule';
 import HealthReport from './components/HealthReport';
 import PredictiveAIModule from './components/PredictiveAIModule';
 import MarketWidget from './components/MarketWidget';
-import LoginScreen from './components/LoginScreen';
 import { LGPDModal } from './components/LGPDModal';
 
 import {
@@ -61,21 +58,17 @@ import {
   Investment
 } from './types';
 
-type TabType = 'DASHBOARD' | 'AUTH' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS' | 'PREDICTIVE_AI';
+type TabType = 'DASHBOARD' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS' | 'PREDICTIVE_AI';
 
 export default function App() {
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Authenticated Profile Simulation
+  // User profile — populated from /api/auth/status on load
   const [user, setUser] = useState<UserProfile>({
-    id: 'user-001',
-    name: 'MKS Consultoria e Inovação',
-    email: 'comercial@mksbrasil.com',
-    mfaEnabled: false,
-    mfaPendingSetup: false,
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop'
+    id: '', name: 'Carregando...', email: '',
+    mfaEnabled: false, mfaPendingSetup: false, avatarUrl: '',
   });
 
   // State loaded from the backend APIs
@@ -93,17 +86,14 @@ export default function App() {
   const [installmentGroups, setInstallmentGroups] = useState<InstallmentGroup[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [lgpdAccepted, setLgpdAccepted] = useState<boolean | null>(null);
 
   const fetchAllData = useCallback(async () => {
     try {
       const response = await fetch('/api/data');
-      if (response.status === 401) { setIsAuthenticated(false); return; }
       if (response.ok) {
         const data = await response.json();
         setAccounts(data.accounts || []);
-        setConnections(data.connections || []);
         setTransactions(data.transactions || []);
         setBudgets(data.budgets || []);
         setGoals(data.goals || []);
@@ -117,7 +107,7 @@ export default function App() {
         setInvestments(data.investments || []);
       }
     } catch (e) {
-      console.error('Error fetching dashboard database from server:', e);
+      console.error('Erro ao buscar dados:', e);
     } finally {
       setIsLoading(false);
     }
@@ -126,19 +116,19 @@ export default function App() {
   useEffect(() => {
     async function initialize() {
       try {
+        // CF Access handles auth — just check user + LGPD status
         const res = await fetch('/api/auth/status');
-        const { authenticated } = await res.json();
-        setIsAuthenticated(authenticated);
-        if (authenticated) {
-          const lgpdRes = await fetch('/api/lgpd/status');
-          const lgpd = await lgpdRes.json();
-          setLgpdAccepted(lgpd.accepted);
-          await fetchAllData();
-        } else {
+        if (!res.ok) { setIsLoading(false); return; }
+        const data = await res.json();
+        setUser(prev => ({ ...prev, id: data.user.id, name: data.user.name, email: data.user.email }));
+        if (data.lgpdRequired) {
+          setLgpdAccepted(false);
           setIsLoading(false);
+        } else {
+          setLgpdAccepted(true);
+          await fetchAllData();
         }
       } catch {
-        setIsAuthenticated(false);
         setIsLoading(false);
       }
     }
@@ -442,86 +432,9 @@ export default function App() {
     }
   };
 
-  const handleLogin = async (email: string, password: string, totpCode?: string): Promise<{ ok: boolean; requiresTOTP?: boolean; error?: string }> => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email || undefined, password, totpCode }),
-      });
-      const data = await res.json();
-      if (data.requiresTOTP) return { ok: false, requiresTOTP: true };
-      if (res.ok && data.success) {
-        setIsAuthenticated(true);
-        const lgpdRes = await fetch('/api/lgpd/status');
-        const lgpd = await lgpdRes.json();
-        setLgpdAccepted(lgpd.accepted);
-        await fetchAllData();
-        return { ok: true };
-      }
-      return { ok: false, error: data.error };
-    } catch {
-      return { ok: false, error: 'Erro de conexão.' };
-    }
-  };
-
-  // Invite overlay state — check ?invite=token on load
-  const [inviteToken, setInviteToken] = useState<string | null>(null);
-  const [inviteData, setInviteData] = useState<{ name: string; email: string; has2fa: boolean; qrDataUrl: string | null } | null>(null);
-  const [invitePassword, setInvitePassword] = useState('');
-  const [inviteError, setInviteError] = useState('');
-  const [inviteSubmitting, setInviteSubmitting] = useState(false);
-  const [inviteDone, setInviteDone] = useState(false);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('invite');
-    if (!token) return;
-    setInviteToken(token);
-    fetch(`/api/invite/${token}`)
-      .then(r => r.json())
-      .then(d => { if (!d.error) setInviteData(d); else setInviteError(d.error); })
-      .catch(() => setInviteError('Convite inválido.'));
-  }, []);
-
-  const handleCompleteInvite = async (e: { preventDefault(): void }) => {
-    e.preventDefault();
-    if (!invitePassword || invitePassword.length < 8) { setInviteError('Senha deve ter no mínimo 8 caracteres.'); return; }
-    setInviteSubmitting(true);
-    try {
-      const res = await fetch(`/api/invite/${inviteToken}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: invitePassword }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setInviteDone(true);
-        window.history.replaceState({}, '', '/');
-      } else {
-        setInviteError(data.error || 'Erro ao definir senha.');
-      }
-    } finally {
-      setInviteSubmitting(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    setIsAuthenticated(false);
-    setAccounts([]);
-    setConnections([]);
-    setTransactions([]);
-    setBudgets([]);
-    setGoals([]);
-    setAlerts([]);
-    setCategories([]);
-    setCreditCards([]);
-    setInvoices([]);
-    setRecurrences([]);
-    setFamilyMembers([]);
-    setInstallmentGroups([]);
-    setInvestments([]);
+  const handleLogout = () => {
+    // CF Access logout — clears the JWT cookie and redirects to OTP login
+    window.location.href = 'https://mks-personnal-finance-manager.cloudflareaccess.com/cdn-cgi/access/logout';
   };
 
   const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
@@ -652,10 +565,9 @@ export default function App() {
     { id: 'CATEGORIES',   label: 'Módulo 9: Categorias',         icon: Tag },
     { id: 'INSTALLMENTS', label: 'Módulo 10: Parcelamentos',     icon: Layers },
     { id: 'INVESTMENTS',  label: 'Módulo 11: Investimentos',     icon: TrendingUp },
-    { id: 'AUTH',         label: 'Módulo 12: Auth & IAM',        icon: Shield },
   ];
 
-  if (isLoading || isAuthenticated === null) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans">
         <div className="flex flex-col items-center gap-4 text-center">
@@ -669,91 +581,14 @@ export default function App() {
     );
   }
 
-  // ── Invite completion overlay ────────────────────────────────────────────
-  if (inviteToken) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
-          <div className="flex flex-col items-center gap-3">
-            <span className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xl font-bold shadow-sm">M</span>
-            <div className="text-center">
-              <h1 className="font-black text-sm tracking-widest text-indigo-600 uppercase">MKS Finanças</h1>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">Ativar Conta</p>
-            </div>
-          </div>
-
-          {inviteDone ? (
-            <div className="text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-teal-50 border border-teal-200 flex items-center justify-center mx-auto">
-                <span className="text-2xl">✓</span>
-              </div>
-              <p className="text-sm font-bold text-slate-800">Senha criada com sucesso!</p>
-              <p className="text-xs text-slate-500">Agora você pode fazer login com seu email e senha.</p>
-              <button
-                onClick={() => { setInviteToken(null); setInviteData(null); setInviteDone(false); }}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold"
-              >Ir para o Login</button>
-            </div>
-          ) : inviteError ? (
-            <div className="text-center space-y-3">
-              <p className="text-sm text-red-600 font-medium">{inviteError}</p>
-              <p className="text-xs text-slate-400">O convite pode ter expirado. Solicite um novo ao administrador.</p>
-            </div>
-          ) : inviteData ? (
-            <form onSubmit={handleCompleteInvite} className="space-y-4">
-              <p className="text-sm text-slate-700">Olá, <strong>{inviteData.name}</strong>! Defina sua senha para ativar o acesso.</p>
-
-              {inviteData.has2fa && inviteData.qrDataUrl && (
-                <div className="space-y-2">
-                  <p className="text-xs font-bold text-slate-600">Configure o autenticador (2FA):</p>
-                  <div className="flex justify-center p-3 bg-white border border-slate-200 rounded-xl">
-                    <img src={inviteData.qrDataUrl} alt="QR Code 2FA" className="w-44 h-44" />
-                  </div>
-                  <p className="text-[11px] text-slate-500 text-center">Escaneie este QR Code no Google Authenticator ou Authy antes de continuar.</p>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nova Senha</label>
-                <input
-                  type="password"
-                  value={invitePassword}
-                  onChange={e => setInvitePassword(e.target.value)}
-                  placeholder="Mínimo 8 caracteres"
-                  required
-                  minLength={8}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {inviteError && <p className="text-xs text-red-600 font-medium">{inviteError}</p>}
-
-              <button
-                type="submit"
-                disabled={inviteSubmitting || invitePassword.length < 8}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold"
-              >
-                {inviteSubmitting ? 'Salvando...' : 'Ativar Conta'}
-              </button>
-            </form>
-          ) : (
-            <div className="flex justify-center py-6">
-              <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} />;
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col antialiased">
       {lgpdAccepted === false && (
-        <LGPDModal onAccept={() => setLgpdAccepted(true)} />
+        <LGPDModal onAccept={async () => {
+          await fetch('/api/lgpd/accept', { method: 'POST' });
+          setLgpdAccepted(true);
+          await fetchAllData();
+        }} />
       )}
       
       {/* Upper Global Header / Status indicators */}
@@ -871,7 +706,7 @@ export default function App() {
           {/* Quick config settings inside sidebar bottom */}
           <div className="pt-4 border-t border-slate-800 space-y-3.5">
             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-indigo-400" /> Servidor Ativo: Express JS
+              <Clock className="w-3.5 h-3.5 text-indigo-400" /> Cloudflare Workers
             </div>
             
             <button 
@@ -1114,11 +949,6 @@ export default function App() {
               </div>
 
             </div>
-          )}
-
-          {/* Tab Route Selection pages */}
-          {activeTab === 'AUTH' && (
-            <AuthModule />
           )}
 
           {activeTab === 'CORE' && (

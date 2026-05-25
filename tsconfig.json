@@ -22,5 +22,7 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": ["src", "index.html"],
+  "exclude": ["node_modules", "workers", "dist", "scripts", "admin"]
 }
