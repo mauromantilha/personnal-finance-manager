@@ -104,11 +104,20 @@ async function runMigrations(dbId, token, dryRun) {
     .sort()
     .map(f => join(MIGRATIONS, f));
 
+  if (!dryRun) {
+    await d1Query(dbId,
+      `CREATE TABLE IF NOT EXISTS schema_migrations (
+         version TEXT NOT NULL PRIMARY KEY,
+         applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+       )`, token);
+  }
+
   for (const file of files) {
-    const name = file.split('/').pop();
-    const sql  = readFileSync(file, 'utf8');
-    const stmts = sql
-      .replace(/--[^\n]*/g, '')           // remove comments
+    const name    = file.split('/').pop();
+    const version = name.replace('.sql', '');
+    const sql     = readFileSync(file, 'utf8');
+    const stmts   = sql
+      .replace(/--[^\n]*/g, '')
       .split(';')
       .map(s => s.trim())
       .filter(Boolean);
@@ -116,8 +125,12 @@ async function runMigrations(dbId, token, dryRun) {
     for (const stmt of stmts) {
       if (!dryRun) {
         await d1Query(dbId, stmt + ';', token);
-        await new Promise(r => setTimeout(r, 120)); // rate-limit guard
+        await new Promise(r => setTimeout(r, 120));
       }
+    }
+    if (!dryRun) {
+      await d1Query(dbId,
+        `INSERT OR IGNORE INTO schema_migrations (version) VALUES ('${version}')`, token);
     }
     ok(`Migration ${name} aplicada (${stmts.length} statements)`);
   }

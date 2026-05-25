@@ -222,6 +222,10 @@ const HTML = `<!DOCTYPE html>
         class="py-3 px-2 text-sm font-medium text-slate-400 hover:text-white transition-colors border-b-2 border-transparent">
         ⚖️ LGPD
       </button>
+      <button onclick="setTab('migrations')" id="tab-migrations"
+        class="py-3 px-2 text-sm font-medium text-slate-400 hover:text-white transition-colors border-b-2 border-transparent">
+        🔧 Migrações
+      </button>
     </nav>
   </div>
 
@@ -442,6 +446,62 @@ Content-Type: application/json
       </div>
     </div>
 
+    <!-- Migrations Pane -->
+    <div id="pane-migrations" class="hidden fade-in">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Migrações de Schema</h2>
+          <p class="text-xs text-slate-500 mt-1">Aplica migrations pendentes em todas as instâncias familiares ativas</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Lista de migrations -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <h3 class="font-medium text-white mb-4">Arquivos no repositório</h3>
+          <ul id="mig-list" class="space-y-1.5 text-sm">
+            <li class="text-slate-500">Carregando...</li>
+          </ul>
+        </div>
+
+        <!-- Runner -->
+        <div class="space-y-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <h3 class="font-medium text-white mb-4">Aplicar migrações pendentes</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs text-slate-400 mb-2 uppercase tracking-wide">Escopo</label>
+                <select id="mig-scope"
+                  class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="">Todas as famílias ativas</option>
+                  <option value="__loading__" disabled>── carregando famílias ──</option>
+                </select>
+              </div>
+              <div class="flex gap-3">
+                <button onclick="runMigrations(false)" id="btn-mig"
+                  class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg px-4 py-3 text-sm transition-colors">
+                  🔧 Aplicar agora
+                </button>
+                <button onclick="runMigrations(true)"
+                  class="bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg px-4 py-3 text-sm transition-colors">
+                  Dry-run
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="mig-log-wrap" class="hidden">
+            <div class="flex items-center gap-2 mb-2">
+              <div id="mig-spinner" class="hidden w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+              <h3 class="text-sm font-medium text-slate-300">Saída do runner</h3>
+            </div>
+            <div id="mig-log" class="log-box h-72"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -538,14 +598,15 @@ async function init() {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 function setTab(name) {
-  ['noc', 'families', 'provision', 'emails', 'lgpd'].forEach(t => {
+  ['noc', 'families', 'provision', 'emails', 'lgpd', 'migrations'].forEach(t => {
     document.getElementById('pane-' + t).classList.toggle('hidden', t !== name);
     const btn = document.getElementById('tab-' + t);
     btn.classList.toggle('tab-active', t === name);
   });
   activeTab = name;
-  if (name === 'emails') loadEmailQuota();
-  if (name === 'lgpd')   loadLGPD();
+  if (name === 'emails')      loadEmailQuota();
+  if (name === 'lgpd')        loadLGPD();
+  if (name === 'migrations')  loadMigrationList();
 }
 
 // ── NOC ───────────────────────────────────────────────────────────────────────
@@ -839,6 +900,73 @@ async function loadEmailQuota() {
   } catch (e) {
     document.getElementById('eq-tbody').innerHTML =
       '<tr><td colspan="4" class="px-4 py-4 text-red-400">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+// ── Migrations ───────────────────────────────────────────────────────────────
+
+async function loadMigrationList() {
+  try {
+    const [migsRes, famsRes] = await Promise.all([
+      fetch('/api/migrations/list'),
+      fetch('/api/families'),
+    ]);
+    const migs  = await migsRes.json();
+    const fams  = (await famsRes.json()).filter(f => f.status === 'active');
+
+    // Lista de arquivos
+    const list = document.getElementById('mig-list');
+    list.innerHTML = migs.map(m =>
+      \`<li class="flex items-center gap-2 text-slate-300">
+         <span class="text-slate-600 font-mono text-xs w-4 text-center">·</span>
+         <span class="font-mono text-xs">\${esc(m)}</span>
+       </li>\`
+    ).join('');
+
+    // Popula select de famílias
+    const sel = document.getElementById('mig-scope');
+    const existing = Array.from(sel.options).filter(o => o.value && o.value !== '__loading__');
+    existing.forEach(o => sel.removeChild(o));
+    sel.innerHTML = '<option value="">Todas as famílias ativas (' + fams.length + ')</option>' +
+      fams.map(f => \`<option value="\${esc(f.subdomain)}">\${esc(f.name)} (\${esc(f.subdomain)})</option>\`).join('');
+  } catch (e) {
+    document.getElementById('mig-list').innerHTML = '<li class="text-red-400">' + esc(e.message) + '</li>';
+  }
+}
+
+async function runMigrations(dryRun) {
+  const scope   = document.getElementById('mig-scope').value;
+  const logWrap = document.getElementById('mig-log-wrap');
+  const logEl   = document.getElementById('mig-log');
+  const spinner = document.getElementById('mig-spinner');
+  const btn     = document.getElementById('btn-mig');
+
+  logWrap.classList.remove('hidden');
+  logEl.textContent = dryRun ? '[DRY-RUN]\n\n' : '';
+  spinner.classList.remove('hidden');
+  btn.disabled = true;
+  btn.textContent = '⏳ Rodando...';
+
+  try {
+    const r = await fetch('/api/migrations/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subdomain: scope || null, dryRun }),
+    });
+    const reader = r.body.getReader();
+    const dec    = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      logEl.textContent += dec.decode(value);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch (e) {
+    logEl.textContent += '\n❌ Erro: ' + e.message;
+  } finally {
+    spinner.classList.add('hidden');
+    btn.disabled = false;
+    btn.textContent = '🔧 Aplicar agora';
   }
 }
 
@@ -1139,6 +1267,45 @@ const server = createServer(async (req, res) => {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: false, error: 'send_failed', message: e.message }));
     }
+  }
+
+  // ── GET /api/migrations/list — lista arquivos .sql do repositório ─────────
+  if (path === '/api/migrations/list' && req.method === 'GET') {
+    const { readdirSync: rd } = await import('fs');
+    const migsDir = join(PROJECT_ROOT, 'migrations');
+    const files   = rd(migsDir).filter(f => f.endsWith('.sql')).sort();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(files));
+  }
+
+  // ── POST /api/migrations/run — executa migrate-all.mjs (streaming) ────────
+  if (path === '/api/migrations/run' && req.method === 'POST') {
+    const body = await readBody(req);
+    const { subdomain, dryRun } = body;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const args = ['scripts/migrate-all.mjs'];
+    if (subdomain) args.push('--subdomain', subdomain);
+    if (dryRun)    args.push('--dry-run');
+
+    const proc = spawn('node', args, {
+      cwd: PROJECT_ROOT,
+      env: { ...process.env },
+    });
+
+    proc.stdout.on('data', d => res.write(d));
+    proc.stderr.on('data', d => res.write(d));
+    proc.on('close', code => {
+      res.write(`\n━━━ Processo encerrado (código ${code}) ━━━\n`);
+      res.end();
+    });
+    return;
   }
 
   // ── GET /api/lgpd/all — consulta status LGPD de cada família ─────────────
