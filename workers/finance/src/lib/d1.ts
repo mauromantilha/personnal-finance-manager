@@ -22,6 +22,11 @@ interface D1ApiResponse<T> {
   messages: string[];
 }
 
+export interface D1Stmt {
+  sql: string;
+  params?: D1Param[];
+}
+
 export class D1Client {
   private readonly url: string;
   private readonly auth: string;
@@ -74,5 +79,12 @@ export class D1Client {
     }
     const { changes, last_row_id } = data.result[0].meta;
     return { changes, lastRowId: last_row_id };
+  }
+
+  // Executa múltiplos statements sequencialmente (não atômico — MVP)
+  async batch(stmts: D1Stmt[]): Promise<void> {
+    for (const { sql, params } of stmts) {
+      await this.exec(sql, params ?? []);
+    }
   }
 }
