@@ -1,0 +1,124 @@
+import { Hono } from 'hono';
+import type { Env, Variables } from '../index';
+import { groqChat, classifyMerchant } from '../lib/groq';
+import { r2Put, r2Get } from '../lib/r2';
+import { mapCreditCard, DbCreditCard } from '../lib/mappers';
+import { recalculateBudgets } from '../lib/helpers';
+import { D1Stmt } from '../lib/d1';
+
+const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// ── POST /api/documents/analyze — Groq Vision ─────────────────────────────────
+router.post('/documents/analyze', async (c) => {
+  const { base64, mimeType, documentType } = await c.req.json<any>();
+  if (!base64 || !mimeType || !documentType)
+    return c.json({ error: 'base64, mimeType e documentType são obrigatórios.' }, 400);
+  if (!['BILL', 'INVOICE'].includes(documentType))
+    return c.json({ error: 'documentType deve ser BILL ou INVOICE.' }, 400);
+
+  const key   = c.env.GROQ_API_KEY;
+  const r2key = buildDocKey(c.get('tenant').r2Prefix, mimeType);
+  let extracted: Record<string, unknown> = {};
+
+  const billPrompt   = `Analise este documento financeiro brasileiro e extraia em JSON: {"description":"nome do serviço","amountInCents":número em centavos,"dueDate":"YYYY-MM-DD","payerName":"string|null","payerDoc":"CPF/CNPJ|null"}. Retorne APENAS o JSON.`;
+  const invoicePrompt = `Analise esta fatura de cartão brasileiro e extraia em JSON: {"dueDate":"YYYY-MM-DD","totalAmountInCents":número em centavos,"lineItems":[{"date":"YYYY-MM-DD","merchant":"string","amountInCents":número}]}. Inclua TODOS os lançamentos. Retorne APENAS o JSON.`;
+
+  if (key) {
+    try {
+      const raw = await groqChat(key, 'meta-llama/llama-4-scout-17b-16e-instruct',
+        [{ role: 'user', content: [
+          { type: 'text', text: documentType === 'INVOICE' ? invoicePrompt : billPrompt },
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+        ] }],
+        { temperature: 0.1, max_tokens: 2048 },
+      );
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) extracted = JSON.parse(match[0]);
+    } catch { /* prossegue sem extração */ }
+  }
+
+  if (documentType === 'INVOICE' && Array.isArray(extracted.lineItems)) {
+    extracted.lineItems = (extracted.lineItems as any[]).map(item => ({
+      ...item, category: classifyMerchant(item.merchant ?? ''),
+    }));
+  }
+
+  // Armazena no R2
+  const buffer = Uint8Array.from(atob(base64), ch => ch.charCodeAt(0));
+  await r2Put(c.env.MKS_DOCUMENTS, r2key, buffer.buffer, mimeType);
+
+  return c.json({ ...extracted, documentKey: r2key });
+});
+
+// ── POST /api/import/invoice — importa linha a linha de fatura ────────────────
+router.post('/import/invoice', async (c) => {
+  const db = c.get('db');
+  const { items, creditCardId } = await c.req.json<any>();
+  if (!Array.isArray(items) || !creditCardId)
+    return c.json({ error: 'items e creditCardId são obrigatórios.' }, 400);
+
+  const card = await db.first<DbCreditCard>('SELECT * FROM credit_cards WHERE id = ?', [creditCardId]);
+  if (!card) return c.json({ error: 'Cartão não encontrado.' }, 404);
+  const mapped = mapCreditCard(card);
+
+  const stmts: D1Stmt[] = [];
+  let imported = 0;
+  const errors: string[] = [];
+
+  for (const item of items) {
+    const { date, merchant, amountInCents, category } = item;
+    if (!date || !merchant || !amountInCents) { errors.push(`Item inválido: ${JSON.stringify(item)}`); continue; }
+    const amount = Math.round(Number(amountInCents));
+    if (isNaN(amount) || amount <= 0) { errors.push(`Valor inválido: ${amountInCents}`); continue; }
+
+    const txDate   = new Date(date as string);
+    const month    = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
+    const invId    = `inv-${creditCardId}-${month.replace('-', '')}`;
+    const dueYear  = txDate.getMonth() + 1 === 12 ? txDate.getFullYear() + 1 : txDate.getFullYear();
+    const dueMonth = ((txDate.getMonth() + 1) % 12) + 1;
+    const dueDate  = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(mapped.dueDay).padStart(2, '0')}`;
+
+    stmts.push({ sql: "INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))", params: [invId, creditCardId, month, dueDate] });
+    stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [amount, invId] });
+
+    const slug = String(merchant).slice(0, 8).replace(/\W/g, '');
+    const txId = `tx-inv-${creditCardId}-${String(date).replace(/-/g, '')}-${amount}-${slug}`;
+    stmts.push({
+      sql: "INSERT OR IGNORE INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id) VALUES (?,?,?,'DES',?,?,NULL,0,?,?)",
+      params: [txId, amount, date, category ?? classifyMerchant(merchant), merchant, creditCardId, invId],
+    });
+    imported++;
+  }
+
+  if (stmts.length) {
+    await db.batch(stmts);
+    await recalculateBudgets(db);
+  }
+  return c.json({ imported, errors });
+});
+
+// ── GET /api/documents/* — proxy R2 ──────────────────────────────────────────
+router.get('/documents/*', async (c) => {
+  const key = c.req.param('*');
+  if (!key) return c.json({ error: 'key obrigatória' }, 400);
+
+  const doc = await r2Get(c.env.MKS_DOCUMENTS, key);
+  if (!doc) return c.json({ error: 'Documento não encontrado.' }, 404);
+
+  return new Response(doc.body, {
+    headers: {
+      'Content-Type':        doc.contentType,
+      'Content-Disposition': 'inline',
+      'Cache-Control':       'private, max-age=3600',
+    },
+  });
+});
+
+function buildDocKey(prefix: string, mimeType: string): string {
+  const extMap: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' };
+  const ext = extMap[mimeType] ?? 'jpg';
+  const now = new Date();
+  return `${prefix}/documents/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/doc-${Date.now()}.${ext}`;
+}
+
+export default router;

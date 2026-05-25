@@ -15,13 +15,22 @@ import recurrenceRoutes   from './routes/recurrences';
 import reportRoutes       from './routes/reports';
 import familyRoutes       from './routes/family';
 import installmentRoutes  from './routes/installments';
+import investmentRoutes   from './routes/investments';
+import userRoutes         from './routes/users';
+import aiRoutes           from './routes/ai';
+import marketRoutes       from './routes/market';
+import openFinanceRoutes  from './routes/openfinance';
+import documentRoutes     from './routes/documents';
+import importerRoutes     from './routes/importers';
+import backupRoutes       from './routes/backup';
 
 const LGPD_CURRENT_VERSION = '1.0';
 
 // ── Env bindings ──────────────────────────────────────────────────────────────
 export interface Env {
-  MKS_TENANTS: KVNamespace;
-  MKS_CACHE:   KVNamespace;
+  MKS_TENANTS:   KVNamespace;
+  MKS_CACHE:     KVNamespace;
+  MKS_DOCUMENTS: R2Bucket;
   CF_ACCOUNT_ID:    string;
   CF_ZONE_ID:       string;
   CF_TEAM_DOMAIN:   string;
@@ -204,6 +213,14 @@ app.route('/api', recurrenceRoutes);
 app.route('/api', reportRoutes);
 app.route('/api', familyRoutes);
 app.route('/api', installmentRoutes);
+app.route('/api', investmentRoutes);
+app.route('/api', userRoutes);
+app.route('/api', aiRoutes);
+app.route('/api', marketRoutes);
+app.route('/api', openFinanceRoutes);
+app.route('/api', documentRoutes);
+app.route('/api', importerRoutes);
+app.route('/api', backupRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.all('*', (c) => c.json({ error: 'Rota não encontrada' }, 404));
