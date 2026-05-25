@@ -8,8 +8,9 @@ routes = [
 
 # Importa arquivos .sql como strings para o migrations runner
 [[rules]]
-type  = "Text"
-globs = ["**/*.sql"]
+type        = "Text"
+globs       = ["**/*.sql"]
+fallthrough = false
 
 [[kv_namespaces]]
 binding = "MKS_TENANTS"
@@ -20,14 +21,16 @@ binding = "MKS_ADMIN"
 id      = "593f7fe311e843df848bcb8c755e86c4"
 
 [vars]
-CF_ACCOUNT_ID  = "9b61f609fee4408fd1c4344feaf9b16a"
-CF_ZONE_ID     = "9d58d8832a461d6e64a17307de32b553"
-CF_TUNNEL_ID   = "50e41496-a62b-452a-bd9f-d0f08c2a620d"
-CF_TEAM_DOMAIN = "mks-personnal-finance-manager"
-BASE_DOMAIN    = "mksbrasil.com"
-D1_FREE_LIMIT  = "10"
-D1_PAID_LIMIT  = "50000"
-ZT_FREE_LIMIT  = "50"
+CF_ACCOUNT_ID    = "9b61f609fee4408fd1c4344feaf9b16a"
+CF_ZONE_ID       = "9d58d8832a461d6e64a17307de32b553"
+CF_TUNNEL_ID     = "50e41496-a62b-452a-bd9f-d0f08c2a620d"
+CF_TEAM_DOMAIN   = "mks-personnal-finance-manager"
+BASE_DOMAIN      = "mksbrasil.com"
+ZT_OTP_IDP_ID    = "9737c8ad-db9e-458e-a5ea-bf0cb9c145dd"
+ZT_ADMIN_APP_AUD = "c94a0f8f5ff65632c54610823c282fa5920cbd3140b7437172b1b098e6b3d101"
+D1_FREE_LIMIT    = "10"
+D1_PAID_LIMIT    = "50000"
+ZT_FREE_LIMIT    = "50"
 
 # Secrets — registrar com: wrangler secret put <NOME>
 # CF_API_TOKEN
