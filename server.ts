@@ -697,8 +697,7 @@ async function startServer() {
 
   // ── HEALTH CHECK (public — NOC use) ──────────────────────────────────────
   app.get('/api/health', async (_req, res) => {
-    let db = false;
-    let storage = false;
+    let db = false, storage = false, lgpdAccepted = false;
     try {
       await d1q('SELECT 1');
       db = true;
@@ -711,17 +710,59 @@ async function startServer() {
       );
       if (r.ok) storage = true;
     } catch {}
+    try {
+      const rows = await d1q("SELECT id FROM lgpd_aceites WHERE policy_version = '1.0' LIMIT 1");
+      lgpdAccepted = rows.length > 0;
+    } catch {}
     res.json({
       ok: db && storage,
       db,
       storage,
+      lgpd_accepted: lgpdAccepted,
       uptime: Math.floor(process.uptime()),
       ts: new Date().toISOString(),
       version: '1.0',
     });
   });
 
+  // ── LGPD status (public — não expõe dados, só informa se aceite existe) ──
+  app.get('/api/lgpd/status', async (_req, res) => {
+    try {
+      const rows = await d1q<any>(
+        "SELECT policy_version, accepted_at FROM lgpd_aceites WHERE policy_version = '1.0' ORDER BY id DESC LIMIT 1"
+      );
+      res.json({
+        accepted: rows.length > 0,
+        version: '1.0',
+        acceptedAt: rows[0]?.accepted_at ?? null,
+      });
+    } catch {
+      res.json({ accepted: false, version: '1.0', acceptedAt: null });
+    }
+  });
+
   app.use('/api', requireAuth);
+
+  // ── LGPD aceite (protegido — usuário deve estar autenticado) ──────────────
+  app.post('/api/lgpd/aceite', async (req, res) => {
+    const ip        = req.ip || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || '';
+    try {
+      const existing = await d1q<any>(
+        "SELECT id FROM lgpd_aceites WHERE policy_version = '1.0' LIMIT 1"
+      );
+      if (existing.length > 0) {
+        return res.json({ ok: true, alreadyAccepted: true });
+      }
+      await d1q(
+        "INSERT INTO lgpd_aceites (policy_version, ip_address, user_agent) VALUES ('1.0', ?, ?)",
+        [ip, userAgent]
+      );
+      res.json({ ok: true, alreadyAccepted: false });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // ── GET ALL DATA ───────────────────────────────────────────────────────────
 

@@ -42,6 +42,7 @@ import HealthReport from './components/HealthReport';
 import PredictiveAIModule from './components/PredictiveAIModule';
 import MarketWidget from './components/MarketWidget';
 import LoginScreen from './components/LoginScreen';
+import { LGPDModal } from './components/LGPDModal';
 
 import {
   UserProfile,
@@ -93,6 +94,7 @@ export default function App() {
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [lgpdAccepted, setLgpdAccepted] = useState<boolean | null>(null);
 
   const fetchAllData = useCallback(async () => {
     try {
@@ -127,8 +129,14 @@ export default function App() {
         const res = await fetch('/api/auth/status');
         const { authenticated } = await res.json();
         setIsAuthenticated(authenticated);
-        if (authenticated) await fetchAllData();
-        else setIsLoading(false);
+        if (authenticated) {
+          const lgpdRes = await fetch('/api/lgpd/status');
+          const lgpd = await lgpdRes.json();
+          setLgpdAccepted(lgpd.accepted);
+          await fetchAllData();
+        } else {
+          setIsLoading(false);
+        }
       } catch {
         setIsAuthenticated(false);
         setIsLoading(false);
@@ -445,6 +453,9 @@ export default function App() {
       if (data.requiresTOTP) return { ok: false, requiresTOTP: true };
       if (res.ok && data.success) {
         setIsAuthenticated(true);
+        const lgpdRes = await fetch('/api/lgpd/status');
+        const lgpd = await lgpdRes.json();
+        setLgpdAccepted(lgpd.accepted);
         await fetchAllData();
         return { ok: true };
       }
@@ -741,6 +752,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col antialiased">
+      {lgpdAccepted === false && (
+        <LGPDModal onAccept={() => setLgpdAccepted(true)} />
+      )}
       
       {/* Upper Global Header / Status indicators */}
       <header className="sticky top-0 z-45 bg-white text-slate-800 px-6 md:px-8 py-4 flex items-center justify-between border-b border-slate-200 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">

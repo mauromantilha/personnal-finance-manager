@@ -514,15 +514,19 @@ async function refreshHealth() {
       const dotColor    = ok ? 'bg-green-500' : 'bg-red-500';
       const statusText  = ok ? 'Online' : 'Offline';
       const uptime      = h.uptime != null ? fmtUptime(h.uptime) : '—';
+      const lgpdBadge   = h.lgpd_accepted === true
+        ? '<span class="text-xs bg-green-950 text-green-400 border border-green-900/50 px-1.5 py-0.5 rounded">LGPD ✓</span>'
+        : '<span class="text-xs bg-amber-950 text-amber-400 border border-amber-900/50 px-1.5 py-0.5 rounded">LGPD ⏳</span>';
       return \`
         <div class="bg-slate-900 border \${borderColor} rounded-xl p-5 transition-all hover:border-slate-600">
-          <div class="flex items-start justify-between mb-3">
+          <div class="flex items-start justify-between mb-2">
             <h3 class="font-semibold text-white">\${esc(f.name)}</h3>
             <span class="flex items-center gap-1.5 text-xs \${statusColor}">
               <span class="w-2 h-2 rounded-full \${dotColor} \${ok ? 'pulse-dot' : ''}"></span>
               \${statusText}
             </span>
           </div>
+          <div class="mb-3">\${lgpdBadge}</div>
           <p class="text-xs text-slate-400 mb-1">🌐 \${esc(f.subdomain)}.mksbrasil.com</p>
           <p class="text-xs text-slate-500 mb-4">⚙️ porta \${f.port || '—'}</p>
           <div class="grid grid-cols-3 gap-2 text-center">
