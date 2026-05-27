@@ -73,6 +73,23 @@ app.all('*', async (c, next) => {
   if (hostname === `admin.${c.env.BASE_DOMAIN}`) return next();
   // Public API paths (registration, etc.) — bypass proxy so Worker handles them
   if (url.pathname.startsWith('/public/') || url.pathname.startsWith('/api/public/')) return next();
+
+  // Only serve SPA for provisioned, active tenants — reject unknown subdomains
+  const subdomain = hostname.split('.')[0];
+  const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
+  if (!tenant || tenant.status !== 'active') {
+    return c.html(
+      '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>404</title>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+      '<body style="font-family:sans-serif;text-align:center;padding:4rem;color:#374151">' +
+      '<h1 style="font-size:4rem;margin:0">404</h1>' +
+      '<p>Endereço não encontrado.</p>' +
+      `<p><a href="https://${c.env.BASE_DOMAIN}" style="color:#6366F1">financaslivre.com</a></p>` +
+      '</body></html>',
+      404,
+    );
+  }
+
   // Proxy to Pages project, preserving path + query
   const pagesUrl = `https://${c.env.CF_PAGES_PROJECT}.pages.dev${url.pathname}${url.search}`;
   const res = await fetch(pagesUrl, {
