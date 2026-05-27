@@ -140,9 +140,9 @@ export default function App() {
   );
   const [lgpdAccepted, setLgpdAccepted] = useState<boolean | null>(null);
 
-  // Auto-logout por inatividade — 30 minutos
+  // Auto-logout por inatividade — 20 minutos
   useEffect(() => {
-    const TIMEOUT_MS = 30 * 60 * 1000;
+    const TIMEOUT_MS = 20 * 60 * 1000;
     let timer: ReturnType<typeof setTimeout>;
     const reset = () => {
       clearTimeout(timer);

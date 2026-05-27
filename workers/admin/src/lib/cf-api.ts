@@ -123,7 +123,7 @@ export async function createAccessApp(
           name: opts.name,
           domain: opts.domain,
           type: 'self_hosted',
-          session_duration: '24h',
+          session_duration: '20m',
           allowed_idps: [opts.otpIdpId],
           auto_redirect_to_identity: true,
         }),
