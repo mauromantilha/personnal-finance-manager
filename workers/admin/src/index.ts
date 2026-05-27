@@ -5,12 +5,13 @@ import { verifyAccessJWT } from './lib/access';
 import { countZTUsers }    from './lib/cf-api';
 import { adminHtml }      from './html';
 
-import provisionRoutes  from './routes/provision';
-import familyRoutes     from './routes/families';
-import migrationRoutes  from './routes/migrations';
-import nocRoutes        from './routes/noc';
-import registerRoutes   from './routes/register';
-import telemetryRoutes  from './routes/telemetry';
+import provisionRoutes       from './routes/provision';
+import familyRoutes          from './routes/families';
+import migrationRoutes       from './routes/migrations';
+import nocRoutes             from './routes/noc';
+import registerRoutes        from './routes/register';
+import telemetryRoutes       from './routes/telemetry';
+import communicationsRoutes  from './routes/communications';
 
 // ── Env bindings ──────────────────────────────────────────────────────────────
 export interface Env {
@@ -28,11 +29,12 @@ export interface Env {
   D1_FREE_LIMIT:    string;
   D1_PAID_LIMIT:    string;
   ZT_FREE_LIMIT:    string;
-  CF_API_TOKEN:   string;
-  ADMIN_PASSWORD: string;
-  RESEND_API_KEY: string;
+  CF_API_TOKEN:        string;
+  CF_ZT_TOKEN:         string;
+  ADMIN_PASSWORD:      string;
+  RESEND_API_KEY:      string;
   TURNSTILE_SECRET_KEY: string;
-  CPF_SALT: string;
+  CPF_SALT:            string;
 }
 
 export interface Tenant {
@@ -140,7 +142,7 @@ app.get('/api/health', async (c) => {
   const d1PaidLimit = parseInt(c.env.D1_PAID_LIMIT);
   const ztFreeLimit = parseInt(c.env.ZT_FREE_LIMIT);
 
-  const ztUsers = await countZTUsers(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN);
+  const ztUsers = await countZTUsers(c.env.CF_ACCOUNT_ID, c.env.CF_ZT_TOKEN || c.env.CF_API_TOKEN);
 
   return c.json({
     ok: true,
@@ -185,6 +187,7 @@ app.route('/api', familyRoutes);
 app.route('/api', migrationRoutes);
 app.route('/api', nocRoutes);
 app.route('/api', telemetryRoutes);
+app.route('/api', communicationsRoutes);
 
 // ── SPA ───────────────────────────────────────────────────────────────────────
 app.get('*', (c) => {

@@ -39,7 +39,8 @@ D1_PAID_LIMIT    = "50000"
 ZT_FREE_LIMIT    = "50"
 
 # Secrets — registrar com: wrangler secret put <NOME>
-# CF_API_TOKEN
+# CF_API_TOKEN          — token D1/R2/KV (D1:Edit, R2:Edit, KV:Edit, Analytics:Read)
+# CF_ZT_TOKEN           — token Zero Trust (Access:Read) para contagem de usuários ZT
 # ADMIN_PASSWORD
 # RESEND_API_KEY
 # TURNSTILE_SECRET_KEY

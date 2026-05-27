@@ -208,8 +208,8 @@ export function adminHtml(baseDomain: string): string { return /* html */`<!DOCT
       <span class="sb-ico">⊕</span>Provisionar
     </div>
     <div class="sb-sec">Operações</div>
-    <div class="sb-item" id="nav-migrations" data-nav="migrations">
-      <span class="sb-ico">⚙</span>Migrações SQL
+    <div class="sb-item" id="nav-communications" data-nav="communications">
+      <span class="sb-ico">✉</span>Comunicados
     </div>
     <div class="sb-sec">Observabilidade</div>
     <div class="sb-item" id="nav-telemetry" data-nav="telemetry">
@@ -383,38 +383,57 @@ export function adminHtml(baseDomain: string): string { return /* html */`<!DOCT
     </div>
   </div>
 
-  <!-- MIGRAÇÕES ───────────────────────────────────────────────── -->
-  <div class="page" id="page-migrations">
+  <!-- COMUNICADOS ─────────────────────────────────────────────── -->
+  <div class="page" id="page-communications">
     <div class="prov-wrap" style="margin-top:6px;">
       <div class="prov-card">
         <div style="margin-bottom:20px;">
-          <div style="font-size:16px;font-weight:700;color:var(--t1);margin-bottom:4px;">Executar Migração SQL</div>
-          <div style="font-size:12px;color:var(--t3);">Execute SQL em uma família específica ou em todos os bancos D1 ativos simultaneamente.</div>
+          <div style="font-size:16px;font-weight:700;color:var(--t1);margin-bottom:4px;">Novo Comunicado</div>
+          <div style="font-size:12px;color:var(--t3);">Envie um email operacional para os responsáveis das famílias cadastradas.</div>
         </div>
         <div class="fg">
-          <label class="fc-lbl">Família (subdomínio)</label>
-          <input id="mig-sub" type="text" class="fc" placeholder="silva — vazio para aplicar em todas as ativas">
-          <div class="fc-hint">Vazio = executa em todas as famílias ativas</div>
+          <label class="fc-lbl">Tipo</label>
+          <select id="comm-level" class="fc">
+            <option value="info">ℹ️ Informativo</option>
+            <option value="maintenance">🔧 Manutenção Programada</option>
+            <option value="incident">🔴 Indisponibilidade</option>
+            <option value="news">🚀 Novidade</option>
+          </select>
         </div>
         <div class="fg">
-          <label class="fc-lbl">SQL <span style="color:var(--err)">*</span></label>
-          <textarea id="mig-sql" class="fc sql-ed mono" placeholder="ALTER TABLE accounts ADD COLUMN notes TEXT;
-CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);"></textarea>
+          <label class="fc-lbl">Destinatários</label>
+          <select id="comm-target" class="fc">
+            <option value="all">Todas as famílias ativas</option>
+          </select>
         </div>
-        <div style="display:flex;gap:10px;">
-          <button onclick="applyMigration()" id="mig-btn" class="btn btn-pri btn-lg" style="flex:1;">⚡ Aplicar Migração</button>
-          <button onclick="document.getElementById('mig-sql').value=''" class="btn btn-sec" style="padding:10px 14px;">Limpar</button>
+        <div class="fg">
+          <label class="fc-lbl">Assunto <span style="color:var(--err)">*</span></label>
+          <input id="comm-subject" type="text" class="fc" placeholder="Ex: Manutenção programada — sábado 14h–16h">
         </div>
-        <div id="mig-result" style="margin-top:14px;"></div>
+        <div class="fg">
+          <label class="fc-lbl">Mensagem <span style="color:var(--err)">*</span></label>
+          <textarea id="comm-message" class="fc" rows="8" style="resize:vertical;" placeholder="Escreva o comunicado aqui. Seja claro e objetivo.&#10;&#10;Ex: Realizaremos uma manutenção programada no sábado das 14h às 16h. Durante esse período o sistema ficará temporariamente indisponível."></textarea>
+        </div>
+        <button onclick="sendCommunication()" id="comm-btn" class="btn btn-pri btn-lg" style="width:100%;">✉ Enviar Comunicado</button>
+        <div id="comm-result" style="margin-top:14px;"></div>
       </div>
 
-      <div class="alr alr-err" style="height:fit-content;align-items:flex-start;flex-direction:column;gap:10px;padding:18px;margin-bottom:0;">
-        <div style="font-size:12px;font-weight:700;">⚠ Riscos das Migrações</div>
-        <div style="display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--t2);">
-          <div>• DDL (<code class="mono" style="color:var(--t1)">ALTER</code>, <code class="mono" style="color:var(--t1)">DROP</code>) são irreversíveis</div>
-          <div>• Teste em uma família antes de aplicar em todas</div>
-          <div>• DML sem <code class="mono" style="color:var(--t1)">WHERE</code> afeta todos os registros</div>
-          <div>• D1 não suporta ROLLBACK — projete para idempotência</div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="tbl-card">
+          <div class="tbl-head">
+            <span class="tbl-ttl">Histórico</span>
+            <button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadCommunications()">↺ Atualizar</button>
+          </div>
+          <div id="comm-history"><div class="empty">Carregando…</div></div>
+        </div>
+        <div class="alr alr-ok" style="margin-bottom:0;flex-direction:column;align-items:flex-start;gap:8px;padding:14px;">
+          <div style="font-weight:700;font-size:12px;">Quando usar cada tipo</div>
+          <div style="font-size:12px;color:var(--t2);display:flex;flex-direction:column;gap:5px;">
+            <div>🔧 <strong>Manutenção</strong> — janela programada para updates</div>
+            <div>🔴 <strong>Indisponibilidade</strong> — falha em produção ativa</div>
+            <div>🚀 <strong>Novidade</strong> — novo recurso disponível</div>
+            <div>ℹ️ <strong>Informativo</strong> — avisos gerais</div>
+          </div>
         </div>
       </div>
     </div>
@@ -619,7 +638,7 @@ var PAGE_TITLES = {
   noc: 'Infraestrutura NOC',
   families: 'Famílias',
   provision: 'Provisionar Nova Família',
-  migrations: 'Migrações SQL',
+  communications: 'Comunicados',
   telemetry: 'Telemetria Global',
   'fam-telemetry': 'Telemetria da Família',
   security: 'Segurança & Ataques'
@@ -638,6 +657,7 @@ function nav(name) {
   if (name === 'families') loadFamilies();
   if (name === 'telemetry') loadTelemetry();
   if (name === 'security') loadSecurity();
+  if (name === 'communications') loadCommunications();
 }
 
 function refreshCurrent() {
@@ -863,7 +883,7 @@ function renderNOC(data) {
         + (db.error ? ' <span style="color:var(--err);font-size:10px;" title="' + db.error + '">⚠</span>' : '') + '</td>'
       + '<td><span class="mono" style="color:var(--acc2);font-size:11px;">' + db.subdomain + '</span></td>'
       + '<td><span class="mono" style="color:var(--t3);font-size:10px;">' + (db.dbId ? db.dbId.slice(0,12) + '…' : '—') + '</span></td>'
-      + '<td style="' + sizeColor + '">' + fmt(db.fileSize || 0)
+      + '<td style="' + sizeColor + '">' + (db.fileSize > 0 ? fmt(db.fileSize) : '<span style="color:var(--t3);font-size:11px;">< 1 KB</span>')
         + '<div class="d1-bar" style="width:80px;"><div class="d1-fill" style="width:' + pct.toFixed(1) + '%"></div></div></td>'
       + '<td style="color:var(--t2);">' + (db.numTables || 0) + ' tabelas</td>'
       + '<td>' + badge(db.status) + '</td>'
@@ -1377,41 +1397,70 @@ async function submitProvision(e) {
   }
 }
 
-// ── Migrations ────────────────────────────────────────────────────
-async function applyMigration() {
-  var sub = el('mig-sub').value.trim();
-  var sql = el('mig-sql').value.trim();
-  var btn = el('mig-btn');
-  if (!sql) { showToast('SQL é obrigatório.', false); return; }
+// ── Comunicados ───────────────────────────────────────────────────
+var commFamsLoaded = false;
+
+async function loadCommunications() {
+  // Populate target select with active families (once)
+  if (!commFamsLoaded && allFams.length > 0) {
+    var sel = el('comm-target');
+    allFams.filter(function(f) { return f.status === 'active'; }).forEach(function(f) {
+      var opt = document.createElement('option');
+      opt.value = f.subdomain;
+      opt.textContent = f.name + ' (' + f.subdomain + ')';
+      sel.appendChild(opt);
+    });
+    commFamsLoaded = true;
+  }
+
+  el('comm-history').innerHTML = spinner('Carregando histórico…');
+  var d = await api('GET', '/communications');
+  if (d.error) { el('comm-history').innerHTML = err(d.error); return; }
+  var items = d.items || [];
+  if (!items.length) {
+    el('comm-history').innerHTML = '<div class="empty">Nenhum comunicado enviado ainda.</div>';
+    return;
+  }
+  var lvlIcons  = { maintenance:'🔧', incident:'🔴', news:'🚀', info:'ℹ️' };
+  var html = items.map(function(item) {
+    var icon = lvlIcons[item.level] || 'ℹ️';
+    return '<div style="padding:12px 16px;border-bottom:1px solid var(--bdr);">'
+      + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">'
+      + '<span style="font-size:14px;">' + icon + '</span>'
+      + '<span style="font-size:12px;font-weight:600;color:var(--t1);">' + item.subject + '</span>'
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--t3);">' + fmtDate(item.sentAt)
+      + ' · ' + (item.sent ? item.sent.length : 0) + ' enviado(s)'
+      + (item.errors && item.errors.length ? ' · <span style="color:var(--err);">' + item.errors.length + ' erro(s)</span>' : '')
+      + '</div>'
+      + '</div>';
+  }).join('');
+  el('comm-history').innerHTML = html;
+}
+
+async function sendCommunication() {
+  var level   = el('comm-level').value;
+  var target  = el('comm-target').value;
+  var subject = el('comm-subject').value.trim();
+  var message = el('comm-message').value.trim();
+  var btn = el('comm-btn');
+  if (!subject || !message) { showToast('Assunto e mensagem são obrigatórios.', false); return; }
+  if (!confirm('Enviar comunicado para ' + (target === 'all' ? 'todas as famílias ativas' : target) + '?')) return;
   btn.disabled = true;
-  btn.textContent = '⟳  Aplicando…';
-  el('mig-result').innerHTML = '<div class="alr alr-ok"><span class="spin">⟳</span><span>Executando SQL…</span></div>';
-  var endpoint = sub ? '/migrations/apply' : '/migrations/apply-all';
-  var body     = sub ? { subdomain: sub, sql: sql } : { sql: sql };
-  var data     = await api('POST', endpoint, body, 120000);
+  btn.textContent = '⟳ Enviando…';
+  el('comm-result').innerHTML = spinner('Enviando comunicado…');
+  var data = await api('POST', '/communications/send', { level, target, subject, message }, 30000);
   btn.disabled = false;
-  btn.textContent = '⚡ Aplicar Migração';
-  if (data.results) {
-    var entries = Object.entries(data.results);
-    var rows = entries.map(function(pair) {
-      var r = pair[1];
-      return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bdr);">'
-        + '<span class="mono" style="color:var(--acc2);font-size:12px;">' + pair[0] + '</span>'
-        + '<span style="font-size:12px;color:var(--t2);">' + r.applied + ' stmt(s)</span>'
-        + (r.errors.length ? '<span style="color:var(--err);font-size:11px;">' + r.errors.join(' | ') + '</span>' : '<span style="color:var(--ok);font-size:12px;">✓</span>')
-        + '</div>';
-    }).join('');
-    el('mig-result').innerHTML = '<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:9px;padding:14px 16px;">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">' + entries.length + ' família(s) migrada(s)</div>'
-      + rows + '</div>';
-    showToast(entries.length + ' família(s) migrada(s).');
-  } else if (data.success) {
-    el('mig-result').innerHTML = '<div class="alr alr-ok"><span>✓</span><span>' + data.applied + ' statement(s) aplicado(s) com sucesso.</span></div>';
-    showToast('Migração aplicada.');
+  btn.textContent = '✉ Enviar Comunicado';
+  if (data.success) {
+    el('comm-result').innerHTML = '<div class="alr alr-ok"><span>✓</span><span>' + data.sent + ' email(s) enviado(s) com sucesso.' + (data.errors && data.errors.length ? ' (' + data.errors.length + ' erro(s))' : '') + '</span></div>';
+    showToast(data.sent + ' comunicado(s) enviado(s).');
+    el('comm-subject').value = '';
+    el('comm-message').value = '';
+    loadCommunications();
   } else {
-    el('mig-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>'
-      + (data.errors || []).join(' | ') + '</span></div>';
-    showToast('Erro na migração.', false);
+    el('comm-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + (data.error || 'Erro ao enviar.') + '</span></div>';
+    showToast(data.error || 'Erro ao enviar.', false);
   }
 }
 
@@ -1464,12 +1513,12 @@ document.addEventListener('keydown', function(e) {
 
 // ── Logout ────────────────────────────────────────────────────────
 function doLogout() {
-  window.location.href = '/cdn-cgi/access/logout';
+  window.location.href = 'https://mks-personnal-finance-manager.cloudflareaccess.com/cdn-cgi/access/logout';
 }
 
-// ── Auto-logout por inatividade (30 min) ──────────────────────────
+// ── Auto-logout por inatividade (20 min) ──────────────────────────
 (function() {
-  var TIMEOUT = 30 * 60 * 1000;
+  var TIMEOUT = 20 * 60 * 1000;
   var _tid;
   function reset() {
     clearTimeout(_tid);
