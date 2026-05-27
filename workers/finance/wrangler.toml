@@ -28,9 +28,7 @@ BASE_DOMAIN        = "financaslivre.com"
 # CF_API_TOKEN
 # GROQ_API_KEY
 # RESEND_API_KEY
-# PLUGGY_CLIENT_ID
-# PLUGGY_CLIENT_SECRET
-# APP_SECRET
+# CPF_SALT
 
 [[r2_buckets]]
 binding     = "MKS_DOCUMENTS"
