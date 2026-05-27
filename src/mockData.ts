@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FinancialAccount, Transaction, BankConnection, CategoryBudget, FinancialGoal, NotificationAlert, Category, CreditCard, Invoice, Recurrence } from './types';
+import { FinancialAccount, Transaction, CategoryBudget, FinancialGoal, NotificationAlert, Category, CreditCard, Invoice, Recurrence } from './types';
 
 export const INITIAL_ACCOUNTS: FinancialAccount[] = [
   {
@@ -44,39 +44,6 @@ export const INITIAL_ACCOUNTS: FinancialAccount[] = [
   }
 ];
 
-export const INITIAL_CONNECTIONS: BankConnection[] = [
-  {
-    id: 'conn-itau',
-    institutionName: 'Banco Itaú',
-    logo: '🏦',
-    status: 'CONNECTED',
-    lastSyncedAt: '2026-05-19T10:00:00Z',
-    itemId: 'plg_itau_98522',
-  },
-  {
-    id: 'conn-inter',
-    institutionName: 'Banco Inter',
-    logo: '🍊',
-    status: 'CONNECTED',
-    lastSyncedAt: '2026-05-19T09:12:00Z',
-    itemId: 'plg_inter_45fff',
-  },
-  {
-    id: 'conn-xp',
-    institutionName: 'XP Investimentos',
-    logo: '📈',
-    status: 'CONNECTED',
-    lastSyncedAt: '2026-05-18T18:30:00Z',
-    itemId: 'plg_xp_8811c',
-  },
-  {
-    id: 'conn-bradesco',
-    institutionName: 'Banco Bradesco',
-    logo: '🔴',
-    status: 'DISCONNECTED',
-    itemId: 'plg_bradesco_22394',
-  }
-];
 
 export const INITIAL_TRANSACTIONS: Transaction[] = [
   {
@@ -324,7 +291,7 @@ export const INITIAL_ALERTS: NotificationAlert[] = [
   {
     id: 'alt-2',
     title: 'Integração de Sincronização Concluída',
-    message: 'Seus dados do Banco Itaú e Inter foram sincronizados com sucesso via Pluggy Open Finance.',
+    message: 'Seus dados foram sincronizados com sucesso via importação OFX.',
     type: 'SUCCESS',
     date: '2026-05-19T09:12:00Z',
     isRead: false

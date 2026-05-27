@@ -8,7 +8,7 @@ import {
   BrainCircuit, RefreshCw, AlertTriangle, Info, CheckCircle2,
   TrendingUp, PieChart, Lightbulb, ClipboardList, Zap, Clock,
   ChevronRight, Shield, MessageSquare, Send, BarChart2, User, Bot,
-  Sparkles
+  Sparkles, Key, ExternalLink, Target, Wallet, FileText, FileSearch,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -58,10 +58,17 @@ interface AnalysisResult {
   plano_acao: PlanoAcao[];
   generatedAt: string;
 }
+interface AgentAction {
+  tool: string;
+  args: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   ts: string;
+  actions?: AgentAction[];
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -135,21 +142,116 @@ function PrazoBadge({ prazo }: { prazo: string }) {
 // ── Chat tab ───────────────────────────────────────────────────────────────
 
 const QUICK_STARTERS = [
-  'Como está minha saúde financeira?',
-  'Quanto posso investir por mês?',
-  'Me explique Tesouro Direto vs CDB',
-  'O que são FIIs e como investir?',
-  'Como reduzir minha fatura do cartão?',
-  'Perspectivas da taxa Selic para 2025',
-  'O que é diversificação de carteira?',
-  'Como funciona o come-cotas?',
+  'Crie meta de reserva de emergência de R$ 15.000',
+  'Registre despesa de R$ 120 em Alimentação hoje',
+  'Configure orçamento de Lazer em R$ 500/mês',
+  'Liste meus documentos salvos',
+  'Crie meta de viagem de R$ 8.000 para dezembro',
+  'Registre receita de salário de R$ 5.000 hoje',
+  'Configure orçamento de Transporte em R$ 400',
+  'Analise minha saúde financeira',
 ];
+
+
+// ── ActionCard — shows what the agent did ────────────────────────────────────
+
+function ActionCard({ action }: { action: AgentAction }) {
+  const fmtCents = (n: number) => `R$ ${(n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+  const res  = action.result as any;
+  const args = action.args as any;
+  const success = !res?.error;
+
+  let label = action.tool;
+  let detail = '';
+  let Icon = CheckCircle2;
+
+  if (action.tool === 'create_transaction') {
+    label = args.type === 'REC' ? 'Receita registrada' : 'Despesa registrada';
+    detail = `${args.description} — ${fmtCents(args.amountInCents)} · ${args.category}`;
+    Icon = args.type === 'REC' ? Wallet : TrendingUp;
+  } else if (action.tool === 'create_goal') {
+    label = 'Meta criada';
+    detail = `${args.name} — alvo ${fmtCents(args.targetInCents)} até ${args.targetDate}`;
+    Icon = Target;
+  } else if (action.tool === 'create_budget') {
+    label = res?.action === 'updated' ? 'Orçamento atualizado' : 'Orçamento criado';
+    detail = `${args.category} — limite ${fmtCents(args.limitInCents)}/mês`;
+    Icon = PieChart;
+  } else if (action.tool === 'list_documents') {
+    label = 'Documentos listados';
+    detail = `${(res?.documents ?? []).length} documento(s) encontrado(s)`;
+    Icon = FileText;
+  } else if (action.tool === 'read_document') {
+    label = success ? 'Documento lido' : 'Erro ao ler documento';
+    detail = success ? 'Conteúdo extraído com visão IA' : (res?.error ?? '');
+    Icon = FileSearch;
+  }
+
+  return (
+    <div className={`flex items-start gap-2 px-3 py-2 rounded-xl border text-[11px] mt-1 ${
+      success ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
+    }`}>
+      <Icon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${success ? 'text-emerald-500' : 'text-rose-500'}`} />
+      <div className="min-w-0">
+        <p className={`font-bold ${success ? 'text-emerald-800' : 'text-rose-800'}`}>{label}</p>
+        <p className={`break-words ${success ? 'text-emerald-700' : 'text-rose-700'}`}>{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── GroqKeyPanel — used by both Chat and Analysis tabs ────────────────────────
+interface GroqKeyPanelProps {
+  onSave: (key: string) => void;
+}
+function GroqKeyPanel({ onSave }: GroqKeyPanelProps) {
+  const [val, setVal] = useState('');
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+      <div className="flex items-start gap-2">
+        <Key className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <p className="text-xs font-bold text-amber-800">Limite gratuito da Groq atingido</p>
+          <p className="text-xs text-amber-700 leading-relaxed">
+            Insira sua própria chave Groq para continuar. É gratuita, sem cartão de crédito.
+          </p>
+          <a
+            href="https://console.groq.com/keys"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 underline underline-offset-2"
+          >
+            Obter chave em console.groq.com <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          placeholder="gsk_..."
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          className="flex-1 text-xs border border-amber-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+        />
+        <button
+          disabled={!val.startsWith('gsk_') || val.length < 20}
+          onClick={() => { sessionStorage.setItem('groq_key', val); onSave(val); }}
+          className="px-3 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+        >
+          Salvar e tentar
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function ChatTab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showKeyPanel, setShowKeyPanel] = useState(false);
+  const [userGroqKey, setUserGroqKey] = useState(() => sessionStorage.getItem('groq_key') ?? '');
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
@@ -163,16 +265,39 @@ function ChatTab() {
     setError('');
     try {
       const history = messages.map(m => ({ role: m.role, content: m.content }));
-      const res = await fetch('/api/ai/financial-chat', {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const groqKey = sessionStorage.getItem('groq_key') ?? userGroqKey;
+      if (groqKey) headers['X-Groq-Api-Key'] = groqKey;
+      const res = await fetch('/api/ai/agent-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ message: text.trim(), history }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Erro no chat.'); return; }
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply, ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }]);
-    } catch (e: any) {
-      setError(e.message || 'Erro de conexão.');
+      if (res.status === 429 || data.error === 'RATE_LIMIT') { setShowKeyPanel(true); setError(''); return; }
+      if (res.status === 401 || data.error === 'GROQ_KEY_MISSING') { setShowKeyPanel(true); setError(''); return; }
+      if (!res.ok) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Sua solicitação não pode ser atendida agora. Tente novamente em instantes ou realize a ação manualmente nos módulos do aplicativo.',
+          ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          actions: [],
+        }]);
+        return;
+      }
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.reply,
+        ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        actions: data.actions ?? [],
+      }]);
+    } catch {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Sua solicitação não pode ser atendida agora. Tente novamente em instantes ou realize a ação manualmente nos módulos do aplicativo.',
+        ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        actions: [],
+      }]);
     } finally {
       setLoading(false);
     }
@@ -190,7 +315,7 @@ function ChatTab() {
             <div className="space-y-1.5 max-w-sm">
               <p className="text-sm font-bold text-slate-700">MKS Finance AI</p>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Assessor financeiro com acesso à sua posição real. Pergunte sobre suas finanças, mercado, investimentos, B3, juros ou planejamento.
+                Agente financeiro inteligente. Crie metas, registre despesas, configure orçamentos e leia documentos — tudo em linguagem natural.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 w-full max-w-md">
@@ -220,6 +345,11 @@ function ChatTab() {
               }`}>
                 {m.content}
               </div>
+              {m.role === 'assistant' && m.actions && m.actions.length > 0 && (
+                <div className="w-full space-y-1">
+                  {m.actions.map((a, ai) => <ActionCard key={ai} action={a} />)}
+                </div>
+              )}
               <span className="text-[10px] text-slate-400 px-1">{m.ts}</span>
             </div>
           </div>
@@ -246,6 +376,9 @@ function ChatTab() {
             <p className="text-xs text-rose-700">{error}</p>
           </div>
         )}
+        {showKeyPanel && (
+          <GroqKeyPanel onSave={k => { setUserGroqKey(k); setShowKeyPanel(false); }} />
+        )}
 
         <div ref={endRef} />
       </div>
@@ -257,7 +390,7 @@ function ChatTab() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
-          placeholder="Pergunte sobre suas finanças, mercado, investimentos..."
+          placeholder="Crie metas, registre despesas, leia documentos ou pergunte sobre finanças..."
           disabled={loading}
           className="flex-1 text-sm border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 bg-white"
         />
@@ -270,7 +403,7 @@ function ChatTab() {
         </button>
       </div>
       <p className="text-[10px] text-slate-400 text-center mt-2">
-        Responde com base nos seus dados reais + conhecimento de mercado do modelo. Para cotações ao vivo, use o widget do dashboard.
+        Agente com acesso aos seus dados reais. Pode criar metas, despesas e orçamentos diretamente. Para cotações ao vivo, use o widget.
       </p>
     </div>
   );
@@ -283,13 +416,20 @@ export default function PredictiveAIModule() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showKeyPanel, setShowKeyPanel] = useState(false);
+  const [userGroqKey, setUserGroqKey] = useState(() => sessionStorage.getItem('groq_key') ?? '');
 
-  const runAnalysis = async () => {
+  const runAnalysis = async (retryKey?: string) => {
     setLoading(true);
     setError('');
+    setShowKeyPanel(false);
     try {
-      const res = await fetch('/api/ai/predictive', { method: 'POST' });
+      const headers: Record<string, string> = {};
+      const groqKey = retryKey ?? sessionStorage.getItem('groq_key') ?? userGroqKey;
+      if (groqKey) headers['X-Groq-Api-Key'] = groqKey;
+      const res = await fetch('/api/ai/predictive', { method: 'POST', headers });
       const data = await res.json();
+      if (res.status === 429 || data.error === 'RATE_LIMIT') { setShowKeyPanel(true); return; }
       if (!res.ok) { setError(data.error || 'Erro na análise.'); return; }
       setResult(data);
     } catch (e: any) {
@@ -309,12 +449,12 @@ export default function PredictiveAIModule() {
             IA Preditiva — Analista Financeiro
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Diagnóstico completo baseado nos seus dados reais + chat com assessor IA especializado.
+            Diagnóstico completo + agente IA que executa ações: cria metas, despesas, orçamentos e lê documentos.
           </p>
         </div>
         {activeSection === 'analysis' && (
           <button
-            onClick={runAnalysis}
+            onClick={() => runAnalysis()}
             disabled={loading}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl transition-colors shadow-sm shrink-0"
           >
@@ -337,7 +477,7 @@ export default function PredictiveAIModule() {
           onClick={() => setActiveSection('chat')}
           className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeSection === 'chat' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
-          <MessageSquare className="w-3.5 h-3.5" /> Chat Financeiro
+          <Bot className="w-3.5 h-3.5" /> Agente IA
         </button>
       </div>
 
@@ -352,6 +492,9 @@ export default function PredictiveAIModule() {
               <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
               <p className="text-xs text-rose-700 font-medium">{error}</p>
             </div>
+          )}
+          {showKeyPanel && (
+            <GroqKeyPanel onSave={k => { setUserGroqKey(k); runAnalysis(k); }} />
           )}
 
           {loading && (
@@ -391,7 +534,7 @@ export default function PredictiveAIModule() {
                   </div>
                 ))}
               </div>
-              <button onClick={runAnalysis} className="mt-2 inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-colors shadow-sm">
+              <button onClick={() => runAnalysis()} className="mt-2 inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-colors shadow-sm">
                 <Zap className="w-4 h-4" /> Executar Análise Completa
               </button>
             </div>

@@ -19,12 +19,12 @@ import investmentRoutes   from './routes/investments';
 import userRoutes         from './routes/users';
 import aiRoutes           from './routes/ai';
 import marketRoutes       from './routes/market';
-import openFinanceRoutes  from './routes/openfinance';
 import documentRoutes     from './routes/documents';
 import importerRoutes     from './routes/importers';
 import backupRoutes       from './routes/backup';
+import debtRoutes         from './routes/debts';
 
-const LGPD_CURRENT_VERSION = '1.0';
+const LGPD_CURRENT_VERSION = '2.0';
 
 // ── Env bindings ──────────────────────────────────────────────────────────────
 export interface Env {
@@ -38,9 +38,6 @@ export interface Env {
   CF_API_TOKEN:       string;
   GROQ_API_KEY:       string;
   RESEND_API_KEY:     string;
-  PLUGGY_CLIENT_ID:   string;
-  PLUGGY_CLIENT_SECRET: string;
-  APP_SECRET:         string;
 }
 
 // ── Tenant (lido do KV MKS_TENANTS) ──────────────────────────────────────────
@@ -73,6 +70,15 @@ export interface Variables {
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+// ── Security headers ──────────────────────────────────────────────────────────
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+});
+
 // ── Middleware 1: Tenant resolution ───────────────────────────────────────────
 app.use('*', async (c, next) => {
   const host      = c.req.header('host') ?? '';
@@ -97,7 +103,6 @@ app.get('/api/health', (c) => {
   return c.json({
     ok:        true,
     subdomain: tenant.subdomain,
-    familyId:  tenant.familyId,
     status:    tenant.status,
     timestamp: new Date().toISOString(),
   });
@@ -164,7 +169,7 @@ app.get('/api/auth/status', (c) => {
   return c.json({
     ok:           true,
     lgpdRequired: !lgpdOk,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, memberId: user.memberId },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, memberId: user.memberId, avatarUrl: user.avatarUrl },
   });
 });
 
@@ -217,10 +222,10 @@ app.route('/api', investmentRoutes);
 app.route('/api', userRoutes);
 app.route('/api', aiRoutes);
 app.route('/api', marketRoutes);
-app.route('/api', openFinanceRoutes);
 app.route('/api', documentRoutes);
 app.route('/api', importerRoutes);
 app.route('/api', backupRoutes);
+app.route('/api', debtRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.all('*', (c) => c.json({ error: 'Rota não encontrada' }, 404));

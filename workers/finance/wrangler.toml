@@ -2,9 +2,10 @@ name            = "mks-finance"
 main            = "src/index.ts"
 compatibility_date = "2025-05-25"
 
-# Serve *.mksbrasil.com/api/* — CF Pages serve o frontend estático
+# Serve *.financaslivre.com/api/* (domínio principal) e *.mksbrasil.com/api/* (legado)
 routes = [
-  { pattern = "*.mksbrasil.com/api/*", zone_name = "mksbrasil.com" },
+  { pattern = "*.financaslivre.com/api/*", zone_name = "financaslivre.com" },
+  { pattern = "*.mksbrasil.com/api/*",      zone_name = "mksbrasil.com" },
   { pattern = "financas.mksbrasil.com/api/*", zone_name = "mksbrasil.com" }
 ]
 
@@ -17,10 +18,11 @@ binding = "MKS_CACHE"
 id      = "f21654ee37724befa85449a4cc1af3be"
 
 [vars]
-CF_ACCOUNT_ID  = "9b61f609fee4408fd1c4344feaf9b16a"
-CF_ZONE_ID     = "9d58d8832a461d6e64a17307de32b553"
-CF_TEAM_DOMAIN = "mks-personnal-finance-manager"
-BASE_DOMAIN    = "mksbrasil.com"
+CF_ACCOUNT_ID      = "9b61f609fee4408fd1c4344feaf9b16a"
+CF_ZONE_ID         = "350977938b4449f053202db04e455be1"   # financaslivre.com
+CF_ZONE_ID_LEGACY  = "9d58d8832a461d6e64a17307de32b553"   # mksbrasil.com (manter p/ suporte legado)
+CF_TEAM_DOMAIN     = "mks-personnal-finance-manager"
+BASE_DOMAIN        = "financaslivre.com"
 
 # Secrets — registrar com: wrangler secret put <NOME>
 # CF_API_TOKEN

@@ -93,8 +93,26 @@ export default function MarketWidget() {
 
   useEffect(() => {
     fetchAll();
-    const timer = setInterval(() => fetchAll(), 5 * 60 * 1000);
-    return () => clearInterval(timer);
+    // Cotações + câmbio: a cada 5 minutos (mantém último dado se falhar)
+    const quotesTimer = setInterval(async () => {
+      try {
+        const [qRes, rRes] = await Promise.allSettled([
+          fetch('/api/market/quotes').then(r => r.json()),
+          fetch('/api/market/rates').then(r => r.json()),
+        ]);
+        if (qRes.status === 'fulfilled') setQuotes(qRes.value);
+        if (rRes.status === 'fulfilled') setRates(rRes.value);
+        setLastRefresh(new Date());
+      } catch { /* mantém último dado disponível */ }
+    }, 5 * 60 * 1000);
+    // Notícias: a cada 15 minutos (mantém últimas notícias se falhar)
+    const newsTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/market/news');
+        if (res.ok) setNews(await res.json());
+      } catch { /* mantém últimas notícias */ }
+    }, 15 * 60 * 1000);
+    return () => { clearInterval(quotesTimer); clearInterval(newsTimer); };
   }, [fetchAll]);
 
   const ibov = quotes?.quotes?.find(q => q.symbol === 'IBOV');

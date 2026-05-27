@@ -7,9 +7,22 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
+  role: 'owner' | 'member';
+  memberId: string | null;
   mfaEnabled: boolean;
   mfaPendingSetup: boolean;
   avatarUrl: string;
+}
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'member';
+  isActive: boolean;
+  memberId: string | null;
+  relationship: string | null;
+  createdAt: string;
 }
 
 export type AccountType = 'CASH' | 'CHECKING' | 'SAVINGS' | 'INVESTMENT';
@@ -22,6 +35,11 @@ export interface FinancialAccount {
   balanceInCents: number;
   color: string;
   isLinked: boolean;
+  branch?: string | null;
+  accountNumber?: string | null;
+  accountDigit?: string | null;
+  managerName?: string | null;
+  managerPhone?: string | null;
 }
 
 export type TransactionType = 'REC' | 'DES' | 'TRANS';
@@ -45,6 +63,10 @@ export interface Transaction {
   installmentGroupId?: string;
   documentKey?: string;
   memberId?: string;
+  // Income metadata (available on REC type)
+  incomeType?: string | null;
+  payer?: string | null;
+  profession?: string | null;
 }
 
 export interface Category {
@@ -97,15 +119,6 @@ export interface Invoice {
   dueDate: string | null;
   paidAt: string | null;
   createdAt: string;
-}
-
-export interface BankConnection {
-  id: string;
-  institutionName: string;
-  logo: string;
-  status: 'CONNECTED' | 'SYNCING' | 'ERROR' | 'DISCONNECTED';
-  lastSyncedAt?: string;
-  itemId?: string; // Belvo / Pluggy simulated identifier
 }
 
 export interface CategoryBudget {
@@ -162,6 +175,22 @@ export interface FamilyMember {
   id: string;
   name: string;
   avatarColor: string;
+  createdAt: string;
+}
+
+export type DebtType = 'cartao' | 'banco' | 'financiamento' | 'aluguel' | 'outros';
+export type DebtStatus = 'ativo' | 'negociando' | 'quitado';
+
+export interface Debt {
+  id: string;
+  creditor: string;
+  type: DebtType;
+  originalAmountInCents: number;
+  currentAmountInCents: number;
+  dueDate: string | null;
+  monthsOverdue: number;
+  status: DebtStatus;
+  notes: string | null;
   createdAt: string;
 }
 

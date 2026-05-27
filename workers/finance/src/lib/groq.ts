@@ -34,6 +34,48 @@ export async function groqChat(
   return data.choices[0]?.message?.content ?? '';
 }
 
+// ── Tool / Agent support ──────────────────────────────────────────────────────
+
+export interface GroqTool {
+  type: 'function';
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+export interface GroqToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+export type GroqAgentMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: GroqToolCall[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
+
+/** Groq chat completions with tool-use / function-calling support. */
+export async function groqAgentCall(
+  apiKey: string,
+  model: string,
+  messages: GroqAgentMessage[],
+  tools: GroqTool[],
+  opts: GroqOpts = {},
+): Promise<{ content: string | null; tool_calls: GroqToolCall[] | null }> {
+  const resp = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, tools, tool_choice: 'auto', ...opts }),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Groq ${resp.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await resp.json() as {
+    choices: Array<{ message: { content: string | null; tool_calls?: GroqToolCall[] } }>;
+  };
+  const msg = data.choices[0]?.message;
+  return { content: msg?.content ?? null, tool_calls: msg?.tool_calls ?? null };
+}
+
 // Classificador local de estabelecimentos (fallback sem IA)
 export function classifyMerchant(desc: string): string {
   const l = desc.toLowerCase();

@@ -13,7 +13,12 @@ CREATE TABLE IF NOT EXISTS accounts (
   bank_name        TEXT    NOT NULL,
   balance_in_cents INTEGER NOT NULL DEFAULT 0,
   color            TEXT    NOT NULL DEFAULT '#6B7280',
-  is_linked        INTEGER NOT NULL DEFAULT 0
+  is_linked        INTEGER NOT NULL DEFAULT 0,
+  branch           TEXT,
+  account_number   TEXT,
+  account_digit    TEXT,
+  manager_name     TEXT,
+  manager_phone    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS connections (
@@ -43,6 +48,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   installment_group_id TEXT,
   document_key         TEXT,
   member_id            TEXT,
+  income_type          TEXT,
+  payer                TEXT,
+  profession           TEXT,
   created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -165,6 +173,8 @@ CREATE TABLE IF NOT EXISTS users (
   member_id            TEXT,
   lgpd_accepted_at     TEXT,
   lgpd_policy_version  TEXT,
+  avatar_url           TEXT,
+  relationship         TEXT,
   is_active            INTEGER NOT NULL DEFAULT 1,
   created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );

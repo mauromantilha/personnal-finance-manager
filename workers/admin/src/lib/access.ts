@@ -22,7 +22,18 @@ async function getPublicKeys(teamDomain: string): Promise<JWKSKey[]> {
   const cached = JWKS_CACHE.get(teamDomain);
   if (cached && Date.now() - cached.fetchedAt < 3_600_000) return cached.keys;
 
-  const res = await fetch(`https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`);
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 5000);
+  let res: Response;
+  try {
+    res = await fetch(`https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`, {
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(tid);
+    throw new Error(`JWKS fetch timeout/error: ${(e as Error).message}`);
+  }
+  clearTimeout(tid);
   if (!res.ok) throw new Error(`JWKS fetch failed: ${res.status}`);
   const data = await res.json() as { keys: JWKSKey[] };
   JWKS_CACHE.set(teamDomain, { keys: data.keys, fetchedAt: Date.now() });

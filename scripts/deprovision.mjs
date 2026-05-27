@@ -20,7 +20,7 @@ const ROOT       = join(__dirname, '..');
 const CTRL       = join(process.env.HOME, '.mks-control');
 const CF_ACCOUNT = '9b61f609fee4408fd1c4344feaf9b16a';
 const CF_TUNNEL  = '50e41496-a62b-452a-bd9f-d0f08c2a620d';
-const BASE_DOMAIN = 'mksbrasil.com';
+const BASE_DOMAIN = 'financaslivre.com';
 
 function log(icon, msg) { console.log(`\n${icon}  ${msg}`); }
 function ok(msg)  { console.log(`   ✓ ${msg}`); }

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { createD1Database, execD1, createAccessApp, createAccessPolicy, addPagesDomain } from '../lib/cf-api';
+import { createD1Database, execD1Batch, createAccessApp, createAccessPolicy, addPagesDomain, removeCfAccessDnsPlaceholder } from '../lib/cf-api';
 import { sendWelcomeEmail } from '../lib/resend';
 // @ts-ignore — wrangler Text rule imports .sql as string
 import SCHEMA_SQL from '../schema.sql';
@@ -21,7 +21,7 @@ router.post('/provision', async (c) => {
   const existing = await c.env.MKS_TENANTS.get(`tenant:${subdomain}`);
   if (existing) return c.json({ error: `Subdomínio "${subdomain}" já está em uso.` }, 409);
 
-  const { CF_ACCOUNT_ID, CF_API_TOKEN, BASE_DOMAIN, RESEND_API_KEY, ZT_OTP_IDP_ID, CF_PAGES_PROJECT } = c.env;
+  const { CF_ACCOUNT_ID, CF_API_TOKEN, BASE_DOMAIN, RESEND_API_KEY, RESEND_FROM_DOMAIN, ZT_OTP_IDP_ID, CF_PAGES_PROJECT } = c.env;
   const familyId = `fam-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 
   // Step 1: Create D1 database
@@ -42,7 +42,7 @@ router.post('/provision', async (c) => {
     const [, app] = await Promise.all([
       applySchema(CF_ACCOUNT_ID, CF_API_TOKEN, d1DatabaseId),
       createAccessApp(CF_ACCOUNT_ID, CF_API_TOKEN, {
-        name: `MKS Finanças — ${name}`,
+        name: `Finanças Livre — ${name}`,
         domain,
         otpIdpId: ZT_OTP_IDP_ID,
       }),
@@ -64,6 +64,18 @@ router.post('/provision', async (c) => {
     return c.json({ error: `Falha ao criar policy: ${(e as Error).message}` }, 500);
   }
 
+  // Step 4b: Remove the A 100.64.0.1 placeholder that CF Access plants for
+  // the subdomain. With *.mksbrasil.com wildcard in place, deleting the
+  // specific record is enough — the wildcard takes over automatically.
+  try {
+    await removeCfAccessDnsPlaceholder(
+      c.env.CF_ZONE_ID, CF_API_TOKEN,
+      `${subdomain}.${BASE_DOMAIN}`,
+    );
+  } catch (e) {
+    console.error('DNS placeholder removal failed:', (e as Error).message);
+  }
+
   // Step 5: Build tenant record and write to KV
   const ownerEmailHash = await hashEmail(ownerEmail);
   const tenant = {
@@ -82,6 +94,16 @@ router.post('/provision', async (c) => {
     createdAt: new Date().toISOString(),
   };
 
+  // Step 5b: Register CF Pages custom domain (blocking — 522 without this)
+  if (CF_PAGES_PROJECT) {
+    try {
+      await addPagesDomain(CF_ACCOUNT_ID, CF_API_TOKEN, CF_PAGES_PROJECT, `${subdomain}.${BASE_DOMAIN}`);
+    } catch (e) {
+      console.error('addPagesDomain failed:', (e as Error).message);
+      // Non-fatal: domain may already be active or Pages may accept it later
+    }
+  }
+
   await c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant));
 
   const index: string[] = JSON.parse(await c.env.MKS_TENANTS.get('tenants:index') ?? '[]');
@@ -91,13 +113,10 @@ router.post('/provision', async (c) => {
     c.env.MKS_TENANTS.put('tenants:count', String(index.length)),
   ]);
 
-  // Step 6: Add CF Pages custom domain + send welcome email (best-effort, non-blocking)
-  c.executionCtx.waitUntil(Promise.all([
-    CF_PAGES_PROJECT
-      ? addPagesDomain(CF_ACCOUNT_ID, CF_API_TOKEN, CF_PAGES_PROJECT, `${subdomain}.${BASE_DOMAIN}`)
-      : Promise.resolve(),
-    sendWelcomeEmail(RESEND_API_KEY, ownerEmail, name, subdomain, BASE_DOMAIN),
-  ]));
+  // Step 6: Send welcome email (best-effort, non-blocking)
+  c.executionCtx.waitUntil(
+    sendWelcomeEmail(RESEND_API_KEY, ownerEmail, name, subdomain, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
+  );
 
   return c.json({ success: true, tenant });
 });
@@ -107,11 +126,11 @@ async function applySchema(accountId: string, token: string, dbId: string): Prom
   const stmts = sql
     .split(';')
     .map((s: string) => s.trim())
-    .filter((s: string) => s.length > 0 && !s.startsWith('--'));
+    .filter((s: string) => s.length > 0 && !s.startsWith('--'))
+    .map((s: string) => s + ';');
 
-  for (const stmt of stmts) {
-    await execD1(accountId, token, dbId, stmt + ';');
-  }
+  // Single batch call — avoids hitting the 50-subrequest-per-invocation limit
+  await execD1Batch(accountId, token, dbId, stmts);
 }
 
 async function hashEmail(email: string): Promise<string> {

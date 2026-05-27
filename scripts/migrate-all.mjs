@@ -3,15 +3,17 @@
  * MKS Finanças — Migration runner para instâncias familiares
  *
  * Uso:
- *   node scripts/migrate-all.mjs                        # todas as famílias ativas
+ *   node scripts/migrate-all.mjs                        # todas as famílias ativas (lê do KV)
  *   node scripts/migrate-all.mjs --subdomain silva      # somente uma família
  *   node scripts/migrate-all.mjs --dry-run              # simula sem aplicar
+ *   node scripts/migrate-all.mjs --main                 # instância principal (D1_DATABASE_ID do .env)
  *
  * Lógica:
- *   1. Cria schema_migrations se não existe no D1
- *   2. Se vazia (DB antigo sem tracking): semeia 0001-0010 como já aplicadas
- *   3. Aplica somente as migrations pendentes (não presentes em schema_migrations)
- *   4. Registra cada migration aplicada em schema_migrations
+ *   1. Lê tenants ativos do KV MKS_TENANTS (tenant:* keys) — sem arquivo local
+ *   2. Cria schema_migrations se não existe no D1
+ *   3. Se vazia (DB antigo sem tracking): semeia 0001-0010 como já aplicadas
+ *   4. Aplica somente as migrations pendentes (não presentes em schema_migrations)
+ *   5. Registra cada migration aplicada em schema_migrations
  */
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
@@ -20,9 +22,9 @@ import { fileURLToPath } from 'url';
 
 const __dirname  = dirname(fileURLToPath(import.meta.url));
 const ROOT       = join(__dirname, '..');
-const CTRL       = join(process.env.HOME, '.mks-control');
 const MIGRATIONS = join(ROOT, 'migrations');
 const CF_ACCOUNT = '9b61f609fee4408fd1c4344feaf9b16a';
+const KV_NS_ID   = '6017e7ceeaa84a0fa7d7c798ce22bce8';
 
 // Versões criadas antes do controle de schema — consideradas já aplicadas em DBs antigos
 const LEGACY_VERSIONS = [
@@ -52,9 +54,32 @@ function parseEnvFile(path) {
   );
 }
 
-function loadFamilies() {
-  const p = join(CTRL, 'families.json');
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : [];
+async function loadTenantsFromKV(token) {
+  // Lista todas as chaves tenant:* do KV
+  const keysResult = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/storage/kv/namespaces/${KV_NS_ID}/keys?prefix=tenant%3A&limit=100`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  ).then(r => r.json());
+
+  if (!keysResult.success) throw new Error(`KV list: ${JSON.stringify(keysResult.errors)}`);
+
+  const families = [];
+  for (const { name: key } of keysResult.result) {
+    const val = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/storage/kv/namespaces/${KV_NS_ID}/values/${encodeURIComponent(key)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).then(r => r.json()).catch(() => null);
+
+    if (val?.d1DatabaseId && val?.status === 'active') {
+      families.push({
+        name:         val.name ?? val.subdomain,
+        subdomain:    val.subdomain,
+        d1DatabaseId: val.d1DatabaseId,
+        status:       val.status,
+      });
+    }
+  }
+  return families;
 }
 
 async function cf(path, method = 'GET', body, token) {
@@ -108,14 +133,21 @@ async function migrateFamily({ name, subdomain, d1DatabaseId }, token) {
   const rows       = await d1q(d1DatabaseId, 'SELECT version FROM schema_migrations', [], token);
   const appliedSet = new Set(rows.map(r => r.version));
 
-  // 3. Semear legados se tabela estava vazia (DB provisionado sem tracking)
+  // 3. Semear legados se tabela estava vazia E as tabelas físicas já existem
+  //    (DB antigo provisionado antes do tracking). DBs novos NÃO devem pular migrações.
   if (appliedSet.size === 0) {
-    for (const v of LEGACY_VERSIONS) {
-      await d1q(d1DatabaseId,
-        `INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)`, [v], token);
-      appliedSet.add(v);
+    const tables = await d1q(d1DatabaseId,
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`, [], token);
+    if (tables.length > 0) {
+      for (const v of LEGACY_VERSIONS) {
+        await d1q(d1DatabaseId,
+          `INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)`, [v], token);
+        appliedSet.add(v);
+      }
+      ok(`Schema_migrations semeada com ${LEGACY_VERSIONS.length} versões legadas (DB antigo)`);
+    } else {
+      ok('DB novo detectado — aplicando todas as migrations do zero');
     }
-    ok(`Schema_migrations semeada com ${LEGACY_VERSIONS.length} versões legadas`);
   }
 
   // 4. Aplicar pendentes
@@ -132,6 +164,12 @@ async function migrateFamily({ name, subdomain, d1DatabaseId }, token) {
         await d1q(d1DatabaseId, stmt + ';', [], token);
         await new Promise(r => setTimeout(r, 100));
       } catch (e) {
+        // "duplicate column name" / "table already exists" → schema já aplicado manualmente, tratar como sucesso
+        const msg = e.message ?? '';
+        if (msg.includes('duplicate column') || msg.includes('already exists')) {
+          skip(`${version}: statement idempotente ignorado (${msg.split(':')[0]})`);
+          continue;
+        }
         warn(`${version}: ${e.message}`);
         failed = true; errors++; break;
       }
@@ -177,16 +215,20 @@ async function main() {
     return;
   }
 
-  // ── Modo normal: famílias do control plane ────────────────────────────────
-  const allFamilies = loadFamilies().filter(f => f.status === 'active');
+  // ── Modo normal: famílias lidas do KV ───────────────────────────────────
+  const rootEnv = parseEnvFile(join(ROOT, '.env'));
+  const token   = rootEnv.CLOUDFLARE_API_TOKEN;
+  if (!token) fail('CLOUDFLARE_API_TOKEN não encontrado no .env raiz.');
 
-  if (allFamilies.length === 0) fail('Nenhuma família ativa encontrada. Use --main para a instância principal.');
+  const allFamilies = await loadTenantsFromKV(token);
+
+  if (allFamilies.length === 0) fail('Nenhuma família ativa encontrada no KV. Use --main para a instância principal.');
 
   const targets = onlySub
     ? allFamilies.filter(f => f.subdomain === onlySub)
     : allFamilies;
 
-  if (targets.length === 0) fail(`Família "${onlySub}" não encontrada ou não está ativa.`);
+  if (targets.length === 0) fail(`Família "${onlySub}" não encontrada ou não está ativa no KV.`);
 
   const migrations = loadMigrationFiles();
   console.log(`\n  Famílias-alvo: ${targets.length}`);
@@ -196,11 +238,6 @@ async function main() {
   const totals = { applied: 0, skipped: 0, errors: 0 };
 
   for (const family of targets) {
-    const envPath = join(CTRL, 'envs', `${family.subdomain}.env`);
-    const env     = parseEnvFile(envPath);
-    const token   = env.CLOUDFLARE_API_TOKEN;
-    if (!token) { warn(`Token CF não encontrado para ${family.subdomain} — pulando`); continue; }
-
     try {
       const r = await migrateFamily(family, token);
       totals.applied  += r.applied;

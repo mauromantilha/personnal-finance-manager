@@ -4,6 +4,7 @@ export async function sendWelcomeEmail(
   familyName: string,
   subdomain: string,
   baseDomain: string,
+  fromDomain?: string,
 ): Promise<void> {
   if (!apiKey) return;
   const url = `https://${subdomain}.${baseDomain}`;
@@ -11,13 +12,13 @@ export async function sendWelcomeEmail(
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: `MKS Finanças <noreply@${baseDomain}>`,
+      from: `Finanças Livre <noreply@${fromDomain ?? baseDomain}>`,  
       to: [to],
-      subject: `Bem-vindo ao MKS Finanças — ${familyName}`,
+      subject: `Bem-vindo ao Finanças Livre — ${familyName}`,
       html: `
         <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
           <h2 style="color:#6366f1;margin-bottom:8px">Sua conta está pronta! 🎉</h2>
-          <p style="color:#334155">Olá! A família <strong>${familyName}</strong> foi criada com sucesso no MKS Finanças.</p>
+          <p style="color:#334155">Olá! A família <strong>${familyName}</strong> foi criada com sucesso no Finanças Livre.</p>
           <div style="margin:24px 0">
             <a href="${url}" style="background:#6366f1;color:white;padding:12px 28px;border-radius:8px;
                text-decoration:none;font-weight:600;display:inline-block">

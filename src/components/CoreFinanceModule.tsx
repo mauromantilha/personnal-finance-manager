@@ -24,7 +24,12 @@ import {
   ClipboardList,
   ScanLine,
   Paperclip,
-  Eye
+  Eye,
+  Banknote,
+  Landmark,
+  BookOpen,
+  Sparkles,
+  TrendingUp,
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard, FamilyMember } from '../types';
 
@@ -42,6 +47,8 @@ interface CoreFinanceModuleProps {
   onImportCSV: (csv: string, accountId: string) => Promise<{ imported: number; errors: string[] }>;
   onAnalyzeDocument: (base64: string, mimeType: string) => Promise<{ description?: string; amountInCents?: number; dueDate?: string; documentKey?: string }>;
   members: FamilyMember[];
+  userRole?: 'owner' | 'member';
+  userMemberId?: string | null;
 }
 
 type PeriodFilter = 'this_month' | 'last_month' | '30d' | '90d' | 'all';
@@ -62,6 +69,8 @@ export default function CoreFinanceModule({
   onImportCSV,
   onAnalyzeDocument,
   members,
+  userRole,
+  userMemberId,
 }: CoreFinanceModuleProps) {
 
   // ── Account form state ──────────────────────────────────────────────────────
@@ -71,6 +80,11 @@ export default function CoreFinanceModule({
   const [accBank, setAccBank] = useState('Banco Itaú');
   const [accBalance, setAccBalance] = useState('');
   const [accColor, setAccColor] = useState('#0284C7');
+  const [accBranch, setAccBranch] = useState('');
+  const [accNumber, setAccNumber] = useState('');
+  const [accDigit, setAccDigit] = useState('');
+  const [accManagerName, setAccManagerName] = useState('');
+  const [accManagerPhone, setAccManagerPhone] = useState('');
 
   // Account edit state
   const [editingAccId, setEditingAccId] = useState<string | null>(null);
@@ -146,6 +160,31 @@ export default function CoreFinanceModule({
   const [memberFilter, setMemberFilter] = useState('');
   const [page, setPage] = useState(1);
 
+  // ── Ledger & section tab state ─────────────────────────────────────────────
+  const [ledgerTab, setLedgerTab] = useState<'ledger' | 'receitas' | 'impostos'>('ledger');
+
+  // ── Income form state ───────────────────────────────────────────────────────
+  const [incomeType, setIncomeType] = useState('salary');
+  const [incomePayer, setIncomePayer] = useState('');
+  const [incomeProfession, setIncomeProfession] = useState('');
+  const [incomeAmount, setIncomeAmount] = useState('');
+  const [incomeDate, setIncomeDate] = useState(new Date().toISOString().split('T')[0]);
+  const [incomeDesc, setIncomeDesc] = useState('');
+  const [incomeAccountId, setIncomeAccountId] = useState('');
+  const [incomeAiState, setIncomeAiState] = useState<'idle' | 'loading' | 'reviewing'>('idle');
+  const [incomeAiError, setIncomeAiError] = useState('');
+  const incomeFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Tax form state ──────────────────────────────────────────────────────────
+  const [taxEntryType, setTaxEntryType] = useState<'payment' | 'refund' | 'installment'>('payment');
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear().toString());
+  const [taxAmount, setTaxAmount] = useState('');
+  const [taxDate, setTaxDate] = useState(new Date().toISOString().split('T')[0]);
+  const [taxDesc, setTaxDesc] = useState('');
+  const [taxAccountId, setTaxAccountId] = useState('');
+  const [taxInstallmentN, setTaxInstallmentN] = useState('1');
+  const [taxInstallmentTotal, setTaxInstallmentTotal] = useState('8');
+
   // ── Feedback ────────────────────────────────────────────────────────────────
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -215,9 +254,17 @@ export default function CoreFinanceModule({
     if (!accName || !accBalance) { fb('Preencha todos os dados da carteira.', 'error'); return; }
     const parsedReal = parseFloat(accBalance.replace(',', '.'));
     if (isNaN(parsedReal)) { fb('Saldo inválido.', 'error'); return; }
-    const result = await onAddAccount({ name: accName, type: accType, bankName: accBank, balanceInCents: Math.round(parsedReal * 100), color: accColor });
-    if (result) { fb(`Carteira "${accName}" criada!`, 'success'); setAccName(''); setAccBalance(''); setShowAccountForm(false); }
-    else fb('Erro ao cadastrar conta.', 'error');
+    const result = await onAddAccount({
+      name: accName, type: accType, bankName: accBank,
+      balanceInCents: Math.round(parsedReal * 100), color: accColor,
+      branch: accBranch || null, accountNumber: accNumber || null, accountDigit: accDigit || null,
+      managerName: accManagerName || null, managerPhone: accManagerPhone || null,
+    } as any);
+    if (result) {
+      fb(`Carteira "${accName}" criada!`, 'success');
+      setAccName(''); setAccBalance(''); setAccBranch(''); setAccNumber(''); setAccDigit(''); setAccManagerName(''); setAccManagerPhone('');
+      setShowAccountForm(false);
+    } else fb('Erro ao cadastrar conta.', 'error');
   };
 
   const startEditAcc = (acc: FinancialAccount) => {
@@ -299,6 +346,82 @@ export default function CoreFinanceModule({
     else fb('Erro ao atualizar lançamento.', 'error');
   };
 
+  const handleCreateIncome = async (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    if (!incomeAmount || !incomeDesc || !incomeAccountId) { fb('Preencha valor, descrição e conta.', 'error'); return; }
+    const parsedReal = parseFloat(incomeAmount.replace(',', '.'));
+    if (isNaN(parsedReal) || parsedReal <= 0) { fb('Valor inválido.', 'error'); return; }
+    const INCOME_TYPE_CATS: Record<string, string> = {
+      salary: 'Salário/CLT', freelance: 'Autônomo/MEI', pro_labore: 'Pró-Labore',
+      rent: 'Aluguel', dividends: 'Dividendos', investment_return: 'Aplicação Financeira',
+      inheritance: 'Herança/Doação', other: 'Receita',
+    };
+    const payload: any = {
+      amountInCents: Math.round(parsedReal * 100),
+      date: incomeDate, type: 'REC',
+      category: INCOME_TYPE_CATS[incomeType] || 'Receita',
+      description: incomeDesc, accountId: incomeAccountId,
+      incomeType, payer: incomePayer || null, profession: incomeProfession || null,
+    };
+    const result = await onAddTransaction(payload);
+    if (result) { fb('Receita registrada!', 'success'); setIncomeAmount(''); setIncomeDesc(''); setIncomePayer(''); setIncomeAiState('idle'); }
+    else fb('Erro ao registrar receita.', 'error');
+  };
+
+  const handleIncomeAIFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { fb('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+    setIncomeAiState('loading');
+    setIncomeAiError('');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = (reader.result as string).split(',')[1];
+        const res = await fetch('/api/transactions/ai-income-parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64, mimeType: file.type }),
+        });
+        if (!res.ok) throw new Error('Falha na API');
+        const data = await res.json() as any;
+        if (data.amountInCents) setIncomeAmount((data.amountInCents / 100).toFixed(2).replace('.', ','));
+        if (data.date) setIncomeDate(data.date);
+        if (data.description) setIncomeDesc(data.description);
+        if (data.payer) setIncomePayer(data.payer);
+        if (data.profession) setIncomeProfession(data.profession);
+        if (data.incomeType) setIncomeType(data.incomeType);
+        setIncomeAiState('reviewing');
+      } catch {
+        setIncomeAiError('Falha ao processar documento. Verifique a imagem.');
+        setIncomeAiState('idle');
+      }
+    };
+    reader.readAsDataURL(file);
+    if (incomeFileRef.current) incomeFileRef.current.value = '';
+  };
+
+  const handleCreateTaxEntry = async (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    if (!taxAmount || !taxAccountId) { fb('Preencha valor e conta.', 'error'); return; }
+    const parsedReal = parseFloat(taxAmount.replace(',', '.'));
+    if (isNaN(parsedReal) || parsedReal <= 0) { fb('Valor inválido.', 'error'); return; }
+    const type = taxEntryType === 'refund' ? 'REC' : 'DES';
+    const category = taxEntryType === 'refund' ? 'Restituição IRPF' : taxEntryType === 'installment' ? 'IRPF - Parcela' : 'IRPF';
+    const defaultDesc = taxEntryType === 'refund'
+      ? `Restituição IR ${taxYear}`
+      : taxEntryType === 'installment'
+        ? `IRPF ${taxYear} - Parcela ${taxInstallmentN}/${taxInstallmentTotal}`
+        : `DARF IRPF ${taxYear}`;
+    const payload: any = {
+      amountInCents: Math.round(parsedReal * 100), date: taxDate, type,
+      category, description: taxDesc || defaultDesc, accountId: taxAccountId,
+    };
+    const result = await onAddTransaction(payload);
+    if (result) { fb('Lançamento fiscal criado!', 'success'); setTaxAmount(''); setTaxDesc(''); }
+    else fb('Erro ao criar lançamento fiscal.', 'error');
+  };
+
   const ACC_COLORS = ['#0284C7', '#EA580C', '#16A34A', '#EAB308', '#8B5CF6', '#EC4899', '#6B7280'];
 
   const PERIOD_LABELS: Record<PeriodFilter, string> = {
@@ -372,6 +495,32 @@ export default function CoreFinanceModule({
                       <input type="text" placeholder="Itaú, Nubank..." value={accBank} onChange={e => setAccBank(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-medium focus:outline-none" />
                     </div>
                   </div>
+                  {/* Agência / Conta / Dígito */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase">Agência</label>
+                      <input type="text" placeholder="0001" value={accBranch} onChange={e => setAccBranch(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-mono focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase">Conta Nº</label>
+                      <input type="text" placeholder="12345" value={accNumber} onChange={e => setAccNumber(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-mono focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase">Dígito</label>
+                      <input type="text" placeholder="6" value={accDigit} onChange={e => setAccDigit(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-mono focus:outline-none" />
+                    </div>
+                  </div>
+                  {/* Gerente */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase">Gerente</label>
+                      <input type="text" placeholder="Nome do gerente" value={accManagerName} onChange={e => setAccManagerName(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-medium focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase">WhatsApp</label>
+                      <input type="text" placeholder="(11) 99999-9999" value={accManagerPhone} onChange={e => setAccManagerPhone(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-mono focus:outline-none" />
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-500 uppercase">Saldo Inicial (R$)</label>
@@ -426,6 +575,28 @@ export default function CoreFinanceModule({
                         <div>
                           <p className="text-xs font-semibold text-slate-700">{acc.name}</p>
                           <p className="text-[10px] text-slate-400 font-medium">{acc.bankName} · {acc.type === 'CASH' ? 'Dinheiro' : acc.type === 'SAVINGS' ? 'Poupança' : acc.type === 'INVESTMENT' ? 'Aplicações' : 'Corrente'}</p>
+                          {(acc.branch || acc.accountNumber) && (
+                            <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                              {acc.branch ? `Ag ${acc.branch}` : ''}{acc.branch && acc.accountNumber ? ' · ' : ''}{acc.accountNumber ? `C/C ${acc.accountNumber}${acc.accountDigit ? `-${acc.accountDigit}` : ''}` : ''}
+                            </p>
+                          )}
+                          {acc.managerName && (
+                            <p className="text-[9px] text-slate-400 mt-0.5 flex items-center gap-1">
+                              <span>{acc.managerName}</span>
+                              {acc.managerPhone && (
+                                <a
+                                  href={`https://wa.me/55${acc.managerPhone.replace(/\D/g,'')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                  className="text-[9px] bg-green-100 text-green-700 font-bold px-1 py-0.5 rounded hover:bg-green-200 transition-colors"
+                                  title={`WhatsApp: ${acc.managerPhone}`}
+                                >
+                                  WhatsApp
+                                </a>
+                              )}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="text-right flex items-center gap-2">
@@ -498,12 +669,9 @@ export default function CoreFinanceModule({
             <form onSubmit={handleCreateTransaction} className="space-y-4">
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Tipo</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => { setTxType('DES'); setUseCard(false); setTxCategory(defaultCategory); }} className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${txType === 'DES' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'}`}>
                     <ArrowUpRight className="w-4 h-4 text-rose-500" /> Despesa (-)
-                  </button>
-                  <button type="button" onClick={() => { setTxType('REC'); setUseCard(false); setTxCategory('Receita'); }} className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${txType === 'REC' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'}`}>
-                    <ArrowDownLeft className="w-4 h-4 text-emerald-500" /> Receita (+)
                   </button>
                   <button type="button" onClick={() => { setTxType('TRANS'); setUseCard(false); setTxCategory('Investimentos'); }} className={`py-2 text-xs font-semibold rounded-lg border-2 flex items-center justify-center gap-1.5 transition-all ${txType === 'TRANS' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:bg-slate-50 text-slate-600'}`}>
                     <ArrowLeftRight className="w-4 h-4 text-indigo-500" /> Transferência
@@ -576,15 +744,23 @@ export default function CoreFinanceModule({
                 <input type="text" placeholder="Ex: Supermercado Pão de Açúcar" value={txDesc} onChange={e => setTxDesc(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500" />
               </div>
 
-              {members.length > 0 && (
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Membro da família</label>
-                  <select value={txMemberId} onChange={e => setTxMemberId(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold">
-                    <option value="">— Sem atribuição —</option>
+              {/* Membro da família: obrigatório para owner quando há membros; fixo para member users */}
+              {userRole === 'member' && userMemberId ? (
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center gap-2">
+                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider">Lançamento para:</span>
+                  <span className="text-xs font-bold text-indigo-800">
+                    {members.find(m => m.id === userMemberId)?.name ?? 'Você'}
+                  </span>
+                </div>
+              ) : members.length > 0 ? (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                  <label className="block text-[10px] font-black text-amber-700 uppercase tracking-wider">👤 Para quem é este lançamento?</label>
+                  <select value={txMemberId} onChange={e => setTxMemberId(e.target.value)} className="w-full text-xs border border-amber-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-indigo-500 font-semibold">
+                    <option value="">Admin / Família (Geral)</option>
                     {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </div>
-              )}
+              ) : null}
 
               <div className="flex justify-end pt-1">
                 <button type="submit" className="w-full md:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-md flex items-center justify-center gap-1">
@@ -694,7 +870,28 @@ export default function CoreFinanceModule({
         )}
       </div>
 
+      {/* Ledger / Receitas / Impostos tab navigation */}
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+        {([
+          { key: 'ledger' as const, label: 'Livro-Razão', Icon: BookOpen },
+          { key: 'receitas' as const, label: 'Receitas', Icon: Banknote },
+          { key: 'impostos' as const, label: 'Impostos & IR', Icon: Landmark },
+        ]).map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            onClick={() => setLedgerTab(key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all ${
+              ledgerTab === key ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Ledger */}
+      {ledgerTab === 'ledger' && (
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
@@ -921,6 +1118,344 @@ export default function CoreFinanceModule({
           </div>
         )}
       </div>
+      )} {/* end ledger tab */}
+
+      {/* Receitas tab */}
+      {ledgerTab === 'receitas' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+                <Banknote className="w-4 h-4 text-emerald-500" />
+                Gestão de Receitas
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">Salários, aluguéis, dividendos, pró-labore e todas as fontes de renda.</p>
+            </div>
+          </div>
+          <div className="p-6 space-y-6">
+            {/* KPIs */}
+            {(() => {
+              const now = new Date();
+              const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+              const incomeThisMonth = transactions.filter(t => t.type === 'REC' && t.date.startsWith(thisMonth)).reduce((s,t) => s+t.amountInCents, 0);
+              const incomeSources = new Set(transactions.filter(t => t.type === 'REC').map(t => t.payer || t.category)).size;
+              const allMonths = [...new Set(transactions.filter(t => t.type === 'REC').map(t => t.date.slice(0,7)))].length;
+              const totalIncome = transactions.filter(t => t.type === 'REC').reduce((s,t) => s+t.amountInCents, 0);
+              const avgMonthly = allMonths > 0 ? Math.round(totalIncome / allMonths) : 0;
+              return (
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">Este mês</p>
+                    <p className="text-lg font-black text-emerald-700 font-mono mt-1">{formatBRL(incomeThisMonth)}</p>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Fontes de renda</p>
+                    <p className="text-lg font-black text-blue-700 font-mono mt-1">{incomeSources}</p>
+                  </div>
+                  <div className="bg-violet-50 border border-violet-100 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-violet-500 uppercase tracking-wider">Média mensal</p>
+                    <p className="text-lg font-black text-violet-700 font-mono mt-1">{formatBRL(avgMonthly)}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Income form */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-700">Registrar Nova Receita</h4>
+                <div className="flex items-center gap-2">
+                  {incomeAiState === 'reviewing' && (
+                    <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-bold">✓ IA preencheu — revise e salve</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => incomeFileRef.current?.click()}
+                    disabled={incomeAiState === 'loading'}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-[11px] font-bold rounded-lg transition-all disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    {incomeAiState === 'loading' ? 'Lendo…' : 'Ler com IA'}
+                  </button>
+                  <input ref={incomeFileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleIncomeAIFile} />
+                </div>
+              </div>
+              {incomeAiError && <p className="text-xs text-rose-600 font-medium bg-rose-50 border border-rose-200 px-3 py-2 rounded-lg">{incomeAiError}</p>}
+              <form onSubmit={handleCreateIncome} className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tipo de renda</label>
+                    <select value={incomeType} onChange={e => setIncomeType(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-semibold">
+                      <option value="salary">💼 Salário / CLT</option>
+                      <option value="freelance">🧾 Autônomo / MEI</option>
+                      <option value="pro_labore">🤝 Pró-Labore</option>
+                      <option value="rent">🏠 Aluguel de Imóvel</option>
+                      <option value="dividends">📈 Dividendos</option>
+                      <option value="investment_return">💰 Aplicação Financeira</option>
+                      <option value="inheritance">🎁 Herança / Doação</option>
+                      <option value="other">🎯 Outros</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pagador / Fonte</label>
+                    <input type="text" placeholder="Ex: Empresa ABC, Imobiliária XYZ…" value={incomePayer} onChange={e => setIncomePayer(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-medium" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Profissão / Cargo</label>
+                    <input type="text" placeholder="Ex: Engenheiro, Médico, Analista…" value={incomeProfession} onChange={e => setIncomeProfession(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Valor líquido (R$)</label>
+                    <input type="text" placeholder="5.200,00" value={incomeAmount} onChange={e => setIncomeAmount(e.target.value)} className="w-full text-xs font-bold font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data</label>
+                    <input type="date" value={incomeDate} onChange={e => setIncomeDate(e.target.value)} className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Conta de crédito</label>
+                    <select value={incomeAccountId} onChange={e => setIncomeAccountId(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-semibold">
+                      <option value="">Selecione…</option>
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descrição</label>
+                  <input type="text" placeholder="Ex: Salário Outubro 2025, Aluguel Apto 301…" value={incomeDesc} onChange={e => setIncomeDesc(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-medium" />
+                </div>
+                <div className="flex justify-end">
+                  <button type="submit" className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5" /> Registrar Receita
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Income list */}
+            {(() => {
+              const incomeTxs = transactions.filter(t => t.type === 'REC').sort((a, b) => b.date.localeCompare(a.date));
+              const INCOME_LABEL: Record<string, string> = {
+                salary: '💼 Salário', freelance: '🧾 Autônomo', pro_labore: '🤝 Pró-Labore',
+                rent: '🏠 Aluguel', dividends: '📈 Dividendos', investment_return: '💰 Aplicação',
+                inheritance: '🎁 Herança', other: '🎯 Outros',
+              };
+              return incomeTxs.length > 0 ? (
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                    <TrendingUp className="w-3.5 h-3.5" /> Histórico de Receitas
+                  </h4>
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-400 font-semibold text-[10px] uppercase">
+                          <th className="px-3 py-2.5 text-left">Data</th>
+                          <th className="px-3 py-2.5 text-left">Descrição</th>
+                          <th className="px-3 py-2.5 text-left">Tipo</th>
+                          <th className="px-3 py-2.5 text-left">Pagador</th>
+                          <th className="px-3 py-2.5 text-left">Profissão</th>
+                          <th className="px-3 py-2.5 text-right">Valor</th>
+                          <th className="px-3 py-2.5 w-8" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {incomeTxs.slice(0, 40).map(tx => (
+                          <tr key={tx.id} className="hover:bg-emerald-50/40 transition-colors group">
+                            <td className="px-3 py-2.5 font-mono text-[11px] text-slate-400">{tx.date}</td>
+                            <td className="px-3 py-2.5 font-medium text-slate-700 truncate max-w-[160px]">{tx.description}</td>
+                            <td className="px-3 py-2.5">
+                              <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+                                {INCOME_LABEL[tx.incomeType ?? ''] || tx.category}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-slate-500 text-[11px] truncate max-w-[120px]">{tx.payer || '—'}</td>
+                            <td className="px-3 py-2.5 text-slate-500 text-[11px] truncate max-w-[100px]">{tx.profession || '—'}</td>
+                            <td className="px-3 py-2.5 text-right font-bold font-mono text-emerald-600">+{formatBRL(tx.amountInCents)}</td>
+                            <td className="px-3 py-2.5">
+                              <button onClick={async () => { await onDeleteTransaction(tx.id); }} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-all">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-10 text-center text-slate-400 text-xs space-y-2">
+                  <Banknote className="w-8 h-8 text-slate-200 mx-auto" />
+                  <p>Nenhuma receita registrada. Use o formulário acima ou importe com IA.</p>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Impostos tab */}
+      {ledgerTab === 'impostos' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+              <Landmark className="w-4 h-4 text-indigo-500" />
+              Impostos & Imposto de Renda
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-1">Controle de pagamentos DARF, parcelas IRPF e restituições.</p>
+          </div>
+          <div className="p-6 space-y-6">
+            {/* Annual KPIs */}
+            {(() => {
+              const TAX_CATS = ['IRPF', 'IRPF - Parcela', 'Restituição IRPF'];
+              const thisYear = new Date().getFullYear().toString();
+              const taxTxs = transactions.filter(t => TAX_CATS.includes(t.category));
+              const paidThisYear = taxTxs.filter(t => t.type === 'DES' && t.date.startsWith(thisYear)).reduce((s,t) => s + t.amountInCents, 0);
+              const refundThisYear = taxTxs.filter(t => t.type === 'REC' && t.date.startsWith(thisYear)).reduce((s,t) => s + t.amountInCents, 0);
+              const paidAllTime = taxTxs.filter(t => t.type === 'DES').reduce((s,t) => s + t.amountInCents, 0);
+              const netBalance = refundThisYear - paidThisYear;
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-rose-50 border border-rose-100 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-rose-500 uppercase">Pago {thisYear}</p>
+                    <p className="text-base font-black text-rose-700 font-mono mt-1">{formatBRL(paidThisYear)}</p>
+                  </div>
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-emerald-500 uppercase">Restituição {thisYear}</p>
+                    <p className="text-base font-black text-emerald-700 font-mono mt-1">{formatBRL(refundThisYear)}</p>
+                  </div>
+                  <div className={`border rounded-xl p-4 ${netBalance >= 0 ? 'bg-teal-50 border-teal-100' : 'bg-amber-50 border-amber-100'}`}>
+                    <p className={`text-[10px] font-bold uppercase ${netBalance >= 0 ? 'text-teal-500' : 'text-amber-500'}`}>Saldo {thisYear}</p>
+                    <p className={`text-base font-black font-mono mt-1 ${netBalance >= 0 ? 'text-teal-700' : 'text-amber-700'}`}>{netBalance >= 0 ? '+' : ''}{formatBRL(netBalance)}</p>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase">Total pago (hist.)</p>
+                    <p className="text-base font-black text-slate-700 font-mono mt-1">{formatBRL(paidAllTime)}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Tax entry form */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+              <h4 className="text-xs font-bold text-slate-700">Novo Lançamento Fiscal</h4>
+              <form onSubmit={handleCreateTaxEntry} className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tipo</label>
+                    <select value={taxEntryType} onChange={e => setTaxEntryType(e.target.value as 'payment' | 'refund' | 'installment')} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-semibold">
+                      <option value="payment">🏦 Pagamento IR (DARF)</option>
+                      <option value="installment">📅 Parcela IRPF</option>
+                      <option value="refund">💚 Restituição IR</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Ano de referência</label>
+                    <input type="text" placeholder="2025" value={taxYear} onChange={e => setTaxYear(e.target.value)} className="w-full text-xs font-mono font-bold border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none" />
+                  </div>
+                  {taxEntryType === 'installment' && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Parcela (ex: 3 de 8)</label>
+                      <div className="flex gap-1.5 items-center">
+                        <input type="text" placeholder="1" value={taxInstallmentN} onChange={e => setTaxInstallmentN(e.target.value)} className="w-full text-xs font-mono font-bold border border-slate-200 rounded-lg px-2 py-2 bg-white focus:outline-none" />
+                        <span className="text-slate-400 text-xs shrink-0">de</span>
+                        <input type="text" placeholder="8" value={taxInstallmentTotal} onChange={e => setTaxInstallmentTotal(e.target.value)} className="w-full text-xs font-mono font-bold border border-slate-200 rounded-lg px-2 py-2 bg-white focus:outline-none" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Valor (R$)</label>
+                    <input type="text" placeholder="2.800,00" value={taxAmount} onChange={e => setTaxAmount(e.target.value)} className="w-full text-xs font-bold font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data</label>
+                    <input type="date" value={taxDate} onChange={e => setTaxDate(e.target.value)} className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Conta</label>
+                    <select value={taxAccountId} onChange={e => setTaxAccountId(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-semibold">
+                      <option value="">Selecione…</option>
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descrição (opcional)</label>
+                  <input type="text" placeholder="Ex: DARF IRPF 2025, Cota 3/8…" value={taxDesc} onChange={e => setTaxDesc(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none font-medium" />
+                </div>
+                <div className="flex justify-end">
+                  <button type="submit" className={`px-5 py-2 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${taxEntryType === 'refund' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                    <Plus className="w-3.5 h-3.5" />
+                    {taxEntryType === 'refund' ? 'Registrar Restituição' : taxEntryType === 'installment' ? 'Registrar Parcela' : 'Registrar Pagamento IR'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Tax list */}
+            {(() => {
+              const TAX_CATS = ['IRPF', 'IRPF - Parcela', 'Restituição IRPF'];
+              const taxTxs = transactions.filter(t => TAX_CATS.includes(t.category)).sort((a, b) => b.date.localeCompare(a.date));
+              return taxTxs.length > 0 ? (
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Histórico Fiscal</h4>
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-400 font-semibold text-[10px] uppercase">
+                          <th className="px-3 py-2.5 text-left">Data</th>
+                          <th className="px-3 py-2.5 text-left">Descrição</th>
+                          <th className="px-3 py-2.5 text-left">Categoria</th>
+                          <th className="px-3 py-2.5 text-left">Conta</th>
+                          <th className="px-3 py-2.5 text-right">Valor</th>
+                          <th className="px-3 py-2.5 w-8" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {taxTxs.map(tx => {
+                          const acc = accounts.find(a => a.id === tx.accountId);
+                          return (
+                            <tr key={tx.id} className="hover:bg-indigo-50/30 transition-colors group">
+                              <td className="px-3 py-2.5 font-mono text-[11px] text-slate-400">{tx.date}</td>
+                              <td className="px-3 py-2.5 font-medium text-slate-700">{tx.description}</td>
+                              <td className="px-3 py-2.5">
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tx.type === 'REC' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>
+                                  {tx.category}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-500 text-[11px]">{acc ? acc.name : '—'}</td>
+                              <td className="px-3 py-2.5 text-right font-bold font-mono">
+                                {tx.type === 'REC'
+                                  ? <span className="text-emerald-600">+{formatBRL(tx.amountInCents)}</span>
+                                  : <span className="text-rose-600">-{formatBRL(tx.amountInCents)}</span>}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <button onClick={async () => { await onDeleteTransaction(tx.id); }} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-all">
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-10 text-center text-slate-400 text-xs space-y-2">
+                  <Landmark className="w-8 h-8 text-slate-200 mx-auto" />
+                  <p>Nenhum lançamento fiscal encontrado. Use o formulário acima para registrar pagamentos, parcelas ou restituições.</p>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* Document viewer modal */}
       {viewDocKey && (

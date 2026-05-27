@@ -46,7 +46,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             M
           </span>
           <div className="text-center">
-            <h1 className="font-black text-sm tracking-widest text-indigo-600 uppercase">MKS Finanças</h1>
+            <h1 className="font-black text-sm tracking-widest text-indigo-600 uppercase">Finanças Livre</h1>
             <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
               {requiresTOTP ? 'Verificação 2FA' : 'Acesso Seguro'}
             </p>

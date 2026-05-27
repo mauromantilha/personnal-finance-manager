@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacidade e LGPD — Finanças Livre</title>
+  <meta name="description" content="Política de Privacidade e conformidade com a LGPD da plataforma Finanças Livre. Saiba como seus dados são protegidos.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --green:  #00A67C;
+      --green2: #00C492;
+      --navy:   #0D1B2A;
+      --coral:  #FF4F6D;
+      --violet: #7C3AED;
+      --cream:  #FAFAF5;
+      --t1:     #0D1B2A;
+      --t2:     #4A5568;
+      --t3:     #A0AEC0;
+      --bdr:    #E8EDF2;
+    }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+           background: var(--cream); color: var(--t1); line-height: 1.7; }
+
+    /* NAV */
+    nav {
+      position: sticky; top: 0; z-index: 200;
+      background: rgba(250,250,245,.92); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--bdr); padding: 0 28px;
+    }
+    .nav-inner { max-width: 1120px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .logo { display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 18px; color: var(--t1); text-decoration: none; letter-spacing: -.3px; }
+    .logo-mark { width: 36px; height: 36px; border-radius: 10px;
+      background: var(--green); display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: #fff; }
+    .btn-back { display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--t2); text-decoration: none;
+      padding: 8px 16px; border: 1px solid var(--bdr); border-radius: 8px; transition: all .15s; }
+    .btn-back:hover { background: #fff; color: var(--green); border-color: var(--green); }
+
+    /* HERO */
+    .page-hero { background: var(--navy); color: #fff; padding: 64px 28px 52px; }
+    .page-hero-inner { max-width: 760px; margin: 0 auto; }
+    .page-badge { display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(0,166,124,.18); border: 1px solid rgba(0,166,124,.35);
+      color: var(--green2); font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; padding: 4px 12px; border-radius: 100px; margin-bottom: 18px; }
+    .page-hero h1 { font-size: clamp(26px, 4vw, 38px); font-weight: 900;
+      letter-spacing: -.5px; line-height: 1.2; margin-bottom: 14px; }
+    .page-hero p { font-size: 15px; color: rgba(255,255,255,.6); }
+    .page-meta { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 20px; }
+    .page-meta span { font-size: 12px; color: rgba(255,255,255,.45);
+      display: flex; align-items: center; gap: 6px; }
+    .page-meta strong { color: rgba(255,255,255,.8); }
+
+    /* CONTENT */
+    .content { max-width: 760px; margin: 0 auto; padding: 52px 28px 80px; }
+
+    .toc { background: #fff; border: 1px solid var(--bdr); border-radius: 14px;
+      padding: 24px 28px; margin-bottom: 48px; }
+    .toc h3 { font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--t3); margin-bottom: 14px; }
+    .toc ol { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+    .toc li a { font-size: 14px; color: var(--green); text-decoration: none; font-weight: 500; }
+    .toc li a:hover { text-decoration: underline; }
+
+    .section { margin-bottom: 52px; }
+    .section-header { display: flex; align-items: flex-start; gap: 14px;
+      margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--bdr); }
+    .section-num { min-width: 36px; height: 36px; background: var(--navy); color: #fff;
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; margin-top: 2px; }
+    .section-num.green { background: var(--green); }
+    .section-num.violet { background: var(--violet); }
+    .section-header h2 { font-size: 20px; font-weight: 800; color: var(--t1); line-height: 1.3; }
+    .section-header p { font-size: 13px; color: var(--t3); margin-top: 4px; }
+
+    .clause { margin-bottom: 20px; }
+    .clause-label { display: inline-block; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em; color: var(--t3); margin-bottom: 6px; }
+    .clause p { font-size: 15px; color: var(--t2); line-height: 1.75; }
+    .clause ul, .clause ol { padding-left: 20px; font-size: 15px; color: var(--t2); line-height: 1.75; }
+    .clause ul li, .clause ol li { margin-bottom: 6px; }
+
+    .callout { border-radius: 12px; padding: 16px 20px; margin: 20px 0;
+      font-size: 14px; line-height: 1.7; }
+    .callout-warning { background: #fffbeb; border: 1.5px solid #fde68a; color: #78350f; }
+    .callout-info    { background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1e3a8a; }
+    .callout-danger  { background: #fef2f2; border: 1.5px solid #fecaca; color: #7f1d1d; }
+    .callout-green   { background: #f0fdf4; border: 1.5px solid #86efac; color: #14532d; }
+    .callout-purple  { background: #faf5ff; border: 1.5px solid #d8b4fe; color: #4c1d95; }
+    .callout strong  { font-weight: 700; }
+
+    /* Rights grid */
+    .rights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    @media (max-width: 580px) { .rights-grid { grid-template-columns: 1fr; } }
+    .right-item { background: #fff; border: 1px solid var(--bdr); border-radius: 10px;
+      padding: 14px 16px; font-size: 14px; }
+    .right-item strong { display: block; font-weight: 700; color: var(--t1); margin-bottom: 4px; }
+    .right-item span { color: var(--t2); }
+
+    /* Table */
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+    .data-table th { background: var(--navy); color: #fff; padding: 12px 14px;
+      text-align: left; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+    .data-table th:first-child { border-radius: 8px 0 0 0; }
+    .data-table th:last-child  { border-radius: 0 8px 0 0; }
+    .data-table td { padding: 12px 14px; border-bottom: 1px solid var(--bdr); color: var(--t2); vertical-align: top; }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tr:nth-child(even) td { background: #f8f8f4; }
+
+    /* LGPD anchor highlight */
+    #lgpd .section-header { border-bottom-color: #7C3AED44; }
+
+    /* FOOTER */
+    footer { background: var(--navy); color: rgba(255,255,255,.4); padding: 52px 28px 32px; }
+    .footer-inner { max-width: 1120px; margin: 0 auto; }
+    .footer-top { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 36px; margin-bottom: 44px; }
+    @media (max-width: 760px) { .footer-top { grid-template-columns: 1fr 1fr; } }
+    .footer-brand { color: #fff; font-weight: 800; font-size: 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .footer-desc { font-size: 13px; line-height: 1.7; max-width: 260px; margin-bottom: 16px; }
+    .footer-cnpj { font-size: 11px; line-height: 1.8; }
+    .footer-col h4 { color: rgba(255,255,255,.7); font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+    .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .footer-col li a { font-size: 13px; color: rgba(255,255,255,.4); transition: color .15s; text-decoration: none; }
+    .footer-col li a:hover { color: rgba(255,255,255,.9); }
+    .footer-bottom { border-top: 1px solid rgba(255,255,255,.06); padding-top: 24px;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+    @media (max-width: 768px) { .nav-links { display: none; } }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo"><div class="logo-mark">🌱</div>Finanças Livre</a>
+    <a href="/" class="btn-back">← Voltar ao início</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="page-hero">
+  <div class="page-hero-inner">
+    <div class="page-badge">🔒 Privacidade &amp; LGPD</div>
+    <h1>Política de Privacidade</h1>
+    <p>Transparência total sobre como coletamos, usamos e protegemos seus dados pessoais e financeiros.</p>
+    <div class="page-meta">
+      <span>📅 Versão <strong>2.0</strong></span>
+      <span>🗓️ Vigente desde <strong>26/05/2026</strong></span>
+      <span>🏢 <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong></span>
+    </div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+  <!-- Índice -->
+  <div class="toc">
+    <h3>Índice</h3>
+    <ol>
+      <li><a href="#s1">Controlador e Encarregado de Dados (DPO)</a></li>
+      <li><a href="#s2">Dados que Coletamos</a></li>
+      <li><a href="#s3">Finalidades e Bases Legais</a></li>
+      <li><a href="#s4">Como Usamos os Dados</a></li>
+      <li><a href="#s5">Compartilhamento de Dados</a></li>
+      <li><a href="#s6">Retenção e Exclusão</a></li>
+      <li><a href="#s7">Segurança e Medidas Técnicas</a></li>
+      <li><a href="#lgpd">Conformidade com a LGPD — Seus Direitos</a></li>
+      <li><a href="#s9">Cookies e Tecnologias Similares</a></li>
+      <li><a href="#s10">Alterações nesta Política</a></li>
+      <li><a href="#s11">Contato e Canal de Privacidade</a></li>
+    </ol>
+  </div>
+
+  <!-- Intro -->
+  <div class="callout callout-green" style="margin-bottom: 44px;">
+    🌱 <strong>Nosso compromisso:</strong> A Finanças Livre foi construída com privacidade por design.
+    Seus dados financeiros pertencem a você. Não vendemos, não alugamos e não utilizamos seus dados para publicidade.
+  </div>
+
+  <!-- Seção 1 -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div>
+        <h2>Controlador e Encarregado de Dados (DPO)</h2>
+        <p>Quem é responsável pelo tratamento dos seus dados.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">1.1 — Controlador</span>
+      <p>
+        <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong><br>
+        CNPJ: 64.293.212/0001-97<br>
+        Sede: São Paulo – SP, Brasil<br>
+        Telefone: (11) 3135-5688<br>
+        E-mail: <a href="mailto:privacidade@financaslivre.com" style="color: var(--green);">privacidade@financaslivre.com</a>
+      </p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">1.2 — Encarregado de Dados (DPO)</span>
+      <p>Nos termos do Art. 41 da LGPD, o Encarregado de Proteção de Dados pode ser contatado pelo e-mail <a href="mailto:dpo@financaslivre.com" style="color: var(--green);">dpo@financaslivre.com</a>. O DPO é o canal oficial para exercício de direitos dos titulares e comunicação com a Autoridade Nacional de Proteção de Dados (ANPD).</p>
+    </div>
+
+    <div class="callout callout-info" style="margin-top: 8px;">
+      📌 <strong>Nota sobre papéis LGPD:</strong> Para os dados financeiros de familiares ou terceiros que o Usuário insere na Plataforma, o <strong>Usuário atua como Controlador</strong> e a Plataforma como <strong>Operadora</strong>. Veja detalhes em <a href="/termos#s3" style="color: var(--violet); font-weight: 600;">Termos de Uso — Seção 3</a>.
+    </div>
+  </div>
+
+  <!-- Seção 2 -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num green">2</div>
+      <div>
+        <h2>Dados que Coletamos</h2>
+        <p>Princípio da minimização: coletamos apenas o necessário.</p>
+      </div>
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Categoria</th>
+          <th>Dados Específicos</th>
+          <th>Obrigatório?</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Identificação de cadastro</strong></td>
+          <td>CPF (armazenado como hash HMAC-SHA-256 — irrecuperável), e-mail (hash para lookup)</td>
+          <td>Sim</td>
+        </tr>
+        <tr>
+          <td><strong>Acesso e autenticação</strong></td>
+          <td>Endereço IP, user-agent, data/hora de acesso, tokens OTP (descartados após uso)</td>
+          <td>Sim</td>
+        </tr>
+        <tr>
+          <td><strong>Dados financeiros</strong></td>
+          <td>Transações, contas, cartões, metas, orçamentos, investimentos, renda e despesas inseridos pelo próprio Usuário</td>
+          <td>Voluntário</td>
+        </tr>
+        <tr>
+          <td><strong>Perfil do usuário</strong></td>
+          <td>Nome, foto de perfil (opcional), membros da família adicionados pelo Usuário</td>
+          <td>Parcialmente</td>
+        </tr>
+        <tr>
+          <td><strong>Documentos (R2)</strong></td>
+          <td>Arquivos enviados pelo Usuário para análise (notas fiscais, extratos). Armazenados no bucket exclusivo do Tenant.</td>
+          <td>Voluntário</td>
+        </tr>
+        <tr>
+          <td><strong>Registros de conformidade</strong></td>
+          <td>Data/hora/IP do aceite dos Termos de Uso e Política de Privacidade</td>
+          <td>Sim</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-green" style="margin-top: 16px;">
+      🔐 <strong>Sobre o CPF:</strong> Após o hash ser gerado no cadastro, o CPF original é descartado e <em>nunca</em> armazenado em texto claro. O algoritmo HMAC-SHA-256 com chave secreta garante que nem nossa equipe técnica consegue recuperar o CPF a partir do hash.
+    </div>
+  </div>
+
+  <!-- Seção 3 -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div>
+        <h2>Finalidades e Bases Legais</h2>
+        <p>Por que coletamos cada dado e qual a base legal (Art. 7º, LGPD).</p>
+      </div>
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Finalidade</th>
+          <th>Base Legal (Art. 7º LGPD)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Criar e gerenciar a conta do Usuário</td>
+          <td>Execução de contrato (inciso V)</td>
+        </tr>
+        <tr>
+          <td>Prevenção a fraudes e unicidade de CPF</td>
+          <td>Legítimo interesse (inciso IX) / Proteção ao crédito (inciso X)</td>
+        </tr>
+        <tr>
+          <td>Autenticação Zero Trust via OTP</td>
+          <td>Execução de contrato (inciso V)</td>
+        </tr>
+        <tr>
+          <td>Prover análises de IA sobre os dados financeiros</td>
+          <td>Execução de contrato (inciso V) + Consentimento (inciso I)</td>
+        </tr>
+        <tr>
+          <td>Registro de aceite dos Termos (prova de conformidade LGPD)</td>
+          <td>Cumprimento de obrigação legal (inciso II)</td>
+        </tr>
+        <tr>
+          <td>Segurança, auditoria e prevenção a abusos</td>
+          <td>Legítimo interesse (inciso IX)</td>
+        </tr>
+        <tr>
+          <td>Comunicações sobre atualizações relevantes do serviço</td>
+          <td>Legítimo interesse (inciso IX) — com opt-out disponível</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Seção 4 -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num green">4</div>
+      <div>
+        <h2>Como Usamos os Dados</h2>
+        <p>Princípio da finalidade: sem uso além do declarado.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">4.1 — Operação do Serviço</span>
+      <p>Utilizamos seus dados para autenticar seu acesso, provisionar e manter seu banco de dados exclusivo e permitir que as funcionalidades da Plataforma (transações, metas, orçamentos, relatórios, análise de IA) funcionem corretamente.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">4.2 — Análise por Inteligência Artificial</span>
+      <p>Os dados financeiros inseridos são processados por modelos de linguagem (LLM) operados pela <strong>Groq Inc.</strong> sob acordos de processamento de dados (DPA) que proíbem o uso dos dados para treinamento dos modelos. Nenhum dado identificável seu é compartilhado com terceiros além dessa operação técnica.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">4.3 — O que NÃO fazemos</span>
+      <ul>
+        <li>❌ Não vendemos seus dados para terceiros;</li>
+        <li>❌ Não utilizamos seus dados para publicidade personalizada;</li>
+        <li>❌ Não compartilhamos seus dados financeiros com outros usuários;</li>
+        <li>❌ Não treinamos modelos de IA com seus dados sem consentimento explícito;</li>
+        <li>❌ Não realizamos tomadas de decisão automatizadas com efeitos jurídicos sobre você.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Seção 5 -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div>
+        <h2>Compartilhamento de Dados</h2>
+        <p>Com quem e por que compartilhamos informações.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">5.1 — Provedores de Infraestrutura</span>
+      <p>Para operar a Plataforma, utilizamos os seguintes subprocessadores, todos com DPA vigente e certificações de segurança relevantes:</p>
+      <ul>
+        <li><strong>Cloudflare, Inc.</strong> — hospedagem (Workers, D1, R2, KV, Access). Dados armazenados em região automática com replicação.</li>
+        <li><strong>Groq, Inc.</strong> — processamento de linguagem natural para análise de IA. Dados enviados sem identificadores pessoais sempre que possível.</li>
+      </ul>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">5.2 — Obrigação Legal</span>
+      <p>Poderemos divulgar dados quando exigido por lei, ordem judicial, solicitação legítima de autoridades competentes (como a ANPD ou Ministério Público), desde que nos limites estritamente necessários.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">5.3 — Transferência Internacional</span>
+      <p>Os serviços da Cloudflare e Groq podem envolver transferência internacional de dados. Ambos os provedores possuem mecanismos adequados de proteção (SCCs / cláusulas contratuais padrão) em conformidade com o Art. 33 da LGPD.</p>
+    </div>
+  </div>
+
+  <!-- Seção 6 -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <div class="section-num green">6</div>
+      <div>
+        <h2>Retenção e Exclusão</h2>
+        <p>Por quanto tempo guardamos seus dados e como eles são apagados.</p>
+      </div>
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr><th>Tipo de Dado</th><th>Prazo de Retenção</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Dados financeiros (transações, contas, cartões, etc.)</td>
+          <td>Enquanto a conta estiver ativa. Excluídos definitivamente (Hard Delete) no encerramento.</td>
+        </tr>
+        <tr>
+          <td>Documentos e arquivos (R2)</td>
+          <td>Enquanto a conta estiver ativa. Excluídos junto ao bucket do Tenant.</td>
+        </tr>
+        <tr>
+          <td>Hash do CPF e e-mail</td>
+          <td>Excluídos no Hard Delete da conta.</td>
+        </tr>
+        <tr>
+          <td>Logs de acesso e autenticação</td>
+          <td>Até 12 meses após geração, salvo obrigação legal.</td>
+        </tr>
+        <tr>
+          <td>Registros de aceite dos Termos (LGPD)</td>
+          <td>Até 5 anos após o aceite, conforme obrigação legal.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-danger" style="margin-top: 16px;">
+      ⚠️ <strong>Hard Delete irreversível:</strong> O encerramento da conta apaga de forma permanente todo o banco de dados exclusivo do Usuário (modelo Tenant/Silo). <strong>Não há recuperação possível</strong>. Exporte seus dados antes de solicitar o encerramento.
+    </div>
+  </div>
+
+  <!-- Seção 7 -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <div class="section-num">7</div>
+      <div>
+        <h2>Segurança e Medidas Técnicas</h2>
+        <p>Como protegemos seus dados contra acessos não autorizados.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">7.1 — Medidas Técnicas Implementadas</span>
+      <ul>
+        <li>🔐 <strong>Criptografia em trânsito</strong>: TLS 1.3 em todas as comunicações;</li>
+        <li>🗄️ <strong>Isolamento por Tenant</strong>: cada conta tem banco de dados exclusivo no Cloudflare D1;</li>
+        <li>🔑 <strong>Autenticação Zero Trust</strong>: OTP por e-mail, sem senhas estáticas, via Cloudflare Access;</li>
+        <li>🛡️ <strong>Proteção DDoS</strong>: Cloudflare WAF e proteção de borda de rede;</li>
+        <li>🤖 <strong>Anti-bot</strong>: validação de tráfego humano por Cloudflare Turnstile no cadastro;</li>
+        <li>#️⃣ <strong>Hash criptográfico de CPF</strong>: HMAC-SHA-256 com chave secreta rotacionável;</li>
+        <li>📋 <strong>Princípio do mínimo privilégio</strong>: cada Worker acessa apenas os recursos necessários.</li>
+      </ul>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">7.2 — Incidentes de Segurança</span>
+      <p>Em caso de incidente de segurança que possa afetar seus dados, notificaremos os Usuários afetados e a ANPD nos prazos previstos no Art. 48 da LGPD (prazo razoável, não superior a 2 dias úteis para a ANPD quando o risco for relevante).</p>
+    </div>
+  </div>
+
+  <!-- Seção LGPD -->
+  <div class="section" id="lgpd">
+    <div class="section-header">
+      <div class="section-num violet">8</div>
+      <div>
+        <h2>Conformidade com a LGPD — Seus Direitos</h2>
+        <p>Lei Geral de Proteção de Dados — Lei nº 13.709/2018, Art. 18.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-purple">
+      🇧🇷 <strong>Lei Geral de Proteção de Dados (LGPD)</strong> — A Finanças Livre opera em total conformidade com a LGPD, sendo a MKS Brasil Software e Gestão Empresarial Ltda a Operadora designada e o Usuário o Controlador dos dados de seus familiares/clientes.
+    </div>
+
+    <p style="font-size: 15px; color: var(--t2); margin: 20px 0 16px; line-height: 1.75;">
+      Como titular de dados pessoais, você tem os seguintes direitos garantidos pelo Art. 18 da LGPD,
+      exercíveis a qualquer momento pelo e-mail <a href="mailto:privacidade@financaslivre.com" style="color: var(--green);">privacidade@financaslivre.com</a>:
+    </p>
+
+    <div class="rights-grid">
+      <div class="right-item">
+        <strong>📋 Confirmação e Acesso</strong>
+        <span>Saber se tratamos seus dados e obter uma cópia completa (Art. 18, I e II).</span>
+      </div>
+      <div class="right-item">
+        <strong>✏️ Correção</strong>
+        <span>Atualizar dados incompletos, inexatos ou desatualizados (Art. 18, III).</span>
+      </div>
+      <div class="right-item">
+        <strong>🚫 Anonimização / Bloqueio</strong>
+        <span>Anonimizar, bloquear ou eliminar dados desnecessários ou excessivos (Art. 18, IV).</span>
+      </div>
+      <div class="right-item">
+        <strong>🗑️ Eliminação</strong>
+        <span>Solicitar a exclusão total dos seus dados (Hard Delete) (Art. 18, VI).</span>
+      </div>
+      <div class="right-item">
+        <strong>📤 Portabilidade</strong>
+        <span>Receber seus dados em formato estruturado e legível por máquina (Art. 18, V).</span>
+      </div>
+      <div class="right-item">
+        <strong>ℹ️ Informação sobre Compartilhamento</strong>
+        <span>Saber com quais entidades públicas e privadas compartilhamos seus dados (Art. 18, VII).</span>
+      </div>
+      <div class="right-item">
+        <strong>↩️ Revogação do Consentimento</strong>
+        <span>Revogar o consentimento a qualquer momento, sem prejuízo de tratamentos já realizados (Art. 18, IX).</span>
+      </div>
+      <div class="right-item">
+        <strong>⚖️ Revisão de Decisões Automatizadas</strong>
+        <span>Solicitar revisão de decisões tomadas exclusivamente com base em tratamento automatizado (Art. 20).</span>
+      </div>
+    </div>
+
+    <div class="clause" style="margin-top: 24px;">
+      <span class="clause-label">Prazo de Atendimento</span>
+      <p>Responderemos às solicitações de exercício de direitos em até <strong>15 dias corridos</strong> a partir do recebimento, conforme Art. 18, § 3º da LGPD.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">Reclamação à ANPD</span>
+      <p>O titular tem o direito de peticionar à <strong>Autoridade Nacional de Proteção de Dados (ANPD)</strong> caso entenda que seus direitos não foram atendidos adequadamente. Acesse <a href="https://www.gov.br/anpd" target="_blank" rel="noopener noreferrer" style="color: var(--green);">gov.br/anpd</a>.</p>
+    </div>
+  </div>
+
+  <!-- Seção 9 -->
+  <div class="section" id="s9">
+    <div class="section-header">
+      <div class="section-num">9</div>
+      <div>
+        <h2>Cookies e Tecnologias Similares</h2>
+        <p>Como usamos armazenamento local no navegador.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">9.1 — Cookies Estritamente Necessários</span>
+      <p>A Plataforma utiliza exclusivamente cookies e armazenamento local (<code>localStorage</code>) estritamente necessários para o funcionamento do serviço: manutenção de sessão autenticada, preferências de interface e cache de dados do usuário. Não utilizamos cookies de rastreamento, publicidade ou analytics de terceiros.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">9.2 — Cloudflare</span>
+      <p>A Cloudflare, nossa provedora de infraestrutura, pode inserir cookies técnicos de segurança (ex: <code>__cf_bm</code> para bot management e Turnstile). Esses cookies são essenciais para a proteção contra bots e não coletam dados pessoais além do necessário para essa finalidade.</p>
+    </div>
+  </div>
+
+  <!-- Seção 10 -->
+  <div class="section" id="s10">
+    <div class="section-header">
+      <div class="section-num green">10</div>
+      <div>
+        <h2>Alterações nesta Política</h2>
+        <p>Como comunicamos mudanças relevantes.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <p>Esta Política de Privacidade poderá ser atualizada periodicamente para refletir mudanças nas práticas de dados, novas funcionalidades ou exigências legais. Alterações materiais serão comunicadas por e-mail aos usuários ativos e exigirão novo aceite obrigatório no próximo acesso ao sistema. A versão vigente estará sempre disponível nesta página com a data de atualização.</p>
+    </div>
+
+    <div class="callout callout-info">
+      📌 O histórico de versões desta Política está disponível mediante solicitação para <a href="mailto:privacidade@financaslivre.com" style="color: var(--violet); font-weight: 600;">privacidade@financaslivre.com</a>.
+    </div>
+  </div>
+
+  <!-- Seção 11 -->
+  <div class="section" id="s11">
+    <div class="section-header">
+      <div class="section-num">11</div>
+      <div>
+        <h2>Contato e Canal de Privacidade</h2>
+        <p>Como falar conosco sobre privacidade e proteção de dados.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <p>Para exercer seus direitos como titular, reportar incidentes, fazer perguntas ou reclamações sobre esta Política, entre em contato:</p>
+      <ul style="margin-top: 12px;">
+        <li>📧 <strong>Privacidade / DPO:</strong> <a href="mailto:privacidade@financaslivre.com" style="color: var(--green);">privacidade@financaslivre.com</a></li>
+        <li>⚖️ <strong>Jurídico:</strong> <a href="mailto:juridico@financaslivre.com" style="color: var(--green);">juridico@financaslivre.com</a></li>
+        <li>📞 <strong>Telefone:</strong> (11) 3135-5688</li>
+        <li>🏢 <strong>Empresa:</strong> MKS Brasil Software e Gestão Empresarial Ltda — CNPJ 64.293.212/0001-97 — São Paulo, SP</li>
+      </ul>
+    </div>
+
+    <div class="callout callout-green" style="margin-top: 20px;">
+      ✅ Esta Política de Privacidade está em vigor desde <strong>26/05/2026</strong> (v2.0) e foi elaborada em conformidade com a LGPD (Lei nº 13.709/2018), o Marco Civil da Internet (Lei nº 12.965/2014) e o Código de Defesa do Consumidor (Lei nº 8.078/1990).
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div>
+        <div class="footer-brand">🌱 Finanças Livre</div>
+        <p class="footer-desc">Gestão financeira familiar com IA. Seguro, privado e totalmente gratuito.</p>
+        <p class="footer-cnpj">
+          MKS Brasil Software e Gestão Empresarial Ltda<br>
+          CNPJ: 64.293.212/0001-97<br>
+          📞 (11) 3135-5688
+        </p>
+      </div>
+      <div class="footer-col">
+        <h4>Produto</h4>
+        <ul>
+          <li><a href="/#ia">Consultor IA</a></li>
+          <li><a href="/#modulos">Módulos</a></li>
+          <li><a href="/#seguranca">Segurança</a></li>
+          <li><a href="/#cadastro">Cadastro</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Empresa</h4>
+        <ul>
+          <li><a href="/sobre">Sobre nós</a></li>
+          <li><a href="mailto:contato@financaslivre.com">Contato</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="/privacidade">Privacidade</a></li>
+          <li><a href="/termos">Termos de Uso</a></li>
+          <li><a href="/lgpd">LGPD</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Finanças Livre — Todos os direitos reservados</span>
+      <span>Desenvolvido com ❤️ no Brasil · Hospedado na Cloudflare</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

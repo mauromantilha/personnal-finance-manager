@@ -1,408 +1,1491 @@
-export const ADMIN_HTML = /* html */`<!DOCTYPE html>
+export function adminHtml(baseDomain: string): string { return /* html */`<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MKS Admin</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
+  <title>MKS Admin Console</title>
+  <script>const BASE_DOMAIN = '${baseDomain}';</script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
-    body { background: #020617; }
-    .section { display: none; }
-    .section.active { display: block; }
-    .nav-btn { @apply text-sm text-slate-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors; }
-    .nav-btn.active { @apply text-white bg-slate-800; }
-    .card { @apply bg-slate-900 border border-slate-800 rounded-xl p-5; }
-    .input { @apply w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-colors; }
-    .btn-primary { @apply bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors; }
-    .btn-ghost { @apply bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors; }
-    .btn-danger { @apply bg-red-900/60 hover:bg-red-800 text-red-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors; }
-    .badge-active { @apply text-xs px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-800; }
-    .badge-suspended { @apply text-xs px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 border border-amber-800; }
-    .badge-deleted { @apply text-xs px-2 py-0.5 rounded-full bg-red-900/60 text-red-300 border border-red-800; }
-    .badge-free { @apply text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700; }
-    .badge-paid { @apply text-xs px-2 py-0.5 rounded-full bg-indigo-900/60 text-indigo-300 border border-indigo-800; }
-    .toast { @apply fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-xl z-50 transition-all duration-300; }
+    :root{
+      /* main area - light */
+      --bg:#f0f2f7;--surf:#ffffff;--card:#ffffff;--hov:#f0f4ff;
+      --bdr:#e2e6f0;--bdr2:#c8d0e6;
+      --t1:#1a2340;--t2:#4a5878;--t3:#8a96b0;
+      --acc:#4f70f7;--acc2:#3a5ae8;--glow:rgba(79,112,247,.12);
+      --ok:#0aad68;--warn:#e09210;--err:#d93535;
+      --r:10px;
+      /* sidebar specific - dark */
+      --sb-bg:#0c1022;--sb-surf:#0f1628;--sb-bdr:#1c2a4a;
+      --sb-t1:#dce4f8;--sb-t2:#8494bb;--sb-t3:#4d5e82;
+      --sb-acc:#4f70f7;--sb-acc2:#7090ff;--sb-hov:#172038;--sb-glow:rgba(79,112,247,.18);
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    html,body{height:100%;}
+    body{background:var(--bg);color:var(--t1);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;height:100vh;overflow:hidden;font-size:14px;-webkit-font-smoothing:antialiased;}
+    a{color:inherit;text-decoration:none;}
+    button{font-family:inherit;cursor:pointer;}
+
+    /* SIDEBAR - dark */
+    #sb{width:220px;min-width:220px;background:var(--sb-bg);border-right:1px solid var(--sb-bdr);display:flex;flex-direction:column;overflow:hidden;}
+    .sb-logo{padding:16px 16px 14px;border-bottom:1px solid var(--sb-bdr);display:flex;align-items:center;gap:10px;}
+    .sb-icon{width:31px;height:31px;border-radius:8px;background:linear-gradient(135deg,#4f70f7,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;flex-shrink:0;}
+    .sb-name{font-size:13px;font-weight:700;color:var(--sb-t1);}
+    .sb-ver{font-size:9px;color:var(--sb-t3);text-transform:uppercase;letter-spacing:.6px;margin-top:1px;}
+    .sb-nav{flex:1;overflow-y:auto;padding:4px 0 8px;}
+    .sb-sec{font-size:9px;font-weight:700;color:var(--sb-t3);text-transform:uppercase;letter-spacing:1.1px;padding:14px 16px 5px;}
+    .sb-item{display:flex;align-items:center;gap:9px;padding:8px 16px;cursor:pointer;color:var(--sb-t2);font-size:13px;font-weight:500;border-left:3px solid transparent;transition:all .12s;user-select:none;}
+    .sb-item:hover{background:rgba(255,255,255,.05);color:var(--sb-t1);}
+    .sb-item.active{border-left-color:var(--sb-acc);background:var(--sb-glow);color:var(--sb-acc2);}
+    .sb-ico{font-size:14px;width:17px;text-align:center;flex-shrink:0;opacity:.85;}
+    .sb-foot{padding:10px 16px;border-top:1px solid var(--sb-bdr);}
+    .sb-live{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--sb-t3);}
+    .sb-dot{width:6px;height:6px;border-radius:50%;background:#0ec97e;box-shadow:0 0 5px #0ec97e;flex-shrink:0;}
+    .sb-ts{font-size:10px;color:var(--sb-t3);margin-top:3px;}
+    .sb-logout{margin-top:8px;width:100%;text-align:left;background:rgba(240,75,75,.08);border:1px solid rgba(240,75,75,.18);color:#f04b4b;padding:7px 11px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;display:flex;align-items:center;gap:6px;}
+    .sb-logout:hover{background:rgba(240,75,75,.16);border-color:rgba(240,75,75,.35);}
+
+    /* MAIN */
+    #main{flex:1;overflow-y:auto;display:flex;flex-direction:column;background:var(--bg);}
+    .topbar{padding:12px 24px;background:var(--surf);border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:10px;flex-shrink:0;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+    .topbar-title{font-size:15px;font-weight:700;color:var(--t1);flex:1;}
+    .tb-pill{font-size:10px;padding:3px 9px;border-radius:20px;background:var(--hov);border:1px solid var(--bdr2);color:var(--t3);}
+    .tb-btn{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;background:var(--hov);color:var(--t2);border:1px solid var(--bdr);cursor:pointer;transition:all .12s;font-family:inherit;}
+    .tb-btn:hover{color:var(--t1);border-color:var(--bdr2);}
+
+    /* PAGE */
+    .page{padding:20px 24px 48px;display:none;}
+    .page.active{display:block;}
+
+    /* KPI ROW */
+    .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;}
+    .kpi{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:16px 18px;transition:border-color .2s;}
+    .kpi:hover{border-color:var(--bdr2);}
+    .kpi-lbl{font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:9px;}
+    .kpi-val{font-size:28px;font-weight:800;color:var(--t1);line-height:1;margin-bottom:5px;font-variant-numeric:tabular-nums;}
+    .kpi-meta{font-size:11px;color:var(--t2);}
+    .kpi-bar{height:3px;background:rgba(255,255,255,.05);border-radius:2px;margin-top:10px;overflow:hidden;}
+    .kpi-fill{height:100%;border-radius:2px;transition:width .6s ease;}
+
+    /* CHARTS */
+    .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
+    .chart-card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:18px 20px;}
+    .chart-wrap{position:relative;height:200px;}
+    .chart-ttl{font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;}
+
+    /* TABLE CARD */
+    .tbl-card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;margin-bottom:18px;}
+    .tbl-head{padding:11px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;}
+    .tbl-ttl{font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;}
+    table{width:100%;border-collapse:collapse;}
+    thead th{padding:8px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.7px;background:rgba(255,255,255,.02);border-bottom:1px solid var(--bdr);white-space:nowrap;}
+    tbody tr{border-bottom:1px solid var(--bdr);transition:background .1s;}
+    tbody tr:last-child{border-bottom:none;}
+    tbody tr:hover{background:var(--hov);cursor:pointer;}
+    td{padding:9px 14px;font-size:13px;color:var(--t1);}
+
+    /* BADGES */
+    .bdg{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;letter-spacing:.2px;white-space:nowrap;}
+    .bdg::before{content:'';width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+    .bdg-active{background:rgba(14,201,126,.1);color:var(--ok);border:1px solid rgba(14,201,126,.25);}
+    .bdg-active::before{background:var(--ok);}
+    .bdg-suspended{background:rgba(245,166,35,.1);color:var(--warn);border:1px solid rgba(245,166,35,.25);}
+    .bdg-suspended::before{background:var(--warn);}
+    .bdg-deleted{background:rgba(240,75,75,.1);color:var(--err);border:1px solid rgba(240,75,75,.25);}
+    .bdg-deleted::before{background:var(--err);}
+    .bdg-free{background:rgba(148,163,184,.08);color:var(--t2);border:1px solid rgba(148,163,184,.15);}
+    .bdg-paid{background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);}
+
+    /* BUTTONS */
+    .btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;border:none;cursor:pointer;transition:all .12s;font-family:inherit;white-space:nowrap;}
+    .btn-pri{background:var(--acc);color:#fff;}
+    .btn-pri:hover{background:var(--acc2);box-shadow:0 4px 10px rgba(79,112,247,.3);}
+    .btn-pri:disabled{opacity:.4;pointer-events:none;}
+    .btn-sec{background:var(--hov);color:var(--t2);border:1px solid var(--bdr);}
+    .btn-sec:hover{color:var(--t1);border-color:var(--bdr2);}
+    .btn-ok{background:rgba(14,201,126,.1);color:var(--ok);border:1px solid rgba(14,201,126,.2);}
+    .btn-ok:hover{background:rgba(14,201,126,.18);}
+    .btn-warn{background:rgba(245,166,35,.1);color:var(--warn);border:1px solid rgba(245,166,35,.2);}
+    .btn-warn:hover{background:rgba(245,166,35,.18);}
+    .btn-err{background:rgba(240,75,75,.1);color:var(--err);border:1px solid rgba(240,75,75,.2);}
+    .btn-err:hover{background:rgba(240,75,75,.18);}
+    .btn-lg{padding:10px 20px;font-size:13px;border-radius:9px;justify-content:center;}
+
+    /* FORM */
+    .fc{width:100%;background:var(--surf);border:1px solid var(--bdr);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--t1);outline:none;transition:border-color .15s,box-shadow .15s;font-family:inherit;}
+    .fc:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--glow);}
+    .fc::placeholder{color:var(--t3);}
+    select.fc{appearance:none;cursor:pointer;}
+    .fc-lbl{display:block;font-size:11px;font-weight:600;color:var(--t2);margin-bottom:5px;letter-spacing:.2px;}
+    .fc-hint{font-size:11px;color:var(--t3);margin-top:4px;}
+    .fg{margin-bottom:15px;}
+
+    /* MODAL */
+    .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(5px);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;opacity:0;pointer-events:none;transition:opacity .2s;}
+    .modal-bg.open{opacity:1;pointer-events:all;}
+    .modal{background:var(--card);border:1px solid var(--bdr2);border-radius:14px;width:100%;max-width:530px;box-shadow:0 24px 60px rgba(0,0,0,.6);transform:translateY(18px) scale(.98);transition:transform .22s;}
+    .modal-bg.open .modal{transform:translateY(0) scale(1);}
+    .mhdr{padding:16px 20px;border-bottom:1px solid var(--bdr);display:flex;align-items:flex-start;justify-content:space-between;}
+    .m-ttl{font-size:15px;font-weight:700;color:var(--t1);}
+    .m-sub{font-size:11px;color:var(--t3);margin-top:3px;}
+    .m-x{width:26px;height:26px;border-radius:6px;background:var(--hov);border:1px solid var(--bdr);color:var(--t2);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .1s;flex-shrink:0;}
+    .m-x:hover{color:var(--t1);}
+    .mbdy{padding:16px 20px;max-height:58vh;overflow-y:auto;}
+    .mftr{padding:12px 20px;border-top:1px solid var(--bdr);display:flex;gap:8px;align-items:center;}
+
+    /* INFO GRID */
+    .ig{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;}
+    .ig-item{background:var(--surf);border:1px solid var(--bdr);border-radius:8px;padding:9px 11px;}
+    .ig-lbl{font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px;}
+    .ig-val{font-size:12px;color:var(--t1);font-weight:500;word-break:break-all;}
+
+    /* NOC */
+    .noc-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;}
+    .noc-card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:15px 17px;}
+    .noc-lbl{font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:7px;}
+    .noc-val{font-size:26px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums;}
+    .noc-hint{font-size:11px;color:var(--t2);margin-top:3px;}
+
+    /* PROV */
+    .prov-wrap{display:grid;grid-template-columns:minmax(0,500px) 1fr;gap:20px;align-items:start;}
+    .prov-card{background:var(--card);border:1px solid var(--bdr);border-radius:14px;padding:24px;}
+    .info-panel{display:flex;flex-direction:column;gap:14px;}
+    .info-box{background:var(--card);border:1px solid var(--bdr);border-radius:12px;padding:18px;}
+
+    /* CHECKLIST */
+    .chk{display:flex;flex-direction:column;gap:9px;}
+    .chk-i{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--t2);}
+    .chk-ico{color:var(--ok);flex-shrink:0;}
+
+    /* D1 MINI BAR */
+    .d1-bar{height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;margin-top:5px;}
+    .d1-fill{height:100%;border-radius:2px;background:var(--acc);}
+
+    /* ALERTS */
+    .alr{display:flex;align-items:flex-start;gap:8px;padding:10px 13px;border-radius:8px;font-size:12px;margin-bottom:10px;}
+    .alr-warn{background:rgba(245,166,35,.07);border:1px solid rgba(245,166,35,.2);color:var(--warn);}
+    .alr-err{background:rgba(240,75,75,.07);border:1px solid rgba(240,75,75,.2);color:var(--err);}
+    .alr-ok{background:rgba(14,201,126,.07);border:1px solid rgba(14,201,126,.2);color:var(--ok);}
+
+    /* MISC */
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .spin{animation:spin .7s linear infinite;display:inline-block;}
+    #toast{position:fixed;bottom:22px;right:22px;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:200;opacity:0;pointer-events:none;transition:opacity .3s;box-shadow:0 8px 24px rgba(0,0,0,.15);max-width:300px;}
+    ::-webkit-scrollbar{width:4px;height:4px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:3px;}
+    .mono{font-family:'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;}
+    .sql-ed{font-family:'SF Mono','Fira Code',Consolas,monospace;font-size:12px;line-height:1.65;resize:vertical;min-height:140px;}
+    .row-fam-name{font-weight:600;}
+    .empty{padding:48px;text-align:center;color:var(--t3);}
+    .empty-ico{font-size:30px;margin-bottom:10px;}
   </style>
 </head>
-<body class="dark text-slate-100 min-h-screen font-sans">
+<body>
 
-<!-- Toast -->
-<div id="toast" class="toast opacity-0 pointer-events-none"></div>
-
-<!-- Nav -->
-<nav class="bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-40">
-  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center gap-4">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-sm font-bold">M</div>
-      <span class="font-semibold text-white">MKS Admin</span>
-      <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Panel</span>
-    </div>
-    <div class="ml-auto flex gap-1">
-      <button onclick="nav('dashboard')"  id="nav-dashboard"  class="nav-btn active">Dashboard</button>
-      <button onclick="nav('families')"   id="nav-families"   class="nav-btn">Famílias</button>
-      <button onclick="nav('provision')"  id="nav-provision"  class="nav-btn">Provisionar</button>
-      <button onclick="nav('migrations')" id="nav-migrations" class="nav-btn">Migrações</button>
+<!-- ── SIDEBAR ──────────────────────────────────────────────────── -->
+<aside id="sb">
+  <div class="sb-logo">
+    <div class="sb-icon">M</div>
+    <div>
+      <div class="sb-name">MKS Admin</div>
+      <div class="sb-ver">Console</div>
     </div>
   </div>
-</nav>
+  <nav class="sb-nav">
+    <div class="sb-sec">Visão Geral</div>
+    <div class="sb-item active" id="nav-dashboard" data-nav="dashboard">
+      <span class="sb-ico">▣</span>Dashboard
+    </div>
+    <div class="sb-item" id="nav-noc" data-nav="noc">
+      <span class="sb-ico">◈</span>Infraestrutura
+    </div>
+    <div class="sb-sec">Gestão</div>
+    <div class="sb-item" id="nav-families" data-nav="families">
+      <span class="sb-ico">⊞</span>Famílias
+    </div>
+    <div class="sb-item" id="nav-provision" data-nav="provision">
+      <span class="sb-ico">⊕</span>Provisionar
+    </div>
+    <div class="sb-sec">Operações</div>
+    <div class="sb-item" id="nav-migrations" data-nav="migrations">
+      <span class="sb-ico">⚙</span>Migrações SQL
+    </div>
+    <div class="sb-sec">Observabilidade</div>
+    <div class="sb-item" id="nav-telemetry" data-nav="telemetry">
+      <span class="sb-ico">◎</span>Telemetria
+    </div>
+    <div class="sb-item" id="nav-security" data-nav="security">
+      <span class="sb-ico">🛡</span>Segurança
+    </div>
+    <div class="sb-item" id="nav-fam-telemetry" data-nav="fam-telemetry" style="display:none;">
+      <span class="sb-ico">▦</span><span id="nav-fam-tel-lbl">Família</span>
+    </div>
+  </nav>
+  <div class="sb-foot">
+    <div class="sb-live"><span class="sb-dot"></span>Worker Ativo</div>
+    <div class="sb-ts" id="sb-ts">—</div>
+    <button class="sb-logout" onclick="doLogout()" title="Encerrar sessão">↪ Sair</button>
+  </div>
+</aside>
 
-<!-- Main -->
-<main class="max-w-7xl mx-auto px-6 py-8">
+<!-- ── MAIN ─────────────────────────────────────────────────────── -->
+<div id="main">
+  <header class="topbar">
+    <div class="topbar-title" id="topbar-title">Dashboard</div>
+    <span class="tb-pill">Produção</span>
+    <button class="tb-btn" id="refresh-btn">↺ Atualizar</button>
+  </header>
 
-  <!-- Dashboard -->
-  <section id="section-dashboard" class="section active">
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-white">Dashboard</h1>
-      <button onclick="loadDashboard()" class="btn-ghost">Atualizar</button>
+  <!-- DASHBOARD ───────────────────────────────────────────────── -->
+  <div class="page active" id="page-dashboard">
+    <div class="kpi-row" style="margin-top:6px;">
+      <div class="kpi">
+        <div class="kpi-lbl">Famílias Cadastradas</div>
+        <div class="kpi-val" id="kpi-fam">—</div>
+        <div class="kpi-meta" id="kpi-fam-meta">Carregando…</div>
+        <div class="kpi-bar"><div class="kpi-fill" id="kpi-fam-fill" style="width:0;background:var(--acc)"></div></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-lbl">Bancos D1 Usados</div>
+        <div class="kpi-val" id="kpi-d1">—</div>
+        <div class="kpi-meta" id="kpi-d1-meta">Carregando…</div>
+        <div class="kpi-bar"><div class="kpi-fill" id="kpi-d1-fill" style="width:0;background:var(--ok)"></div></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-lbl">Usuários Zero Trust</div>
+        <div class="kpi-val" id="kpi-zt">—</div>
+        <div class="kpi-meta" id="kpi-zt-meta">Carregando…</div>
+        <div class="kpi-bar"><div class="kpi-fill" id="kpi-zt-fill" style="width:0;background:var(--warn)"></div></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-lbl">Taxa de Ativação</div>
+        <div class="kpi-val" id="kpi-rate">—</div>
+        <div class="kpi-meta" id="kpi-rate-meta">% famílias ativas</div>
+        <div class="kpi-bar"><div class="kpi-fill" id="kpi-rate-fill" style="width:0;background:var(--ok)"></div></div>
+      </div>
     </div>
 
-    <!-- Stat cards -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="card">
-        <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">Famílias Ativas</div>
-        <div id="stat-families" class="text-4xl font-bold text-indigo-400">—</div>
-        <div class="text-xs text-slate-500 mt-1">tenants ativos</div>
-      </div>
-      <div class="card">
-        <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">D1 Free Limit</div>
-        <div id="stat-d1" class="text-4xl font-bold text-emerald-400">—</div>
-        <div id="stat-d1-bar" class="mt-3 bg-slate-800 rounded-full h-1.5">
-          <div id="stat-d1-fill" class="h-1.5 rounded-full bg-emerald-500 transition-all" style="width:0%"></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">ZT Users</div>
-        <div id="stat-zt" class="text-4xl font-bold text-amber-400">—</div>
-        <div id="stat-zt-bar" class="mt-3 bg-slate-800 rounded-full h-1.5">
-          <div id="stat-zt-fill" class="h-1.5 rounded-full bg-amber-500 transition-all" style="width:0%"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Alerts -->
     <div id="dash-alerts"></div>
 
-    <!-- Recent families table preview -->
-    <div class="card mt-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="font-semibold text-white">Famílias Recentes</h2>
-        <button onclick="nav('families')" class="text-xs text-indigo-400 hover:text-indigo-300">Ver todas →</button>
+    <div class="chart-row">
+      <div class="chart-card">
+        <div class="chart-ttl">Status das Famílias</div>
+        <div class="chart-wrap"><canvas id="chart-status"></canvas></div>
       </div>
-      <div id="dash-families">Carregando...</div>
-    </div>
-  </section>
-
-  <!-- Families -->
-  <section id="section-families" class="section">
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-white">Famílias</h1>
-      <div class="flex gap-2">
-        <input type="search" id="family-search" placeholder="Buscar..." class="input w-48"
-          oninput="filterFamilies()">
-        <button onclick="nav('provision')" class="btn-primary">+ Nova Família</button>
+      <div class="chart-card">
+        <div class="chart-ttl">Capacidade de Recursos</div>
+        <div class="chart-wrap"><canvas id="chart-res"></canvas></div>
       </div>
     </div>
-    <div id="families-container">Carregando...</div>
-  </section>
 
-  <!-- Provision -->
-  <section id="section-provision" class="section">
-    <div class="max-w-lg">
-      <h1 class="text-2xl font-bold text-white mb-2">Provisionar Nova Família</h1>
-      <p class="text-sm text-slate-400 mb-6">Cria D1, CF Access App e envia email de boas-vindas automaticamente.</p>
+    <div class="tbl-card">
+      <div class="tbl-head">
+        <span class="tbl-ttl">Famílias Recentes</span>
+        <button class="btn btn-sec" style="font-size:11px;padding:4px 10px;" data-nav="families">Ver todas →</button>
+      </div>
+      <div id="dash-fam-table"></div>
+    </div>
+  </div>
 
-      <form id="provision-form" class="card space-y-4" onsubmit="submitProvision(event)">
-        <div>
-          <label class="block text-xs text-slate-400 mb-1.5">Nome da Família</label>
-          <input name="name" type="text" placeholder="Família Silva" required class="input">
+  <!-- NOC / INFRAESTRUTURA ────────────────────────────────────── -->
+  <div class="page" id="page-noc">
+    <div id="noc-wrap" style="margin-top:6px;">
+      <div class="empty"><div class="spin" style="font-size:22px;">⟳</div><div style="margin-top:10px;">Consultando infraestrutura Cloudflare…</div></div>
+    </div>
+  </div>
+
+  <!-- FAMÍLIAS ────────────────────────────────────────────────── -->
+  <div class="page" id="page-families">
+    <div style="display:flex;align-items:center;gap:10px;margin-top:6px;margin-bottom:18px;flex-wrap:wrap;">
+      <div style="position:relative;flex:1;min-width:220px;max-width:320px;">
+        <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:13px;pointer-events:none;">⌕</span>
+        <input type="text" id="fam-search" class="fc" placeholder="Buscar família ou subdomínio…" style="padding-left:32px;">
+      </div>
+      <select id="fam-status" class="fc" style="width:150px;">
+        <option value="">Todos os status</option>
+        <option value="active">Ativas</option>
+        <option value="suspended">Suspensas</option>
+        <option value="deleted">Excluídas</option>
+      </select>
+      <select id="fam-tier" class="fc" style="width:130px;">
+        <option value="">Todos os planos</option>
+        <option value="1">Free</option>
+        <option value="2">Paid</option>
+      </select>
+      <button class="btn btn-pri" data-nav="provision">+ Nova Família</button>
+    </div>
+    <div id="families-container"></div>
+  </div>
+
+  <!-- PROVISIONAR ─────────────────────────────────────────────── -->
+  <div class="page" id="page-provision">
+    <div class="prov-wrap" style="margin-top:6px;">
+      <div class="prov-card">
+        <div style="margin-bottom:20px;">
+          <div style="font-size:16px;font-weight:700;color:var(--t1);margin-bottom:4px;">Provisionar Nova Família</div>
+          <div style="font-size:12px;color:var(--t3);">Cria banco D1, política de acesso e envia convite ao administrador da família.</div>
         </div>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1.5">Subdomínio</label>
-          <div class="flex items-center gap-2">
-            <input name="subdomain" type="text" placeholder="silva" required
-              pattern="[a-z0-9-]+" title="Apenas letras minúsculas, números e hífens"
-              oninput="this.value=this.value.toLowerCase()" class="input flex-1">
-            <span class="text-slate-500 text-sm whitespace-nowrap">.mksbrasil.com</span>
+        <form id="prov-form" onsubmit="submitProvision(event)" autocomplete="off">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
+            <div class="fg" style="grid-column:1/-1;">
+              <label class="fc-lbl">Nome da Família <span style="color:var(--err)">*</span></label>
+              <input name="name" type="text" class="fc" placeholder="Ex: Silva, Pereira, Costa…" required>
+              <div class="fc-hint">Nome exibido na interface da família</div>
+            </div>
+            <div class="fg">
+              <label class="fc-lbl">Subdomínio <span style="color:var(--err)">*</span></label>
+              <div style="display:flex;">
+                <input name="subdomain" type="text" class="fc" placeholder="silva" required
+                  style="border-radius:8px 0 0 8px;border-right:none;"
+                  oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'')">
+                <span style="background:var(--hov);border:1px solid var(--bdr);border-left:none;border-radius:0 8px 8px 0;padding:9px 10px;font-size:11px;color:var(--t3);white-space:nowrap;">.${baseDomain}</span>
+              </div>
+              <div class="fc-hint">Letras minúsculas, números e hífens</div>
+            </div>
+            <div class="fg">
+              <label class="fc-lbl">Plano</label>
+              <select name="tier" class="fc">
+                <option value="1">Free — até 10 bancos D1</option>
+                <option value="2">Paid — até 50.000 bancos D1</option>
+              </select>
+            </div>
+            <div class="fg" style="grid-column:1/-1;">
+              <label class="fc-lbl">E-mail do Administrador <span style="color:var(--err)">*</span></label>
+              <input name="ownerEmail" type="email" class="fc" placeholder="admin@familia.com" required>
+              <div class="fc-hint">Receberá convite e link de acesso via e-mail</div>
+            </div>
+          </div>
+          <button type="submit" id="prov-btn" class="btn btn-pri btn-lg" style="width:100%;margin-top:4px;">
+            Provisionar Família
+          </button>
+        </form>
+        <div id="prov-result" style="margin-top:14px;"></div>
+      </div>
+
+      <div class="info-panel">
+        <div class="info-box">
+          <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:12px;">O que é criado automaticamente</div>
+          <div class="chk">
+            <div class="chk-i"><span class="chk-ico">✓</span><span>Banco D1 exclusivo com schema completo</span></div>
+            <div class="chk-i"><span class="chk-ico">✓</span><span>Aplicação no Cloudflare Access com política por e-mail</span></div>
+            <div class="chk-i"><span class="chk-ico">✓</span><span>Registro de roteamento no KV (subdomínio → D1)</span></div>
+            <div class="chk-i"><span class="chk-ico">✓</span><span>Todas as migrações SQL aplicadas automaticamente</span></div>
+            <div class="chk-i"><span class="chk-ico">✓</span><span>E-mail de boas-vindas com link de acesso seguro</span></div>
           </div>
         </div>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1.5">Email do Owner</label>
-          <input name="ownerEmail" type="email" placeholder="owner@familia.com" required class="input">
+        <div class="alr alr-warn" style="margin-bottom:0;">
+          <span>⚠</span>
+          <span>O processo leva até 30 segundos. Não feche a aba durante o provisionamento.</span>
         </div>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1.5">Plano</label>
-          <select name="tier" class="input">
-            <option value="1">Free</option>
-            <option value="2">Paid</option>
-          </select>
-        </div>
-        <button type="submit" id="provision-btn" class="btn-primary w-full py-2.5">
-          Provisionar Família
-        </button>
-      </form>
-
-      <div id="provision-result" class="mt-4"></div>
+        <div id="prov-limits" class="info-box" style="display:none;"></div>
+      </div>
     </div>
-  </section>
+  </div>
 
-  <!-- Migrations -->
-  <section id="section-migrations" class="section">
-    <div class="max-w-2xl">
-      <h1 class="text-2xl font-bold text-white mb-2">Migrações SQL</h1>
-      <p class="text-sm text-slate-400 mb-6">Execute SQL em uma família específica ou em todas as ativas.</p>
-
-      <div class="card space-y-4">
-        <div>
-          <label class="block text-xs text-slate-400 mb-1.5">
-            Família (subdomínio) — <span class="text-slate-500">deixe vazio para aplicar em todas</span>
-          </label>
-          <input id="mig-subdomain" type="text" placeholder="silva" class="input">
+  <!-- MIGRAÇÕES ───────────────────────────────────────────────── -->
+  <div class="page" id="page-migrations">
+    <div class="prov-wrap" style="margin-top:6px;">
+      <div class="prov-card">
+        <div style="margin-bottom:20px;">
+          <div style="font-size:16px;font-weight:700;color:var(--t1);margin-bottom:4px;">Executar Migração SQL</div>
+          <div style="font-size:12px;color:var(--t3);">Execute SQL em uma família específica ou em todos os bancos D1 ativos simultaneamente.</div>
         </div>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1.5">SQL</label>
-          <textarea id="mig-sql" rows="8"
-            placeholder="ALTER TABLE users ADD COLUMN phone TEXT;&#10;CREATE INDEX IF NOT EXISTS ..."
-            class="input font-mono text-xs resize-y"></textarea>
+        <div class="fg">
+          <label class="fc-lbl">Família (subdomínio)</label>
+          <input id="mig-sub" type="text" class="fc" placeholder="silva — vazio para aplicar em todas as ativas">
+          <div class="fc-hint">Vazio = executa em todas as famílias ativas</div>
         </div>
-        <button onclick="applyMigration()" id="mig-btn"
-          class="bg-amber-600 hover:bg-amber-500 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors">
-          Aplicar Migração
-        </button>
+        <div class="fg">
+          <label class="fc-lbl">SQL <span style="color:var(--err)">*</span></label>
+          <textarea id="mig-sql" class="fc sql-ed mono" placeholder="ALTER TABLE accounts ADD COLUMN notes TEXT;
+CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="applyMigration()" id="mig-btn" class="btn btn-pri btn-lg" style="flex:1;">⚡ Aplicar Migração</button>
+          <button onclick="document.getElementById('mig-sql').value=''" class="btn btn-sec" style="padding:10px 14px;">Limpar</button>
+        </div>
+        <div id="mig-result" style="margin-top:14px;"></div>
       </div>
 
-      <div id="mig-result" class="mt-4"></div>
+      <div class="alr alr-err" style="height:fit-content;align-items:flex-start;flex-direction:column;gap:10px;padding:18px;margin-bottom:0;">
+        <div style="font-size:12px;font-weight:700;">⚠ Riscos das Migrações</div>
+        <div style="display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--t2);">
+          <div>• DDL (<code class="mono" style="color:var(--t1)">ALTER</code>, <code class="mono" style="color:var(--t1)">DROP</code>) são irreversíveis</div>
+          <div>• Teste em uma família antes de aplicar em todas</div>
+          <div>• DML sem <code class="mono" style="color:var(--t1)">WHERE</code> afeta todos os registros</div>
+          <div>• D1 não suporta ROLLBACK — projete para idempotência</div>
+        </div>
+      </div>
     </div>
-  </section>
+  </div>
 
-</main>
+  <!-- TELEMETRIA GLOBAL ─────────────────────────────────────── -->
+  <div class="page" id="page-telemetry">
+    <div style="margin-top:6px;">
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">
+        <div class="kpi"><div class="kpi-lbl">Famílias Ativas</div><div class="kpi-val" id="tel-fam">—</div><div class="kpi-meta" id="tel-fam-meta">de todas as famílias</div><div class="kpi-bar"><div class="kpi-fill" id="tel-fam-fill" style="width:0;background:var(--ok)"></div></div></div>
+        <div class="kpi"><div class="kpi-lbl">Usuários no Sistema</div><div class="kpi-val" id="tel-users">—</div><div class="kpi-meta">total entre famílias</div><div class="kpi-bar"><div class="kpi-fill" id="tel-users-fill" style="width:0;background:var(--acc)"></div></div></div>
+        <div class="kpi"><div class="kpi-lbl">Req. Workers (24h)</div><div class="kpi-val" id="tel-req">—</div><div class="kpi-meta" id="tel-err">carregando…</div><div class="kpi-bar"><div class="kpi-fill" id="tel-req-fill" style="width:0;background:var(--warn)"></div></div></div>
+        <div class="kpi"><div class="kpi-lbl">D1 Total Usado</div><div class="kpi-val" id="tel-d1">—</div><div class="kpi-meta">MB nos bancos ativos</div><div class="kpi-bar"><div class="kpi-fill" id="tel-d1-fill" style="width:0;background:var(--acc2)"></div></div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card" style="grid-column:1/-1;">
+          <div class="chart-ttl">Requisições Workers — últimas 24h (por meia hora)</div>
+          <div class="chart-wrap" style="height:180px;"><canvas id="chart-tel-req"></canvas></div>
+        </div>
+      </div>
+      <div class="tbl-card">
+        <div class="tbl-head"><span class="tbl-ttl">Uso por Família</span><button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadTelemetry()">↺ Atualizar</button></div>
+        <div id="tel-fam-table"><div class="empty">Carregando…</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TELEMETRIA FAMÍLIA ──────────────────────────────────────── -->
+  <div class="page" id="page-fam-telemetry">
+    <div style="margin-top:6px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <button class="btn btn-sec" onclick="nav('families')">← Voltar</button>
+        <div style="font-size:15px;font-weight:700;" id="ftel-title">—</div>
+        <button class="btn btn-sec" style="font-size:11px;" id="ftel-refresh">↺ Atualizar</button>
+      </div>
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">
+        <div class="kpi"><div class="kpi-lbl">Usuários</div><div class="kpi-val" id="ftel-users">—</div><div class="kpi-meta">ativos no banco</div></div>
+        <div class="kpi"><div class="kpi-lbl">Transações</div><div class="kpi-val" id="ftel-tx">—</div><div class="kpi-meta">total</div></div>
+        <div class="kpi"><div class="kpi-lbl">Tamanho D1</div><div class="kpi-val" id="ftel-d1">—</div><div class="kpi-meta">MB</div></div>
+        <div class="kpi"><div class="kpi-lbl">Arquivos R2</div><div class="kpi-val" id="ftel-r2">—</div><div class="kpi-meta" id="ftel-r2-meta">objetos</div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <div class="chart-ttl">Transações — últimos 7 dias</div>
+          <div class="chart-wrap" style="height:180px;"><canvas id="chart-ftel-tx"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-ttl">Tabelas — contagem de registros</div>
+          <div class="chart-wrap" style="height:180px;"><canvas id="chart-ftel-tables"></canvas></div>
+        </div>
+      </div>
+      <div class="tbl-card">
+        <div class="tbl-head"><span class="tbl-ttl">Usuários da Família</span></div>
+        <div id="ftel-users-table"><div class="empty">Carregando…</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEGURANÇA ───────────────────────────────────────────────── -->
+  <div class="page" id="page-security">
+    <div style="margin-top:6px;">
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">
+        <div class="kpi"><div class="kpi-lbl">Bloqueados (24h)</div><div class="kpi-val" id="sec-blocked">—</div><div class="kpi-meta">pelo firewall CF</div><div class="kpi-bar"><div class="kpi-fill" id="sec-blocked-fill" style="width:0;background:var(--err)"></div></div></div>
+        <div class="kpi"><div class="kpi-lbl">IPs em Rate Limit</div><div class="kpi-val" id="sec-rl">—</div><div class="kpi-meta">ativos no KV</div><div class="kpi-bar"><div class="kpi-fill" id="sec-rl-fill" style="width:0;background:var(--warn)"></div></div></div>
+        <div class="kpi"><div class="kpi-lbl">Hits Rate Limit Total</div><div class="kpi-val" id="sec-rl-total">—</div><div class="kpi-meta">tentativas bloqueadas</div></div>
+        <div class="kpi"><div class="kpi-lbl">Países Atacantes</div><div class="kpi-val" id="sec-countries">—</div><div class="kpi-meta">no período</div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <div class="chart-ttl">Firewall — Ações (24h)</div>
+          <div class="chart-wrap" style="height:180px;"><canvas id="chart-sec-actions"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-ttl">Requisições HTTP — por hora</div>
+          <div class="chart-wrap" style="height:180px;"><canvas id="chart-sec-http"></canvas></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;">
+        <div class="tbl-card">
+          <div class="tbl-head"><span class="tbl-ttl">Top IPs Bloqueados</span></div>
+          <div id="sec-ips-table"><div class="empty">Carregando…</div></div>
+        </div>
+        <div class="tbl-card">
+          <div class="tbl-head"><span class="tbl-ttl">IPs em Rate Limit (KV)</span></div>
+          <div id="sec-rl-table"><div class="empty">Carregando…</div></div>
+        </div>
+      </div>
+      <div class="tbl-card">
+        <div class="tbl-head"><span class="tbl-ttl">Países de Origem (Ataques)</span><button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadSecurity()">↺ Atualizar</button></div>
+        <div id="sec-countries-table"><div class="empty">Carregando…</div></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ── MODAL: Detalhe da Família ─────────────────────────────── -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <div class="mhdr">
+      <div>
+        <div class="m-ttl" id="m-name">—</div>
+        <div id="m-badges" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;"></div>
+      </div>
+      <button class="m-x" id="modal-close">×</button>
+    </div>
+    <div class="mbdy">
+      <div class="ig" id="m-info"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:9px;">Banco de Dados D1</div>
+      <div id="m-stats"></div>
+    </div>
+    <div class="mftr">
+      <a id="m-link" href="#" target="_blank" class="btn btn-sec" style="font-size:11px;padding:5px 10px;">↗ Abrir Site</a>
+      <button id="m-toggle" class="btn btn-warn" style="font-size:11px;padding:5px 10px;"></button>
+      <div style="flex:1;"></div>
+      <button id="m-delete" class="btn btn-err" style="font-size:11px;padding:5px 10px;">Excluir</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
 
 <script>
-// ── State & helpers ───────────────────────────────────────────────────────────
-let allFamilies = [];
+// ── State ─────────────────────────────────────────────────────────
+var allFams     = [];
+var nocLoaded   = false;
+var modalSub    = null;
+var modalTenant = null;
+var charts      = {};
 
-function $(id) { return document.getElementById(id); }
+// ── Helpers ───────────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
 
-function toast(msg, ok = true) {
-  const el = $('toast');
-  el.textContent = msg;
-  el.className = 'toast ' + (ok ? 'bg-emerald-800 text-emerald-100' : 'bg-red-900 text-red-200');
-  el.style.opacity = '1';
-  setTimeout(() => { el.style.opacity = '0'; }, 3000);
+function fmt(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  var k = 1024, sz = ['B','KB','MB','GB'];
+  var i = Math.floor(Math.log(bytes) / Math.log(k));
+  return (bytes / Math.pow(k, i)).toFixed(1) + '\xA0' + sz[i];
 }
 
-async function api(method, path, body) {
+function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
+
+function fmtDate(s) {
+  if (!s) return '—';
+  return new Date(s).toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+function badge(s) { return '<span class="bdg bdg-' + s + '">' + s + '</span>'; }
+
+function tierBadge(t) {
+  return t === 2 ? '<span class="bdg bdg-paid">Paid</span>' : '<span class="bdg bdg-free">Free</span>';
+}
+
+function spinner(msg) {
+  return '<div style="display:flex;align-items:center;gap:8px;color:var(--t2);font-size:13px;padding:8px 0;">'
+       + '<span class="spin">⟳</span>' + (msg || 'Carregando…') + '</div>';
+}
+
+function showToast(msg, ok) {
+  var e = el('toast');
+  e.textContent = msg;
+  e.style.background = ok === false ? 'rgba(240,75,75,.15)' : 'rgba(14,201,126,.15)';
+  e.style.border = ok === false ? '1px solid rgba(240,75,75,.35)' : '1px solid rgba(14,201,126,.35)';
+  e.style.color  = ok === false ? '#f04b4b' : '#0ec97e';
+  e.style.opacity = '1';
+  clearTimeout(e._tid);
+  e._tid = setTimeout(function() { e.style.opacity = '0'; }, 3500);
+}
+
+// ── API ───────────────────────────────────────────────────────────
+async function api(method, path, body, ms) {
+  if (ms === undefined) ms = 15000;
+  var ctrl = new AbortController();
+  var tid  = setTimeout(function() { ctrl.abort(); }, ms);
   try {
-    const r = await fetch('/api' + path, {
-      method,
+    var r = await fetch('/api' + path, {
+      method: method,
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+      signal: ctrl.signal,
     });
-    return r.json();
+    clearTimeout(tid);
+    var ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) {
+      if (r.url && r.url.includes('cloudflareaccess.com'))
+        return { error: 'Sessão expirada. Recarregue a página.' };
+      return { error: 'Resposta inesperada (' + r.status + '). Recarregue a página.' };
+    }
+    return await r.json();
   } catch (e) {
-    return { error: e.message };
+    clearTimeout(tid);
+    if (e && e.name === 'AbortError') return { error: 'Timeout após ' + (ms/1000) + 's.' };
+    return { error: String((e && e.message) || e) };
   }
 }
 
-// ── Navigation ────────────────────────────────────────────────────────────────
+// ── Navigation ────────────────────────────────────────────────────
+var PAGE_TITLES = {
+  dashboard: 'Dashboard',
+  noc: 'Infraestrutura NOC',
+  families: 'Famílias',
+  provision: 'Provisionar Nova Família',
+  migrations: 'Migrações SQL',
+  telemetry: 'Telemetria Global',
+  'fam-telemetry': 'Telemetria da Família',
+  security: 'Segurança & Ataques'
+};
+
 function nav(name) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  $('section-' + name).classList.add('active');
-  $('nav-' + name).classList.add('active');
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('.sb-item').forEach(function(b) { b.classList.remove('active'); });
+  var page = el('page-' + name);
+  var navBtn = el('nav-' + name);
+  if (page) page.classList.add('active');
+  if (navBtn) navBtn.classList.add('active');
+  el('topbar-title').textContent = PAGE_TITLES[name] || name;
   if (name === 'dashboard') loadDashboard();
-  if (name === 'families')  loadFamilies();
+  if (name === 'noc' && !nocLoaded) loadNOC();
+  if (name === 'families') loadFamilies();
+  if (name === 'telemetry') loadTelemetry();
+  if (name === 'security') loadSecurity();
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
+function refreshCurrent() {
+  var active = document.querySelector('.sb-item.active');
+  if (!active) return;
+  var name = active.dataset.nav;
+  if (name === 'noc') { nocLoaded = false; }
+  nav(name);
+}
+
+// ── Charts ────────────────────────────────────────────────────────
+function initStatusChart(active, suspended, deleted) {
+  var canvas = el('chart-status');
+  if (!canvas) return;
+  if (charts.status) { charts.status.destroy(); charts.status = null; }
+  var total = active + suspended + deleted;
+  charts.status = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: ['Ativas', 'Suspensas', 'Excluídas'],
+      datasets: [{
+        data: [active, suspended, deleted],
+        backgroundColor: ['rgba(14,201,126,.7)', 'rgba(245,166,35,.7)', 'rgba(240,75,75,.65)'],
+        borderColor:      ['#0ec97e', '#f5a623', '#f04b4b'],
+        borderWidth: 1.5, borderRadius: 7, borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 500 },
+      scales: {
+        x: { ticks: { color: '#4a5878', font: { size: 12, weight: '600' } },
+             grid: { display: false }, border: { display: false } },
+        y: { beginAtZero: true,
+             ticks: { color: '#8a96b0', font: { size: 10 }, stepSize: 1 },
+             grid: { color: 'rgba(0,0,0,.06)' }, border: { display: false } }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: function(ctx) {
+          return ' ' + ctx.raw + ' (' + (total > 0 ? Math.round(ctx.raw/total*100) : 0) + '%)';
+        }}}
+      }
+    }
+  });
+}
+
+function initResourceChart(d1Cur, d1Lim, ztCur, ztLim) {
+  var canvas = el('chart-res');
+  if (!canvas) return;
+  if (charts.res) { charts.res.destroy(); charts.res = null; }
+  var d1Pct = d1Lim > 0 ? Math.min(d1Cur / d1Lim * 100, 100) : 0;
+  var ztPct = ztLim > 0 ? Math.min(ztCur / ztLim * 100, 100) : 0;
+  var cfg = {
+    type: 'bar',
+    data: {
+      labels: ['Bancos D1', 'Usuários ZT'],
+      datasets: [
+        { label: 'Usado', data: [d1Pct, ztPct],
+          backgroundColor: ['rgba(79,112,247,.65)', 'rgba(245,166,35,.65)'],
+          borderColor: ['#4f70f7','#f5a623'], borderWidth: 1.5, borderRadius: 4
+        },
+        { label: 'Disponível', data: [100 - d1Pct, 100 - ztPct],
+          backgroundColor: ['rgba(255,255,255,.04)', 'rgba(255,255,255,.04)'],
+          borderColor: ['rgba(255,255,255,.06)', 'rgba(255,255,255,.06)'], borderWidth: 1, borderRadius: 4
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600 },
+      scales: {
+        x: { stacked: true, max: 100, display: true,
+          ticks: { color: '#8a96b0', font: { size: 10 }, callback: function(v) { return v + '%'; } },
+          grid: { color: 'rgba(0,0,0,.06)' }, border: { display: false }
+        },
+        y: { stacked: true, ticks: { color: '#4a5878', font: { size: 12 } }, grid: { display: false }, border: { display: false } }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: function(ctx) {
+            if (ctx.datasetIndex !== 0) return null;
+            var idx = ctx.dataIndex;
+            var cur = idx === 0 ? d1Cur : ztCur;
+            var lim = idx === 0 ? d1Lim : ztLim;
+            return ' ' + cur + ' / ' + lim + ' (' + Math.round(ctx.raw) + '%)';
+          }}
+        }
+      }
+    }
+  };
+  charts.res = new Chart(canvas, cfg);
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────
 async function loadDashboard() {
-  const [health, limits] = await Promise.all([api('GET', '/health'), api('GET', '/limits')]);
+  el('kpi-fam').textContent = '—';
+  el('kpi-d1').textContent  = '—';
+  el('kpi-zt').textContent  = '—';
+  el('kpi-rate').textContent = '—';
+  el('dash-fam-table').innerHTML = spinner('Carregando dados…');
 
-  const count = health.families ?? 0;
-  $('stat-families').textContent = count;
+  var results = await Promise.all([api('GET', '/health'), api('GET', '/families')]);
+  var health = results[0], famData = results[1];
 
-  const d1 = health.limits?.d1;
-  if (d1) {
-    $('stat-d1').textContent = d1.current + '/' + d1.freeLimit;
-    const pct = Math.min((d1.current / d1.freeLimit) * 100, 100);
-    $('stat-d1-fill').style.width = pct + '%';
-    $('stat-d1-fill').className = 'h-1.5 rounded-full transition-all ' + (pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-amber-500' : 'bg-emerald-500');
+  if (health.error) {
+    el('kpi-fam').textContent = 'Erro';
+    el('dash-fam-table').innerHTML = '<div class="empty"><div class="alr alr-err" style="display:inline-flex;gap:6px;align-items:center;">⚠ ' + health.error + '</div></div>';
+    return;
   }
 
-  const ztLimit = 50;
-  const ztCount = health.limits?.zt ? 0 : 0; // populated once ZT count is wired
-  $('stat-zt').textContent = ztCount + '/' + ztLimit;
+  var fams = famData.families || [];
+  allFams = fams;
 
-  const alertsEl = $('dash-alerts');
+  var total   = fams.length;
+  var active  = fams.filter(function(f) { return f.status === 'active'; }).length;
+  var susp    = fams.filter(function(f) { return f.status === 'suspended'; }).length;
+  var deleted = fams.filter(function(f) { return f.status === 'deleted'; }).length;
+
+  el('kpi-fam').textContent    = total;
+  el('kpi-fam-meta').textContent = active + ' ativas, ' + susp + ' suspensas';
+  el('kpi-fam-fill').style.width = Math.min(total / 50 * 100, 100) + '%';
+
+  var d1 = (health.limits && health.limits.d1) || {};
+  var d1Cur = d1.current || 0, d1Lim = d1.freeLimit || 10;
+  el('kpi-d1').textContent = d1Cur;
+  el('kpi-d1-meta').textContent = d1Cur + ' / ' + d1Lim + ' (' + Math.round(d1Cur/d1Lim*100) + '%)';
+  var d1Pct = Math.min(d1Cur / d1Lim * 100, 100);
+  el('kpi-d1-fill').style.width = d1Pct + '%';
+  el('kpi-d1-fill').style.background = d1Pct > 80 ? 'var(--err)' : d1Pct > 60 ? 'var(--warn)' : 'var(--ok)';
+
+  var zt = (health.limits && health.limits.zt) || {};
+  var ztCur = zt.current || 0, ztLim = zt.freeLimit || 50;
+  el('kpi-zt').textContent = ztCur;
+  el('kpi-zt-meta').textContent = ztCur + ' / ' + ztLim + ' usuários ZT';
+  el('kpi-zt-fill').style.width = Math.min(ztCur/ztLim*100, 100) + '%';
+
+  var rate = total > 0 ? Math.round(active / total * 100) : 0;
+  el('kpi-rate').textContent = rate + '%';
+  el('kpi-rate-meta').textContent = active + ' de ' + total + ' famílias';
+  el('kpi-rate-fill').style.width = rate + '%';
+  el('kpi-rate-fill').style.background = rate > 80 ? 'var(--ok)' : rate > 50 ? 'var(--warn)' : 'var(--err)';
+
+  // Alerts
+  var alertsEl = el('dash-alerts');
   alertsEl.innerHTML = '';
-  (limits.alerts ?? []).forEach(a => {
-    alertsEl.innerHTML += '<div class="mb-3 bg-amber-900/20 border border-amber-800/50 rounded-xl px-4 py-3 text-sm text-amber-300">' + a + '</div>';
+  var alerts = (famData.alerts || (health.alerts) || []);
+  alerts.forEach(function(a) {
+    alertsEl.innerHTML += '<div class="alr alr-warn"><span>⚠</span><span>' + a + '</span></div>';
   });
 
-  // Mini families table
-  const data = await api('GET', '/families');
-  const fams = (data.families ?? []).slice(0, 5);
-  $('dash-families').innerHTML = fams.length
-    ? '<table class="w-full text-sm"><tbody class="divide-y divide-slate-800">'
-        + fams.map(f => '<tr class="hover:bg-slate-800/30"><td class="py-2.5 font-medium text-white">' + f.name + '</td>'
-          + '<td class="py-2.5 text-indigo-400 font-mono text-xs">' + f.subdomain + '</td>'
-          + '<td class="py-2.5">' + badge(f.status) + '</td>'
-          + '<td class="py-2.5 text-slate-500 text-xs">' + new Date(f.createdAt).toLocaleDateString('pt-BR') + '</td></tr>').join('')
-        + '</tbody></table>'
-    : '<p class="text-sm text-slate-500">Nenhuma família ainda.</p>';
+  // Charts
+  setTimeout(function() {
+    initStatusChart(active, susp, deleted);
+    initResourceChart(d1Cur, d1Lim, ztCur, ztLim);
+  }, 50);
+
+  // Recent table
+  var recent = fams.slice(0, 8);
+  if (!recent.length) {
+    el('dash-fam-table').innerHTML = '<div class="empty"><div class="empty-ico">👥</div><div>Nenhuma família cadastrada ainda.</div></div>';
+    return;
+  }
+  var rows = recent.map(function(f) {
+    return '<tr data-action="detail" data-sub="' + f.subdomain + '">'
+      + '<td class="row-fam-name">' + f.name + '</td>'
+      + '<td><span class="mono" style="color:var(--acc2);font-size:12px;">' + f.subdomain + '</span></td>'
+      + '<td>' + tierBadge(f.tier) + '</td>'
+      + '<td>' + badge(f.status) + '</td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + fmtDate(f.createdAt) + '</td>'
+      + '</tr>';
+  }).join('');
+  el('dash-fam-table').innerHTML = '<table>'
+    + '<thead><tr><th>Nome</th><th>Subdomínio</th><th>Plano</th><th>Status</th><th>Criação</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table>';
+
+  // Update timestamp
+  el('sb-ts').textContent = 'Atualizado ' + new Date().toLocaleTimeString('pt-BR');
 }
 
-// ── Families ──────────────────────────────────────────────────────────────────
+// ── NOC ───────────────────────────────────────────────────────────
+async function loadNOC() {
+  nocLoaded = false;
+  el('noc-wrap').innerHTML = '<div class="empty"><div class="spin" style="font-size:22px;">⟳</div><div style="margin-top:10px;">Consultando infraestrutura Cloudflare…</div></div>';
+  var data = await api('GET', '/noc', null, 35000);
+  if (data.error) {
+    el('noc-wrap').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + data.error + '</span></div>';
+    return;
+  }
+  nocLoaded = true;
+  renderNOC(data);
+}
+
+function renderNOC(data) {
+  var s   = data.summary || {};
+  var dbs = data.databases || [];
+  var r2  = data.r2Buckets || [];
+
+  // KPI cards
+  var kpiHtml = '<div class="noc-kpi">'
+    + nocCard('D1 Total (Bytes)', fmt(s.totalD1Bytes || 0), 'Armazenamento usado')
+    + nocCard('Famílias Ativas', s.active || 0, 'Bancos acessíveis')
+    + nocCard('Famílias Suspensas', s.suspended || 0, 'Acesso bloqueado')
+    + nocCard('R2 Buckets', r2.length, 'Armazenamento de arquivos')
+    + '</div>';
+
+  // D1 chart
+  var chartHtml = '';
+  if (dbs.length > 0) {
+    chartHtml = '<div class="chart-card" style="margin-bottom:18px;">'
+      + '<div class="chart-ttl">Armazenamento D1 por Família (Top ' + Math.min(dbs.length, 15) + ')</div>'
+      + '<canvas id="chart-noc-d1" height="' + (Math.min(dbs.length, 15) * 28 + 20) + '"></canvas>'
+      + '</div>';
+  }
+
+  // D1 Table
+  var tableRows = dbs.map(function(db) {
+    var pct = s.totalD1Bytes > 0 ? Math.min(db.fileSize / s.totalD1Bytes * 100, 100) : 0;
+    var sizeColor = db.fileSize > 5000000 ? 'color:var(--warn)' : db.fileSize > 1000000 ? 'color:var(--t1)' : 'color:var(--t2)';
+    return '<tr data-action="detail" data-sub="' + db.subdomain + '">'
+      + '<td class="row-fam-name">' + db.name
+        + (db.error ? ' <span style="color:var(--err);font-size:10px;" title="' + db.error + '">⚠</span>' : '') + '</td>'
+      + '<td><span class="mono" style="color:var(--acc2);font-size:11px;">' + db.subdomain + '</span></td>'
+      + '<td><span class="mono" style="color:var(--t3);font-size:10px;">' + (db.dbId ? db.dbId.slice(0,12) + '…' : '—') + '</span></td>'
+      + '<td style="' + sizeColor + '">' + fmt(db.fileSize || 0)
+        + '<div class="d1-bar" style="width:80px;"><div class="d1-fill" style="width:' + pct.toFixed(1) + '%"></div></div></td>'
+      + '<td style="color:var(--t2);">' + (db.numTables || 0) + ' tabelas</td>'
+      + '<td>' + badge(db.status) + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var tableHtml = '<div class="tbl-card" style="margin-bottom:18px;">'
+    + '<div class="tbl-head"><span class="tbl-ttl">Bancos D1</span>'
+    + '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="nocLoaded=false;loadNOC();">↺ Atualizar</button>'
+    + '</div>'
+    + (dbs.length > 0
+      ? '<table><thead><tr><th>Família</th><th>Subdomínio</th><th>D1 ID</th><th>Tamanho</th><th>Tabelas</th><th>Status</th></tr></thead>'
+        + '<tbody>' + tableRows + '</tbody></table>'
+      : '<div class="empty">Nenhum banco encontrado.</div>')
+    + '</div>';
+
+  // R2
+  var r2Html = '<div class="tbl-card">'
+    + '<div class="tbl-head"><span class="tbl-ttl">R2 Buckets</span></div>'
+    + '<div style="padding:14px 16px;display:flex;flex-wrap:wrap;gap:10px;">'
+    + (r2.length > 0
+      ? r2.map(function(b) {
+          return '<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:9px;padding:11px 14px;min-width:180px;">'
+            + '<div style="font-size:13px;font-weight:600;color:var(--t1);">' + b.name + '</div>'
+            + '<div style="font-size:11px;color:var(--t3);margin-top:3px;">' + (b.creation_date ? fmtDate(b.creation_date) : '—') + '</div>'
+            + '</div>';
+        }).join('')
+      : '<div style="color:var(--t3);font-size:13px;padding:8px 0;">Nenhum bucket encontrado. Verifique permissões R2:Read do token.</div>')
+    + '</div></div>';
+
+  el('noc-wrap').innerHTML = kpiHtml + chartHtml + tableHtml + r2Html;
+
+  // NOC D1 chart
+  if (dbs.length > 0) {
+    var top = dbs.slice(0, 15);
+    var labels = top.map(function(db) { return db.subdomain; });
+    var values = top.map(function(db) { return Math.round((db.fileSize || 0) / 1024); });
+    setTimeout(function() {
+      var canvas = el('chart-noc-d1');
+      if (!canvas) return;
+      if (charts.d1) { charts.d1.destroy(); charts.d1 = null; }
+      charts.d1 = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{ label: 'KB', data: values,
+            backgroundColor: 'rgba(79,112,247,.6)', borderColor: '#4f70f7',
+            borderWidth: 1, borderRadius: 4
+          }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          animation: { duration: 500 },
+          scales: {
+            x: { ticks: { color:'#8a96b0', font:{size:10}, callback: function(v) { return v + ' KB'; } },
+              grid: { color:'rgba(0,0,0,.06)' }, border:{display:false} },
+            y: { ticks: { color:'#4a5878', font:{size:11} }, grid:{display:false}, border:{display:false} }
+          },
+          plugins: { legend:{display:false},
+            tooltip: { callbacks: { label: function(ctx) { return ' ' + fmt(ctx.raw * 1024); } } }
+          }
+        }
+      });
+    }, 60);
+  }
+}
+
+function nocCard(label, val, hint) {
+  return '<div class="noc-card"><div class="noc-lbl">' + label + '</div>'
+       + '<div class="noc-val">' + val + '</div>'
+       + '<div class="noc-hint">' + hint + '</div></div>';
+}
+
+// ── Families ──────────────────────────────────────────────────────
 async function loadFamilies() {
-  const data = await api('GET', '/families');
-  allFamilies = data.families ?? [];
-  renderFamilies(allFamilies);
+  el('families-container').innerHTML = spinner('Carregando famílias…');
+  var data = await api('GET', '/families');
+  allFams = data.families || [];
+  renderFamilies(allFams);
 }
 
 function filterFamilies() {
-  const q = $('family-search').value.toLowerCase();
-  renderFamilies(allFamilies.filter(f =>
-    f.name.toLowerCase().includes(q) || f.subdomain.includes(q)
-  ));
+  var q   = el('fam-search').value.toLowerCase();
+  var st  = el('fam-status').value;
+  var tr  = el('fam-tier').value;
+  renderFamilies(allFams.filter(function(f) {
+    var matchQ  = !q  || f.name.toLowerCase().includes(q) || f.subdomain.includes(q);
+    var matchSt = !st || f.status === st;
+    var matchTr = !tr || String(f.tier) === tr;
+    return matchQ && matchSt && matchTr;
+  }));
 }
 
-function badge(status) {
-  return '<span class="badge-' + status + '">' + status + '</span>';
-}
-
-function tierBadge(tier) {
-  return tier === 2
-    ? '<span class="badge-paid">Paid</span>'
-    : '<span class="badge-free">Free</span>';
-}
-
-function renderFamilies(families) {
-  if (!families.length) {
-    $('families-container').innerHTML = '<div class="card text-center py-12 text-slate-500">Nenhuma família encontrada.</div>';
+function renderFamilies(fams) {
+  if (!fams.length) {
+    el('families-container').innerHTML = '<div class="empty"><div class="empty-ico">⊞</div><div>Nenhuma família encontrada.</div></div>';
     return;
   }
-  $('families-container').innerHTML = '<div class="card overflow-hidden p-0">'
-    + '<table class="w-full text-sm">'
-    + '<thead><tr class="bg-slate-800/50 text-slate-400 text-xs">'
-    + '<th class="text-left px-4 py-3">Nome</th>'
-    + '<th class="text-left px-4 py-3">Subdomínio</th>'
-    + '<th class="text-left px-4 py-3">Plano</th>'
-    + '<th class="text-left px-4 py-3">Status</th>'
-    + '<th class="text-left px-4 py-3">Criado</th>'
-    + '<th class="text-left px-4 py-3">Ações</th>'
-    + '</tr></thead>'
-    + '<tbody class="divide-y divide-slate-800">'
-    + families.map(f => '<tr class="hover:bg-slate-800/30 group">'
-      + '<td class="px-4 py-3 font-medium text-white">' + f.name + '</td>'
-      + '<td class="px-4 py-3"><span class="font-mono text-indigo-400 text-xs bg-indigo-900/20 px-2 py-0.5 rounded">' + f.subdomain + '</span></td>'
-      + '<td class="px-4 py-3">' + tierBadge(f.tier) + '</td>'
-      + '<td class="px-4 py-3">' + badge(f.status) + '</td>'
-      + '<td class="px-4 py-3 text-slate-500 text-xs">' + new Date(f.createdAt).toLocaleDateString('pt-BR') + '</td>'
-      + '<td class="px-4 py-3">'
-        + '<div class="flex gap-1.5 opacity-80 group-hover:opacity-100">'
-          + '<a href="https://' + f.subdomain + '.mksbrasil.com" target="_blank" class="btn-ghost">Abrir</a>'
-          + (f.status === 'active'
-              ? '<button onclick="updateStatus(\'' + f.subdomain + '\',\'suspended\')" class="btn-ghost">Suspender</button>'
-              : f.status === 'suspended'
-              ? '<button onclick="updateStatus(\'' + f.subdomain + '\',\'active\')" class="btn-ghost text-emerald-400">Reativar</button>'
-              : '')
-          + (f.status !== 'deleted'
-              ? '<button onclick="deleteFamily(\'' + f.subdomain + '\')" class="btn-danger">Excluir</button>'
-              : '')
-        + '</div>'
-      + '</td>'
-      + '</tr>').join('')
-    + '</tbody></table></div>';
+  var rows = fams.map(function(f) {
+    var actions = '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="detail" data-sub="' + f.subdomain + '">Detalhes</button>';
+    if (f.status === 'active')    actions += ' <button class="btn btn-warn" style="font-size:11px;padding:4px 9px;" data-action="suspend" data-sub="' + f.subdomain + '">Suspender</button>';
+    if (f.status === 'suspended') actions += ' <button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" data-action="activate" data-sub="' + f.subdomain + '">Reativar</button>';
+    if (f.status !== 'deleted')   actions += ' <button class="btn btn-err" style="font-size:11px;padding:4px 9px;" data-action="delete" data-sub="' + f.subdomain + '">Excluir</button>';
+    actions += ' <button class="btn" style="font-size:11px;padding:4px 9px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + f.subdomain + '">◎ Stats</button>';
+    return '<tr>'
+      + '<td class="row-fam-name" style="cursor:pointer;" data-action="detail" data-sub="' + f.subdomain + '">' + f.name + '</td>'
+      + '<td><span class="mono" style="color:var(--acc2);font-size:12px;">' + f.subdomain + '</span></td>'
+      + '<td>' + tierBadge(f.tier) + '</td>'
+      + '<td>' + badge(f.status) + '</td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + fmtDate(f.createdAt) + '</td>'
+      + '<td style="text-align:right;">' + actions + '</td>'
+      + '</tr>';
+  }).join('');
+  el('families-container').innerHTML = '<div class="tbl-card"><table>'
+    + '<thead><tr><th>Nome</th><th>Subdomínio</th><th>Plano</th><th>Status</th><th>Criação</th><th style="text-align:right;">Ações</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table>'
+    + '<div style="padding:10px 16px;font-size:11px;color:var(--t3);">' + fams.length + ' família(s) encontrada(s)</div>'
+    + '</div>';
 }
 
-async function updateStatus(subdomain, status) {
-  const data = await api('PUT', '/families/' + subdomain, { status });
-  if (data.success) { toast('Status atualizado.'); loadFamilies(); }
-  else toast(data.error ?? 'Erro', false);
+async function updateStatus(sub, status) {
+  var data = await api('PUT', '/families/' + sub, { status: status });
+  if (data.success) {
+    showToast(status === 'active' ? 'Família reativada.' : 'Família suspensa.');
+    loadFamilies();
+  } else { showToast(data.error || 'Erro ao atualizar.', false); }
 }
 
-async function deleteFamily(subdomain) {
-  if (!confirm('Excluir família "' + subdomain + '"? A conta será marcada como deleted.')) return;
-  const data = await api('DELETE', '/families/' + subdomain);
-  if (data.success) { toast('Família excluída.'); loadFamilies(); }
-  else toast(data.error ?? 'Erro', false);
+async function deleteFamily(sub) {
+  if (!confirm('Excluir família "' + sub + '"? A família será marcada como excluída.')) return;
+  var data = await api('DELETE', '/families/' + sub);
+  if (data.success) { showToast('Família excluída.'); loadFamilies(); }
+  else showToast(data.error || 'Erro ao excluir.', false);
 }
 
-// ── Provision ─────────────────────────────────────────────────────────────────
+async function deleteFamily(sub) {
+  if (!confirm('Excluir família "' + sub + '"? A família será marcada como excluída.')) return;
+  var data = await api('DELETE', '/families/' + sub);
+  if (data.success) { showToast('Família excluída.'); loadFamilies(); }
+  else showToast(data.error || 'Erro ao excluir.', false);
+}
+
+// ── Telemetria Global ─────────────────────────────────────────────
+async function loadTelemetry() {
+  el('tel-fam').textContent = '—'; el('tel-users').textContent = '—';
+  el('tel-req').textContent = '—'; el('tel-d1').textContent = '—';
+  el('tel-fam-table').innerHTML = spinner('Carregando telemetria…');
+  var d = await api('GET', '/telemetry/global');
+  if (d.error) { el('tel-fam-table').innerHTML = err(d.error); return; }
+  var s = d.summary || {};
+  el('tel-fam').textContent  = s.activeFamilies ?? '—';
+  el('tel-fam-meta').textContent = (s.totalFamilies || 0) + ' total (' + (s.suspendedFamilies || 0) + ' susp / ' + (s.deletedFamilies || 0) + ' del)';
+  setFill('tel-fam-fill', s.activeFamilies, s.totalFamilies);
+  el('tel-users').textContent = s.totalUsers ?? '—';
+  setFill('tel-users-fill', s.totalUsers, 100);
+  var req = d.workers || {};
+  el('tel-req').textContent = fmtNum(req.totalRequests);
+  el('tel-err').textContent = 'Erros: ' + fmtNum(req.totalErrors) + ' (' + (req.errorRate || '0.00') + '%)';
+  setFill('tel-req-fill', req.totalErrors, req.totalRequests);
+  var mb = ((s.totalD1Bytes || 0) / 1048576).toFixed(1);
+  el('tel-d1').textContent = mb + ' MB';
+  setFill('tel-d1-fill', s.totalD1Bytes, 1073741824); // 1 GB reference
+
+  // Sparkline chart
+  var tl = req.requestsTimeline || {};
+  var labels = Object.keys(tl).sort();
+  var vals   = labels.map(function(k) { return tl[k]; });
+  drawSparkline('chart-tel-req', labels, vals, '#4f70f7', 'Requests');
+
+  // Families usage table
+  var fams = d.families || [];
+  if (!fams.length) { el('tel-fam-table').innerHTML = '<div class="empty">Sem dados de famílias.</div>'; return; }
+  var maxD1 = Math.max.apply(null, fams.map(function(f) { return f.d1FileSizeBytes || 0; }));
+  var rows = fams.map(function(f) {
+    var mb = ((f.d1FileSizeBytes || 0) / 1048576).toFixed(2);
+    var pct = maxD1 > 0 ? Math.round((f.d1FileSizeBytes || 0) / maxD1 * 100) : 0;
+    var bar = '<div style="background:rgba(79,112,247,.12);border-radius:4px;height:8px;width:100%;margin-top:3px;">'
+            + '<div style="background:var(--acc);border-radius:4px;height:8px;width:' + pct + '%;"></div></div>';
+    return '<tr>'
+      + '<td style="cursor:pointer;" data-action="telemetry" data-sub="' + f.subdomain + '">' + f.name + '</td>'
+      + '<td><span class="mono" style="font-size:12px;color:var(--acc2);">' + f.subdomain + '</span></td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + f.users + '</td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + f.txLast24h + '</td>'
+      + '<td style="min-width:120px;"><div style="font-size:11px;color:var(--t2);">' + mb + ' MB</div>' + bar + '</td>'
+      + '<td style="text-align:right;"><button class="btn" style="font-size:11px;padding:3px 8px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + f.subdomain + '">Detalhes</button></td>'
+      + '</tr>';
+  }).join('');
+  el('tel-fam-table').innerHTML = '<table>'
+    + '<thead><tr><th>Família</th><th>Subdomínio</th><th>Usuários</th><th>TX(24h)</th><th>D1</th><th style="text-align:right;">Ação</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table>';
+}
+
+// ── Telemetria por Família ────────────────────────────────────────
+async function openFamilyTelemetry(sub) {
+  var navItem = el('nav-fam-telemetry');
+  var fam = (allFams || []).find(function(f) { return f.subdomain === sub; });
+  var name = fam ? fam.name : sub;
+  if (navItem) { navItem.style.display = ''; el('nav-fam-tel-lbl').textContent = name; }
+  nav('fam-telemetry');
+  el('ftel-title').textContent = name + ' — ' + sub;
+  el('ftel-users').textContent = '—'; el('ftel-tx').textContent = '—';
+  el('ftel-d1').textContent = '—'; el('ftel-r2').textContent = '—';
+  el('ftel-users-table').innerHTML = spinner('Carregando…');
+  el('ftel-refresh').onclick = function() { openFamilyTelemetry(sub); };
+  var d = await api('GET', '/telemetry/family/' + sub);
+  if (d.error) { el('ftel-users-table').innerHTML = err(d.error); return; }
+  var d1 = d.d1 || {}; var r2 = d.r2 || {};
+  el('ftel-users').textContent = (d1.tables || {}).users || 0;
+  el('ftel-tx').textContent    = fmtNum((d1.tables || {}).transactions || 0);
+  el('ftel-d1').textContent    = ((d1.fileSizeBytes || 0) / 1048576).toFixed(2) + ' MB';
+  el('ftel-r2').textContent    = r2.objects || 0;
+  el('ftel-r2-meta').textContent = ((r2.bytes || 0) / 1048576).toFixed(2) + ' MB';
+
+  // 7-day TX chart
+  var tl = d.txTimeline || [];
+  drawSparkline('chart-ftel-tx', tl.map(function(r) { return r.day; }), tl.map(function(r) { return r.n; }), '#0ec97e', 'Transações');
+
+  // Tables bar chart
+  var tables = d1.tables || {};
+  var tKeys = Object.keys(tables);
+  var tVals = tKeys.map(function(k) { return tables[k]; });
+  drawBars('chart-ftel-tables', tKeys, tVals);
+
+  // Users table
+  var users = d.recentUsers || [];
+  if (!users.length) { el('ftel-users-table').innerHTML = '<div class="empty">Nenhum usuário.</div>'; return; }
+  var uRows = users.map(function(u) {
+    return '<tr>'
+      + '<td>' + (u.name || '—') + '</td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + (u.email || '—') + '</td>'
+      + '<td><span class="badge badge-' + (u.role === 'admin' ? 'warn' : 'ok') + '">' + (u.role || 'user') + '</span></td>'
+      + '<td style="color:var(--t3);font-size:12px;">' + fmtDate(u.created_at) + '</td>'
+      + '</tr>';
+  }).join('');
+  el('ftel-users-table').innerHTML = '<table>'
+    + '<thead><tr><th>Nome</th><th>Email</th><th>Role</th><th>Criação</th></tr></thead>'
+    + '<tbody>' + uRows + '</tbody></table>';
+}
+
+// ── Segurança ────────────────────────────────────────────────────
+async function loadSecurity() {
+  el('sec-blocked').textContent = '—'; el('sec-rl').textContent = '—';
+  el('sec-rl-total').textContent = '—'; el('sec-countries').textContent = '—';
+  el('sec-ips-table').innerHTML = spinner('Carregando…');
+  el('sec-rl-table').innerHTML = spinner('Carregando…');
+  el('sec-countries-table').innerHTML = spinner('Carregando…');
+  var d = await api('GET', '/telemetry/security');
+  if (d.error) { el('sec-ips-table').innerHTML = err(d.error); return; }
+  var fw = d.firewall || {}; var rl = d.rateLimits || {};
+
+  el('sec-blocked').textContent  = fmtNum(fw.totalBlocked || 0);
+  setFill('sec-blocked-fill', fw.totalBlocked || 0, 1000);
+  el('sec-rl').textContent       = (rl.activeIPs || []).length;
+  setFill('sec-rl-fill', (rl.activeIPs || []).length, 50);
+  el('sec-rl-total').textContent = fmtNum(rl.totalHits || 0);
+  el('sec-countries').textContent = Object.keys(fw.byAction || {}).length;
+
+  // Firewall actions chart
+  var actions = fw.byAction || {};
+  var aKeys = Object.keys(actions);
+  var aVals = aKeys.map(function(k) { return actions[k]; });
+  drawBars('chart-sec-actions', aKeys, aVals);
+
+  // HTTP timeline chart
+  var tl = d.httpTimeline || [];
+  drawSparkline('chart-sec-http',
+    tl.map(function(r) { return r.hour ? r.hour.slice(11, 16) : ''; }),
+    tl.map(function(r) { return r.requests; }),
+    '#f5a623', 'Requisições');
+
+  // Top blocked IPs
+  var ips = (fw.topBlockedIPs || []).slice(0, 15);
+  if (!ips.length) { el('sec-ips-table').innerHTML = '<div class="empty">Nenhum IP bloqueado registrado.</div>'; }
+  else {
+    var maxC = Math.max.apply(null, ips.map(function(i) { return i.count; }));
+    el('sec-ips-table').innerHTML = '<table>'
+      + '<thead><tr><th>IP</th><th>Bloqueios</th></tr></thead>'
+      + '<tbody>' + ips.map(function(i) {
+          var pct = maxC > 0 ? Math.round(i.count / maxC * 100) : 0;
+          return '<tr><td class="mono" style="font-size:12px;color:var(--err);">' + i.ip + '</td>'
+            + '<td style="width:160px;">'
+            + '<div style="font-size:11px;color:var(--t2);">' + i.count + '</div>'
+            + '<div style="background:rgba(240,75,75,.12);border-radius:3px;height:6px;"><div style="background:var(--err);border-radius:3px;height:6px;width:' + pct + '%;"></div></div>'
+            + '</td></tr>';
+        }).join('') + '</tbody></table>';
+  }
+
+  // Rate limit IPs
+  var rlIPs = (rl.activeIPs || []).filter(function(i) { return i.count > 0; }).slice(0, 20);
+  if (!rlIPs.length) { el('sec-rl-table').innerHTML = '<div class="empty">Nenhuma entrada de rate-limit.</div>'; }
+  else {
+    el('sec-rl-table').innerHTML = '<table>'
+      + '<thead><tr><th>Chave</th><th>Contagem</th></tr></thead>'
+      + '<tbody>' + rlIPs.map(function(i) {
+          return '<tr><td class="mono" style="font-size:12px;color:var(--warn);">' + i.key + '</td>'
+            + '<td style="font-size:12px;color:var(--t2);">' + i.count + '</td></tr>';
+        }).join('') + '</tbody></table>';
+  }
+
+  // Countries table
+  var countries = fw.topCountries || [];
+  if (!countries.length) { el('sec-countries-table').innerHTML = '<div class="empty">Sem dados de países.</div>'; return; }
+  var maxCnt = Math.max.apply(null, countries.map(function(c) { return c.count; }));
+  el('sec-countries-table').innerHTML = '<table>'
+    + '<thead><tr><th>País</th><th>Eventos</th></tr></thead>'
+    + '<tbody>' + countries.map(function(c) {
+        var pct = maxCnt > 0 ? Math.round(c.count / maxCnt * 100) : 0;
+        return '<tr><td style="font-size:13px;">' + c.country + '</td>'
+          + '<td style="width:180px;">'
+          + '<div style="font-size:11px;color:var(--t2);">' + c.count + '</div>'
+          + '<div style="background:rgba(245,166,35,.12);border-radius:3px;height:6px;"><div style="background:var(--warn);border-radius:3px;height:6px;width:' + pct + '%;"></div></div>'
+          + '</td></tr>';
+      }).join('') + '</tbody></table>';
+}
+
+// ── Chart helpers ────────────────────────────────────────────────
+function drawSparkline(canvasId, labels, data, color, label) {
+  var canvas = el(canvasId);
+  if (!canvas) return;
+  if (charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
+  if (!labels.length) return;
+  charts[canvasId] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{ label: label, data: data, fill: true,
+        backgroundColor: color.replace(')', ',.12)').replace('rgb','rgba'),
+        borderColor: color, borderWidth: 2, tension: 0.35,
+        pointRadius: 0, pointHoverRadius: 3 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+      scales: {
+        x: { ticks: { color: '#8a96b0', font: { size: 10 }, maxTicksLimit: 12, maxRotation: 0 },
+             grid: { display: false }, border: { display: false } },
+        y: { beginAtZero: true, ticks: { color: '#8a96b0', font: { size: 10 } },
+             grid: { color: 'rgba(0,0,0,.06)' }, border: { display: false } }
+      }
+    }
+  });
+}
+
+function drawBars(canvasId, labels, data) {
+  var canvas = el(canvasId);
+  if (!canvas) return;
+  if (charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
+  if (!labels.length) return;
+  var colors = [
+    'rgba(79,112,247,.65)', 'rgba(14,201,126,.65)', 'rgba(245,166,35,.65)',
+    'rgba(240,75,75,.65)',  'rgba(167,139,250,.65)', 'rgba(52,211,153,.65)',
+    'rgba(251,113,133,.65)','rgba(96,165,250,.65)'
+  ];
+  charts[canvasId] = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{ data: data,
+        backgroundColor: labels.map(function(_,i) { return colors[i % colors.length]; }),
+        borderRadius: 4, borderSkipped: false }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8a96b0', font: { size: 10 }, maxRotation: 30 }, grid: { display: false }, border: { display: false } },
+        y: { beginAtZero: true, ticks: { color: '#8a96b0', font: { size: 10 } }, grid: { color: 'rgba(0,0,0,.06)' }, border: { display: false } }
+      }
+    }
+  });
+}
+
+function setFill(id, val, max) {
+  var el2 = el(id);
+  if (!el2) return;
+  var pct = max > 0 ? Math.min(Math.round((val || 0) / max * 100), 100) : 0;
+  el2.style.width = pct + '%';
+}
+
+function fmtNum(n) {
+  if (n == null) return '—';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000)    return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+// ── Family Detail Modal ───────────────────────────────────────────
+async function openModal(sub) {
+  modalSub    = sub;
+  modalTenant = allFams.find(function(f) { return f.subdomain === sub; }) || null;
+
+  el('m-name').textContent = modalTenant ? modalTenant.name : sub;
+  el('m-badges').innerHTML = modalTenant ? (badge(modalTenant.status) + ' ' + tierBadge(modalTenant.tier)) : spinner();
+  el('m-info').innerHTML   = spinner();
+  el('m-stats').innerHTML  = spinner('Consultando D1…');
+  el('m-link').href        = '#';
+  el('m-toggle').textContent = '…';
+  el('modal-bg').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  if (!modalTenant) {
+    var td = await api('GET', '/families/' + sub);
+    if (td.error || !td.tenant) {
+      el('m-info').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + (td.error || 'Família não encontrada.') + '</span></div>';
+      return;
+    }
+    modalTenant = td.tenant;
+  }
+
+  el('m-name').textContent  = modalTenant.name;
+  el('m-badges').innerHTML  = badge(modalTenant.status) + ' ' + tierBadge(modalTenant.tier);
+  el('m-link').href         = 'https://' + modalTenant.subdomain + '.' + BASE_DOMAIN;
+  el('m-toggle').textContent = modalTenant.status === 'active' ? 'Suspender' : 'Reativar';
+  el('m-toggle').className = 'btn ' + (modalTenant.status === 'active' ? 'btn-warn' : 'btn-ok') + ' btn-sm';
+
+  el('m-info').innerHTML =
+    igItem('Subdomínio',    '<span class="mono" style="color:var(--acc2);">' + modalTenant.subdomain + '.' + BASE_DOMAIN + '</span>') +
+    igItem('Plano',         tierBadge(modalTenant.tier)) +
+    igItem('Status',        badge(modalTenant.status)) +
+    igItem('Criação',       fmtDate(modalTenant.createdAt)) +
+    igItem('Família ID',    '<span class="mono" style="font-size:11px;color:var(--t2);">' + (modalTenant.familyId || '—') + '</span>') +
+    igItem('D1 Database',   '<span class="mono" style="font-size:10px;color:var(--t2);">' + ((modalTenant.d1DatabaseId || '').slice(0,20) + (modalTenant.d1DatabaseId ? '…' : '—')) + '</span>');
+
+  loadModalStats(sub);
+}
+
+function igItem(label, val) {
+  return '<div class="ig-item"><div class="ig-lbl">' + label + '</div><div class="ig-val">' + val + '</div></div>';
+}
+
+async function loadModalStats(sub) {
+  var data = await api('GET', '/families/' + sub + '/stats', null, 25000);
+  if (data.error) {
+    el('m-stats').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + data.error + '</span></div>';
+    return;
+  }
+  var rows = data.rows || {};
+  var d1   = data.d1   || {};
+  var labels = [
+    ['transactions','Transações'],['accounts','Contas'],['credit_cards','Cartões'],
+    ['categories','Categorias'],['investments','Investimentos'],['users','Usuários'],
+    ['goals','Metas'],['recurrences','Recorrências']
+  ];
+  var statsGrid = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;">'
+    + '<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;">'
+    + '<div class="ig-lbl">Tamanho D1</div><div style="font-size:16px;font-weight:700;color:var(--t1);">' + fmt(d1.fileSize || 0) + '</div></div>'
+    + '<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;">'
+    + '<div class="ig-lbl">Tabelas</div><div style="font-size:16px;font-weight:700;color:var(--t1);">' + (d1.numTables || '—') + '</div></div>'
+    + '</div>';
+  var counters = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">';
+  labels.forEach(function(pair) {
+    var n = rows[pair[0]];
+    var val = n === undefined || n === -1 ? '—' : fmtN(n);
+    counters += '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--surf);border:1px solid var(--bdr);border-radius:6px;padding:7px 10px;">'
+      + '<span style="font-size:11px;color:var(--t2);">' + pair[1] + '</span>'
+      + '<span style="font-size:13px;font-weight:700;color:var(--t1);">' + val + '</span>'
+      + '</div>';
+  });
+  el('m-stats').innerHTML = statsGrid + counters + '</div>';
+}
+
+function closeModal() {
+  el('modal-bg').classList.remove('open');
+  document.body.style.overflow = '';
+  modalSub = null; modalTenant = null;
+}
+
+async function modalToggle() {
+  if (!modalTenant) return;
+  var ns = modalTenant.status === 'active' ? 'suspended' : 'active';
+  var data = await api('PUT', '/families/' + modalSub, { status: ns });
+  if (data.success) { showToast(ns === 'active' ? 'Família reativada.' : 'Família suspensa.'); closeModal(); loadFamilies(); }
+  else showToast(data.error || 'Erro.', false);
+}
+
+async function modalDelete() {
+  if (!modalTenant) return;
+  if (!confirm('Excluir família "' + modalTenant.name + '"?')) return;
+  var data = await api('DELETE', '/families/' + modalSub);
+  if (data.success) { showToast('Família excluída.'); closeModal(); loadFamilies(); }
+  else showToast(data.error || 'Erro ao excluir.', false);
+}
+
+// ── Provision ─────────────────────────────────────────────────────
 async function submitProvision(e) {
   e.preventDefault();
-  const btn = $('provision-btn');
-  const fd  = new FormData(e.target);
-  const body = { name: fd.get('name'), subdomain: fd.get('subdomain'), ownerEmail: fd.get('ownerEmail'), tier: parseInt(fd.get('tier')) };
-
+  var btn  = el('prov-btn');
+  var fd   = new FormData(e.target);
+  var body = { name: fd.get('name'), subdomain: fd.get('subdomain'), ownerEmail: fd.get('ownerEmail'), tier: parseInt(fd.get('tier')) };
   btn.disabled = true;
-  btn.textContent = 'Provisionando...';
-  $('provision-result').innerHTML = '<div class="card text-sm text-slate-400 flex items-center gap-2"><div class="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div> Criando D1, Access App e enviando email...</div>';
-
-  const data = await api('POST', '/provision', body);
+  btn.textContent = '⟳  Provisionando…';
+  el('prov-result').innerHTML = '<div class="alr alr-ok"><span class="spin">⟳</span><span>Criando banco D1, configurando acesso e enviando e-mail…</span></div>';
+  var data = await api('POST', '/provision', body, 60000);
   btn.disabled = false;
   btn.textContent = 'Provisionar Família';
-
   if (data.success) {
-    $('provision-result').innerHTML = '<div class="card border-emerald-800 space-y-2">'
-      + '<div class="text-emerald-400 font-semibold">Família provisionada!</div>'
-      + '<div class="text-sm text-slate-300">URL: <a href="https://' + body.subdomain + '.mksbrasil.com" target="_blank" class="text-indigo-400 underline">https://' + body.subdomain + '.mksbrasil.com</a></div>'
-      + '<div class="text-xs text-slate-500 font-mono">D1: ' + data.tenant.d1DatabaseId + '</div>'
-      + '<div class="text-xs text-slate-500 font-mono">AUD: ' + data.tenant.accessAppAud.slice(0, 16) + '...</div>'
+    el('prov-result').innerHTML =
+      '<div class="alr alr-ok" style="flex-direction:column;align-items:flex-start;gap:8px;padding:14px 16px;">'
+      + '<div style="font-weight:700;font-size:13px;">✓ Família provisionada com sucesso!</div>'
+      + '<div style="font-size:12px;color:var(--t2);">URL: <a href="https://' + body.subdomain + '.' + BASE_DOMAIN + '" target="_blank" style="color:var(--acc2);">https://' + body.subdomain + '.' + BASE_DOMAIN + '</a></div>'
+      + '<div class="mono" style="font-size:11px;color:var(--t3);">D1: ' + data.tenant.d1DatabaseId + '</div>'
       + '</div>';
     e.target.reset();
-    toast('Família provisionada com sucesso!');
+    showToast('Família provisionada com sucesso!');
+    allFams = [];
+    nocLoaded = false;
   } else {
-    $('provision-result').innerHTML = '<div class="card border-red-900 text-red-400 text-sm">' + (data.error ?? 'Erro desconhecido') + '</div>';
-    toast(data.error ?? 'Erro ao provisionar', false);
+    el('prov-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + (data.error || 'Erro desconhecido') + '</span></div>';
+    showToast(data.error || 'Erro ao provisionar.', false);
   }
 }
 
-// ── Migrations ────────────────────────────────────────────────────────────────
+// ── Migrations ────────────────────────────────────────────────────
 async function applyMigration() {
-  const subdomain = $('mig-subdomain').value.trim();
-  const sql       = $('mig-sql').value.trim();
-  const btn       = $('mig-btn');
-
-  if (!sql) { toast('SQL é obrigatório.', false); return; }
-
+  var sub = el('mig-sub').value.trim();
+  var sql = el('mig-sql').value.trim();
+  var btn = el('mig-btn');
+  if (!sql) { showToast('SQL é obrigatório.', false); return; }
   btn.disabled = true;
-  btn.textContent = 'Aplicando...';
-  $('mig-result').innerHTML = '';
-
-  const endpoint = subdomain ? '/migrations/apply' : '/migrations/apply-all';
-  const body     = subdomain ? { subdomain, sql } : { sql };
-  const data     = await api('POST', endpoint, body);
-
+  btn.textContent = '⟳  Aplicando…';
+  el('mig-result').innerHTML = '<div class="alr alr-ok"><span class="spin">⟳</span><span>Executando SQL…</span></div>';
+  var endpoint = sub ? '/migrations/apply' : '/migrations/apply-all';
+  var body     = sub ? { subdomain: sub, sql: sql } : { sql: sql };
+  var data     = await api('POST', endpoint, body, 120000);
   btn.disabled = false;
-  btn.textContent = 'Aplicar Migração';
-
+  btn.textContent = '⚡ Aplicar Migração';
   if (data.results) {
-    // apply-all
-    const entries = Object.entries(data.results);
-    $('mig-result').innerHTML = '<div class="card space-y-2 text-sm">'
-      + entries.map(([sub, r]) =>
-          '<div class="flex items-center gap-2">'
-          + '<span class="font-mono text-indigo-400">' + sub + '</span>'
-          + '<span class="text-slate-300">' + r.applied + ' stmt(s)</span>'
-          + (r.errors.length ? '<span class="text-red-400">' + r.errors.join(' | ') + '</span>' : '<span class="text-emerald-400">✓</span>')
-          + '</div>'
-        ).join('')
-      + '</div>';
-    toast(entries.length + ' família(s) migrada(s).');
+    var entries = Object.entries(data.results);
+    var rows = entries.map(function(pair) {
+      var r = pair[1];
+      return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bdr);">'
+        + '<span class="mono" style="color:var(--acc2);font-size:12px;">' + pair[0] + '</span>'
+        + '<span style="font-size:12px;color:var(--t2);">' + r.applied + ' stmt(s)</span>'
+        + (r.errors.length ? '<span style="color:var(--err);font-size:11px;">' + r.errors.join(' | ') + '</span>' : '<span style="color:var(--ok);font-size:12px;">✓</span>')
+        + '</div>';
+    }).join('');
+    el('mig-result').innerHTML = '<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:9px;padding:14px 16px;">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">' + entries.length + ' família(s) migrada(s)</div>'
+      + rows + '</div>';
+    showToast(entries.length + ' família(s) migrada(s).');
   } else if (data.success) {
-    $('mig-result').innerHTML = '<div class="card text-emerald-400 text-sm">' + data.applied + ' statement(s) aplicado(s).</div>';
-    toast('Migração aplicada com sucesso.');
+    el('mig-result').innerHTML = '<div class="alr alr-ok"><span>✓</span><span>' + data.applied + ' statement(s) aplicado(s) com sucesso.</span></div>';
+    showToast('Migração aplicada.');
   } else {
-    $('mig-result').innerHTML = '<div class="card text-red-400 text-sm space-y-1">'
-      + (data.errors ?? []).map(e => '<div>' + e + '</div>').join('')
-      + '</div>';
-    toast('Erros na migração.', false);
+    el('mig-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>'
+      + (data.errors || []).join(' | ') + '</span></div>';
+    showToast('Erro na migração.', false);
   }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-loadDashboard();
+// ── Event Delegation ──────────────────────────────────────────────
+document.addEventListener('click', function(e) {
+  // Sidebar nav
+  var sbItem = e.target.closest('.sb-item[data-nav]');
+  if (sbItem) { nav(sbItem.dataset.nav); return; }
+
+  // Buttons with data-nav
+  var navBtn = e.target.closest('[data-nav]');
+  if (navBtn && !navBtn.classList.contains('sb-item')) { nav(navBtn.dataset.nav); return; }
+
+  // Row/button actions
+  var actionEl = e.target.closest('[data-action]');
+  if (actionEl) {
+    var action = actionEl.dataset.action;
+    var sub    = actionEl.dataset.sub;
+    if (action === 'detail')    { openModal(sub); return; }
+    if (action === 'telemetry') { e.stopPropagation(); openFamilyTelemetry(sub); return; }
+    if (action === 'suspend')   { e.stopPropagation(); updateStatus(sub, 'suspended'); return; }
+    if (action === 'activate')  { e.stopPropagation(); updateStatus(sub, 'active'); return; }
+    if (action === 'delete')    { e.stopPropagation(); deleteFamily(sub); return; }
+  }
+
+  // Refresh button
+  if (e.target.id === 'refresh-btn' || e.target.closest('#refresh-btn')) { refreshCurrent(); return; }
+
+  // Modal close
+  if (e.target.id === 'modal-bg') { closeModal(); return; }
+  if (e.target.id === 'modal-close' || e.target.closest('#modal-close')) { closeModal(); return; }
+
+  // Modal actions
+  if (e.target.id === 'm-toggle' || e.target.closest('#m-toggle')) { modalToggle(); return; }
+  if (e.target.id === 'm-delete' || e.target.closest('#m-delete')) { modalDelete(); return; }
+});
+
+// Families filters
+document.addEventListener('input', function(e) {
+  if (e.target.id === 'fam-search') filterFamilies();
+});
+document.addEventListener('change', function(e) {
+  if (e.target.id === 'fam-status' || e.target.id === 'fam-tier') filterFamilies();
+});
+
+// Keyboard
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ── Logout ────────────────────────────────────────────────────────
+function doLogout() {
+  window.location.href = '/cdn-cgi/access/logout';
+}
+
+// ── Auto-logout por inatividade (30 min) ──────────────────────────
+(function() {
+  var TIMEOUT = 30 * 60 * 1000;
+  var _tid;
+  function reset() {
+    clearTimeout(_tid);
+    _tid = setTimeout(function() {
+      alert('Sessão encerrada por inatividade.');
+      doLogout();
+    }, TIMEOUT);
+  }
+  ['click','keydown','mousemove','touchstart','scroll'].forEach(function(ev) {
+    document.addEventListener(ev, reset, true);
+  });
+  reset();
+})();
+
+// ── Init ──────────────────────────────────────────────────────────
+nav('dashboard');
 </script>
 </body>
-</html>`;
+</html>`; }

@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LGPD — Finanças Livre</title>
+  <meta name="description" content="Conformidade com a Lei Geral de Proteção de Dados (LGPD) da plataforma Finanças Livre. Conheça seus direitos como titular de dados.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --green:  #00A67C;
+      --green2: #00C492;
+      --navy:   #0D1B2A;
+      --violet: #7C3AED;
+      --cream:  #FAFAF5;
+      --t1:     #0D1B2A;
+      --t2:     #4A5568;
+      --t3:     #A0AEC0;
+      --bdr:    #E8EDF2;
+    }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+           background: var(--cream); color: var(--t1); line-height: 1.7; }
+
+    /* NAV */
+    nav { position: sticky; top: 0; z-index: 200;
+      background: rgba(250,250,245,.92); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--bdr); padding: 0 28px; }
+    .nav-inner { max-width: 1120px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .logo { display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 18px; color: var(--t1); text-decoration: none; letter-spacing: -.3px; }
+    .logo-mark { width: 36px; height: 36px; border-radius: 10px; background: var(--green);
+      display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; }
+    .btn-back { display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--t2); text-decoration: none;
+      padding: 8px 16px; border: 1px solid var(--bdr); border-radius: 8px; transition: all .15s; }
+    .btn-back:hover { background: #fff; color: var(--green); border-color: var(--green); }
+
+    /* HERO */
+    .page-hero { background: var(--violet); color: #fff; padding: 64px 28px 52px; position: relative; overflow: hidden; }
+    .page-hero::before { content: ''; position: absolute; inset: 0;
+      background: linear-gradient(135deg, #4c1d95 0%, #7c3aed 60%, #5b21b6 100%); }
+    .page-hero-inner { max-width: 760px; margin: 0 auto; position: relative; }
+    .page-badge { display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25);
+      color: #e9d5ff; font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; padding: 4px 12px; border-radius: 100px; margin-bottom: 18px; }
+    .page-hero h1 { font-size: clamp(26px, 4vw, 38px); font-weight: 900;
+      letter-spacing: -.5px; line-height: 1.2; margin-bottom: 14px; }
+    .page-hero p { font-size: 15px; color: rgba(255,255,255,.75); }
+    .page-meta { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 20px; }
+    .page-meta span { font-size: 12px; color: rgba(255,255,255,.5);
+      display: flex; align-items: center; gap: 6px; }
+    .page-meta strong { color: rgba(255,255,255,.9); }
+
+    /* CONTENT */
+    .content { max-width: 760px; margin: 0 auto; padding: 52px 28px 80px; }
+
+    .toc { background: #fff; border: 1px solid var(--bdr); border-radius: 14px;
+      padding: 24px 28px; margin-bottom: 48px; }
+    .toc h3 { font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--t3); margin-bottom: 14px; }
+    .toc ol { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+    .toc li a { font-size: 14px; color: var(--violet); text-decoration: none; font-weight: 500; }
+    .toc li a:hover { text-decoration: underline; }
+
+    .section { margin-bottom: 52px; }
+    .section-header { display: flex; align-items: flex-start; gap: 14px;
+      margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #ede9fe; }
+    .section-num { min-width: 36px; height: 36px; background: var(--violet); color: #fff;
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; margin-top: 2px; }
+    .section-header h2 { font-size: 20px; font-weight: 800; color: var(--t1); line-height: 1.3; }
+    .section-header p { font-size: 13px; color: var(--t3); margin-top: 4px; }
+
+    .clause { margin-bottom: 20px; }
+    .clause-label { display: inline-block; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em; color: var(--t3); margin-bottom: 6px; }
+    .clause p { font-size: 15px; color: var(--t2); line-height: 1.75; }
+    .clause ul { padding-left: 20px; font-size: 15px; color: var(--t2); line-height: 1.75; }
+    .clause ul li { margin-bottom: 6px; }
+
+    .callout { border-radius: 12px; padding: 16px 20px; margin: 20px 0;
+      font-size: 14px; line-height: 1.7; }
+    .callout-purple { background: #faf5ff; border: 1.5px solid #d8b4fe; color: #4c1d95; }
+    .callout-green  { background: #f0fdf4; border: 1.5px solid #86efac; color: #14532d; }
+    .callout-info   { background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1e3a8a; }
+    .callout strong { font-weight: 700; }
+
+    /* Rights grid */
+    .rights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
+    @media (max-width: 580px) { .rights-grid { grid-template-columns: 1fr; } }
+    .right-card { background: #fff; border: 1.5px solid #ede9fe; border-radius: 12px;
+      padding: 18px; transition: box-shadow .15s; }
+    .right-card:hover { box-shadow: 0 4px 20px rgba(124,58,237,.1); }
+    .right-card .icon { font-size: 22px; margin-bottom: 8px; }
+    .right-card strong { display: block; font-size: 14px; font-weight: 700; color: var(--t1); margin-bottom: 4px; }
+    .right-card p { font-size: 13px; color: var(--t2); line-height: 1.6; }
+    .right-card .art { display: inline-block; margin-top: 8px; font-size: 11px;
+      font-weight: 700; color: var(--violet); background: #f5f3ff;
+      padding: 2px 8px; border-radius: 100px; }
+
+    /* Timeline */
+    .timeline { display: flex; flex-direction: column; gap: 0; margin-top: 16px; }
+    .tl-item { display: flex; gap: 16px; }
+    .tl-line { display: flex; flex-direction: column; align-items: center; width: 28px; shrink: 0; }
+    .tl-dot { width: 12px; height: 12px; background: var(--violet); border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+    .tl-vert { width: 2px; background: #ede9fe; flex: 1; min-height: 24px; }
+    .tl-item:last-child .tl-vert { display: none; }
+    .tl-content { padding-bottom: 20px; }
+    .tl-content strong { font-size: 14px; font-weight: 700; color: var(--t1); }
+    .tl-content p { font-size: 14px; color: var(--t2); margin-top: 2px; line-height: 1.6; }
+
+    /* ANPD box */
+    .anpd-box { background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+      border: 1.5px solid #c4b5fd; border-radius: 14px; padding: 24px 28px; margin-top: 32px; }
+    .anpd-box h3 { font-size: 16px; font-weight: 800; color: var(--violet); margin-bottom: 8px; }
+    .anpd-box p { font-size: 14px; color: var(--t2); line-height: 1.7; }
+    .anpd-box a { color: var(--violet); font-weight: 600; }
+
+    /* FOOTER */
+    footer { background: var(--navy); color: rgba(255,255,255,.4); padding: 52px 28px 32px; }
+    .footer-inner { max-width: 1120px; margin: 0 auto; }
+    .footer-top { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 36px; margin-bottom: 44px; }
+    @media (max-width: 760px) { .footer-top { grid-template-columns: 1fr 1fr; } }
+    .footer-brand { color: #fff; font-weight: 800; font-size: 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .footer-desc { font-size: 13px; line-height: 1.7; max-width: 260px; margin-bottom: 16px; }
+    .footer-cnpj { font-size: 11px; line-height: 1.8; }
+    .footer-col h4 { color: rgba(255,255,255,.7); font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+    .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .footer-col li a { font-size: 13px; color: rgba(255,255,255,.4); transition: color .15s; text-decoration: none; }
+    .footer-col li a:hover { color: rgba(255,255,255,.9); }
+    .footer-bottom { border-top: 1px solid rgba(255,255,255,.06); padding-top: 24px;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo"><div class="logo-mark">🌱</div>Finanças Livre</a>
+    <a href="/" class="btn-back">← Voltar ao início</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="page-hero">
+  <div class="page-hero-inner">
+    <div class="page-badge">⚖️ Lei nº 13.709/2018</div>
+    <h1>LGPD — Proteção de Dados</h1>
+    <p>Conheça seus direitos como titular de dados pessoais e saiba como a Finanças Livre garante a conformidade com a Lei Geral de Proteção de Dados.</p>
+    <div class="page-meta">
+      <span>📅 Versão <strong>2.0</strong></span>
+      <span>🗓️ Vigente desde <strong>26/05/2026</strong></span>
+      <span>🇧🇷 <strong>Lei nº 13.709/2018</strong></span>
+    </div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+  <!-- Índice -->
+  <div class="toc">
+    <h3>Nesta página</h3>
+    <ol>
+      <li><a href="#s1">O que é a LGPD e quem ela protege</a></li>
+      <li><a href="#s2">Papéis legais: Controlador e Operador</a></li>
+      <li><a href="#s3">Seus 8 direitos como titular (Art. 18)</a></li>
+      <li><a href="#s4">Bases legais utilizadas (Art. 7º)</a></li>
+      <li><a href="#s5">Como exercer seus direitos</a></li>
+      <li><a href="#s6">Prazo e procedimento de atendimento</a></li>
+      <li><a href="#s7">Autoridade Nacional de Proteção de Dados (ANPD)</a></li>
+    </ol>
+  </div>
+
+  <!-- Intro callout -->
+  <div class="callout callout-purple" style="margin-bottom: 44px;">
+    🛡️ <strong>Compromisso com a LGPD:</strong> A Finanças Livre foi projetada com <em>Privacy by Design</em> — desde a arquitetura de isolamento de dados por tenant até o hash criptográfico de CPF. Seus dados nunca são vendidos, alugados ou usados para publicidade.
+  </div>
+
+  <!-- Seção 1 -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div>
+        <h2>O que é a LGPD e quem ela protege</h2>
+        <p>Visão geral da lei e seu alcance.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <p>A <strong>Lei Geral de Proteção de Dados (LGPD)</strong> — Lei nº 13.709 de 14 de agosto de 2018 — é a legislação brasileira que estabelece regras sobre coleta, armazenamento, tratamento e compartilhamento de dados pessoais, com o objetivo de proteger a privacidade e os direitos fundamentais de liberdade e de privacidade dos cidadãos.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">A quem se aplica</span>
+      <p>A LGPD se aplica a qualquer operação de tratamento de dados realizada por pessoa física ou jurídica, de direito público ou privado, desde que os dados sejam coletados no Brasil ou o titular se encontre no território nacional — independentemente de onde o tratador esteja localizado. A Finanças Livre está plenamente sujeita a essa lei.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">Conceito de Dados Pessoais</span>
+      <p>São dados pessoais toda informação que identifique ou possa identificar uma pessoa natural: nome, CPF, e-mail, endereço IP, localização, dados financeiros vinculados a uma pessoa, entre outros. Dados anonimizados (que não permitem identificação) estão fora do escopo da lei.</p>
+    </div>
+  </div>
+
+  <!-- Seção 2 -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div>
+        <h2>Papéis legais: Controlador e Operador</h2>
+        <p>Quem decide sobre os dados e quem os processa.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-info">
+      📌 A correta definição dos papéis é fundamental para a responsabilização legal em caso de incidentes ou violações de dados.
+    </div>
+
+    <div class="clause" style="margin-top: 20px;">
+      <span class="clause-label">Controlador</span>
+      <p>O <strong>Controlador</strong> é quem define as finalidades e os meios de tratamento dos dados. No contexto da Finanças Livre, há dois cenários:</p>
+      <ul>
+        <li><strong>Para dados do próprio Usuário</strong> (e-mail, preferências de conta): a <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong> atua como Controladora.</li>
+        <li><strong>Para dados de familiares ou clientes inseridos na plataforma</strong>: o <strong>próprio Usuário</strong> é o Controlador — e deve garantir base legal válida (Art. 7º) para esse tratamento.</li>
+      </ul>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">Operador</span>
+      <p>O <strong>Operador</strong> é quem trata os dados em nome do Controlador. A <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong> atua como Operadora quando processa os dados financeiros que o Usuário insere na plataforma, seguindo estritamente as instruções definidas pela finalidade do serviço.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">Encarregado (DPO)</span>
+      <p>O Encarregado de Proteção de Dados pode ser contatado pelo e-mail <a href="mailto:dpo@financaslivre.com" style="color: var(--violet);">dpo@financaslivre.com</a>. O DPO é o canal oficial para comunicações com a ANPD e para exercício dos direitos dos titulares.</p>
+    </div>
+  </div>
+
+  <!-- Seção 3 -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div>
+        <h2>Seus 8 direitos como titular (Art. 18)</h2>
+        <p>Direitos garantidos pela LGPD a qualquer titular de dados.</p>
+      </div>
+    </div>
+
+    <div class="rights-grid">
+      <div class="right-card">
+        <div class="icon">📋</div>
+        <strong>Confirmação e Acesso</strong>
+        <p>Saber se tratamos seus dados e obter uma cópia completa de todas as informações que possuímos sobre você.</p>
+        <span class="art">Art. 18, I e II</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">✏️</div>
+        <strong>Correção</strong>
+        <p>Solicitar a atualização de dados incompletos, inexatos ou desatualizados.</p>
+        <span class="art">Art. 18, III</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">🔒</div>
+        <strong>Anonimização ou Bloqueio</strong>
+        <p>Exigir a anonimização, bloqueio ou eliminação de dados desnecessários, excessivos ou tratados em desconformidade com a lei.</p>
+        <span class="art">Art. 18, IV</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">🗑️</div>
+        <strong>Eliminação (Hard Delete)</strong>
+        <p>Solicitar a exclusão definitiva e irreversível de todos os seus dados pessoais tratados com base em consentimento.</p>
+        <span class="art">Art. 18, VI</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">📤</div>
+        <strong>Portabilidade</strong>
+        <p>Receber seus dados pessoais em formato estruturado, interoperável e legível por máquina para transferência a outro controlador.</p>
+        <span class="art">Art. 18, V</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">ℹ️</div>
+        <strong>Informação sobre Compartilhamento</strong>
+        <p>Saber com quais entidades públicas e privadas compartilhamos seus dados pessoais.</p>
+        <span class="art">Art. 18, VII</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">↩️</div>
+        <strong>Revogação do Consentimento</strong>
+        <p>Revogar o consentimento dado a qualquer momento, por procedimento gratuito e facilitado, sem prejuízo de tratamentos já realizados.</p>
+        <span class="art">Art. 18, IX</span>
+      </div>
+      <div class="right-card">
+        <div class="icon">⚖️</div>
+        <strong>Revisão de Decisões Automatizadas</strong>
+        <p>Solicitar revisão de qualquer decisão tomada exclusivamente com base em tratamento automatizado que afete seus interesses.</p>
+        <span class="art">Art. 20</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Seção 4 -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <div>
+        <h2>Bases legais utilizadas (Art. 7º)</h2>
+        <p>Por que e com qual fundamento legal tratamos seus dados.</p>
+      </div>
+    </div>
+
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Execução de contrato — Art. 7º, V</strong>
+          <p>Criar sua conta, prover autenticação Zero Trust via OTP, e operar as funcionalidades da plataforma (transações, metas, orçamentos, IA financeira).</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Cumprimento de obrigação legal — Art. 7º, II</strong>
+          <p>Registrar e reter o aceite dos Termos de Uso e desta Política de Privacidade como prova de conformidade com a LGPD.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Legítimo interesse — Art. 7º, IX</strong>
+          <p>Prevenção a fraudes (unicidade de CPF), segurança da infraestrutura, auditoria de acesso e prevenção a abusos (anti-bot). O legítimo interesse é balanceado contra os direitos e expectativas dos titulares.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Consentimento — Art. 7º, I</strong>
+          <p>Envio de comunicações opcionais sobre atualizações relevantes do serviço. O consentimento pode ser revogado a qualquer momento.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Seção 5 -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div>
+        <h2>Como exercer seus direitos</h2>
+        <p>Canais disponíveis e o que preparar para a solicitação.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <p>Para exercer qualquer dos direitos listados acima, entre em contato pelos canais abaixo. Você precisará se identificar para que possamos verificar sua identidade e localizar seus dados.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px;">
+      <div style="background: #fff; border: 1px solid var(--bdr); border-radius: 12px; padding: 18px;">
+        <p style="font-size: 13px; font-weight: 700; color: var(--t3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px;">Privacidade / DPO</p>
+        <a href="mailto:privacidade@financaslivre.com" style="color: var(--violet); font-weight: 600; font-size: 14px;">privacidade@financaslivre.com</a>
+        <p style="font-size: 13px; color: var(--t2); margin-top: 4px;">Para exercício de direitos, solicitações e dúvidas sobre dados pessoais</p>
+      </div>
+      <div style="background: #fff; border: 1px solid var(--bdr); border-radius: 12px; padding: 18px;">
+        <p style="font-size: 13px; font-weight: 700; color: var(--t3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px;">Telefone</p>
+        <p style="color: var(--violet); font-weight: 600; font-size: 14px;">(11) 3135-5688</p>
+        <p style="font-size: 13px; color: var(--t2); margin-top: 4px;">MKS Brasil Software e Gestão Empresarial Ltda — São Paulo, SP</p>
+      </div>
+    </div>
+
+    <div class="callout callout-green" style="margin-top: 20px;">
+      ✅ <strong>Gratuitidade:</strong> O exercício de todos os direitos listados é gratuito, nos termos do Art. 18, § 3º da LGPD.
+    </div>
+  </div>
+
+  <!-- Seção 6 -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <div class="section-num">6</div>
+      <div>
+        <h2>Prazo e procedimento de atendimento</h2>
+        <p>Como tratamos sua solicitação após o recebimento.</p>
+      </div>
+    </div>
+
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Dia 0 — Recebimento</strong>
+          <p>Confirmação automática de recebimento da solicitação por e-mail.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Até 3 dias úteis — Verificação de identidade</strong>
+          <p>Podemos solicitar documentação complementar para confirmar sua identidade e localizar seus dados.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-line"><div class="tl-dot"></div><div class="tl-vert"></div></div>
+        <div class="tl-content">
+          <strong>Até 15 dias corridos — Resposta definitiva</strong>
+          <p>Prazo máximo para resposta conforme Art. 18, § 3º da LGPD. Em casos de alta complexidade, informaremos sobre eventual prorrogação e seus motivos.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Seção 7 -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <div class="section-num">7</div>
+      <div>
+        <h2>Autoridade Nacional de Proteção de Dados (ANPD)</h2>
+        <p>O órgão regulador da LGPD no Brasil.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <p>Se você considerar que seus direitos não foram adequadamente atendidos, pode peticionar diretamente à <strong>Autoridade Nacional de Proteção de Dados (ANPD)</strong>, o órgão do governo federal responsável pela fiscalização e aplicação da LGPD no Brasil.</p>
+    </div>
+
+    <div class="anpd-box">
+      <h3>🏛️ ANPD — Autoridade Nacional de Proteção de Dados</h3>
+      <p>Site oficial: <a href="https://www.gov.br/anpd" target="_blank" rel="noopener noreferrer">gov.br/anpd</a><br>
+      Canal de atendimento ao cidadão: <a href="https://www.gov.br/anpd/pt-br/canais_atendimento" target="_blank" rel="noopener noreferrer">gov.br/anpd/canais_atendimento</a><br>
+      Ouvidoria: <a href="mailto:ouvidoria@anpd.gov.br">ouvidoria@anpd.gov.br</a></p>
+    </div>
+
+    <div class="callout callout-purple" style="margin-top: 24px;">
+      📚 <strong>Documentos relacionados:</strong> Esta página complementa a nossa
+      <a href="/privacidade" style="color: var(--violet); font-weight: 600;">Política de Privacidade</a> e os
+      <a href="/termos" style="color: var(--violet); font-weight: 600;">Termos de Uso</a>.
+      Leia também o item 3 dos Termos de Uso sobre papéis legais na LGPD.
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div>
+        <div class="footer-brand">🌱 Finanças Livre</div>
+        <p class="footer-desc">Gestão financeira familiar com IA. Seguro, privado e totalmente gratuito.</p>
+        <p class="footer-cnpj">
+          MKS Brasil Software e Gestão Empresarial Ltda<br>
+          CNPJ: 64.293.212/0001-97<br>
+          📞 (11) 3135-5688
+        </p>
+      </div>
+      <div class="footer-col">
+        <h4>Produto</h4>
+        <ul>
+          <li><a href="/#ia">Consultor IA</a></li>
+          <li><a href="/#modulos">Módulos</a></li>
+          <li><a href="/#seguranca">Segurança</a></li>
+          <li><a href="/#cadastro">Cadastro</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Empresa</h4>
+        <ul>
+          <li><a href="/sobre">Sobre nós</a></li>
+          <li><a href="mailto:contato@financaslivre.com">Contato</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="/privacidade">Privacidade</a></li>
+          <li><a href="/termos">Termos de Uso</a></li>
+          <li><a href="/lgpd">LGPD</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Finanças Livre — Todos os direitos reservados</span>
+      <span>Desenvolvido com ❤️ no Brasil · Hospedado na Cloudflare</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

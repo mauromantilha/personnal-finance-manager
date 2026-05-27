@@ -5,12 +5,14 @@ export interface DbUser {
   id: string; name: string; email: string; role: string;
   member_id: string | null; is_active: number;
   lgpd_accepted_at: string | null; lgpd_policy_version: string | null;
+  avatar_url: string | null;
   created_at: string;
 }
 export interface User {
   id: string; name: string; email: string;
   role: 'owner' | 'member'; memberId: string | null; isActive: boolean;
   lgpdAcceptedAt: string | null; lgpdPolicyVersion: string | null;
+  avatarUrl: string | null;
   createdAt: string;
 }
 export function mapUser(r: DbUser): User {
@@ -19,6 +21,7 @@ export function mapUser(r: DbUser): User {
     role: r.role as 'owner' | 'member', memberId: r.member_id,
     isActive: r.is_active === 1,
     lgpdAcceptedAt: r.lgpd_accepted_at, lgpdPolicyVersion: r.lgpd_policy_version,
+    avatarUrl: r.avatar_url ?? null,
     createdAt: r.created_at,
   };
 }
@@ -27,15 +30,22 @@ export function mapUser(r: DbUser): User {
 export interface DbAccount {
   id: string; name: string; type: string; bank_name: string;
   balance_in_cents: number; color: string; is_linked: number;
+  branch: string | null; account_number: string | null; account_digit: string | null;
+  manager_name: string | null; manager_phone: string | null;
 }
 export interface Account {
   id: string; name: string; type: string; bankName: string;
   balanceInCents: number; color: string; isLinked: boolean;
+  branch: string | null; accountNumber: string | null; accountDigit: string | null;
+  managerName: string | null; managerPhone: string | null;
 }
 export function mapAccount(r: DbAccount): Account {
   return {
     id: r.id, name: r.name, type: r.type, bankName: r.bank_name,
     balanceInCents: r.balance_in_cents, color: r.color, isLinked: r.is_linked === 1,
+    branch: r.branch ?? null, accountNumber: r.account_number ?? null,
+    accountDigit: r.account_digit ?? null, managerName: r.manager_name ?? null,
+    managerPhone: r.manager_phone ?? null,
   };
 }
 
@@ -48,6 +58,7 @@ export interface DbTransaction {
   invoice_id: string | null; installment_number: number | null;
   installment_total: number | null; installment_group_id: string | null;
   document_key: string | null; member_id: string | null; created_at: string;
+  income_type: string | null; payer: string | null; profession: string | null;
 }
 export interface Transaction {
   id: string; amountInCents: number; date: string; type: string;
@@ -57,6 +68,7 @@ export interface Transaction {
   invoiceId: string | null; installmentNumber: number | null;
   installmentTotal: number | null; installmentGroupId: string | null;
   documentKey: string | null; memberId: string | null; createdAt: string;
+  incomeType: string | null; payer: string | null; profession: string | null;
 }
 export function mapTransaction(r: DbTransaction): Transaction {
   return {
@@ -68,6 +80,7 @@ export function mapTransaction(r: DbTransaction): Transaction {
     installmentNumber: r.installment_number, installmentTotal: r.installment_total,
     installmentGroupId: r.installment_group_id,
     documentKey: r.document_key, memberId: r.member_id, createdAt: r.created_at,
+    incomeType: r.income_type ?? null, payer: r.payer ?? null, profession: r.profession ?? null,
   };
 }
 
@@ -147,11 +160,6 @@ export function mapGoal(r: Record<string, unknown>) {
 // ── Alerts ────────────────────────────────────────────────────────────────────
 export function mapAlert(r: Record<string, unknown>) {
   return { id: r.id, type: r.type, title: r.title, message: r.message, date: r.date, isRead: r.is_read === 1 };
-}
-
-// ── Connections ───────────────────────────────────────────────────────────────
-export function mapConnection(r: Record<string, unknown>) {
-  return { id: r.id, institutionName: r.institution_name, logo: r.logo, status: r.status, itemId: r.item_id ?? null, lastSyncedAt: r.last_synced_at ?? null };
 }
 
 // ── Family Members ────────────────────────────────────────────────────────────

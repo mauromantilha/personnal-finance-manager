@@ -2,33 +2,41 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import {
   mapAccount, mapTransaction, mapCategory, mapCreditCard, mapInvoice,
-  mapRecurrence, mapBudget, mapGoal, mapAlert, mapConnection, mapFamilyMember,
+  mapRecurrence, mapBudget, mapGoal, mapAlert, mapFamilyMember,
   mapInstallmentGroup, mapInvestment, mapChat,
 } from '../lib/mappers';
 import { processRecurrences, recalculateBudgets, generateProactiveAlerts } from '../lib/helpers';
+import type { D1Param } from '../lib/d1';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ── GET /api/data — snapshot completo para o frontend ────────────────────────
 router.get('/data', async (c) => {
-  const db = c.get('db');
+  const db   = c.get('db');
+  const user = c.get('user');
 
   await processRecurrences(db);
   await recalculateBudgets(db);
   await generateProactiveAlerts(db);
 
+  // Membros individuais veem apenas suas próprias transações
+  const isMember = user.role !== 'owner';
+  const txSql = isMember
+    ? 'SELECT * FROM transactions WHERE member_id = ? ORDER BY date DESC, created_at DESC'
+    : 'SELECT * FROM transactions ORDER BY date DESC, created_at DESC';
+  const txParams: D1Param[] = isMember ? [user.memberId ?? ''] : [];
+
   const [
-    accounts, connections, transactions, budgets, goals, alerts, chatHistory,
+    accounts, transactions, budgets, goals, alerts, chatHistory,
     categories, creditCards, invoices, recurrences, familyMembers,
     igRows, igCounts, investments,
   ] = await Promise.all([
     db.query('SELECT * FROM accounts').then(r => r.map(mapAccount as any)),
-    db.query('SELECT * FROM connections').then(r => r.map(mapConnection)),
-    db.query('SELECT * FROM transactions ORDER BY date DESC, created_at DESC').then(r => r.map(mapTransaction as any)),
+    db.query(txSql, txParams).then(r => r.map(mapTransaction as any)),
     db.query('SELECT * FROM budgets').then(r => r.map(mapBudget)),
     db.query('SELECT * FROM goals').then(r => r.map(mapGoal)),
     db.query('SELECT * FROM alerts ORDER BY date DESC').then(r => r.map(mapAlert)),
-    db.query('SELECT * FROM chat_history ORDER BY rowid ASC').then(r => r.map(mapChat)),
+    db.query('SELECT * FROM (SELECT * FROM chat_history ORDER BY rowid DESC LIMIT 200) ORDER BY rowid ASC').then(r => r.map(mapChat)),
     db.query('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC').then(r => r.map(mapCategory as any)),
     db.query("SELECT * FROM credit_cards WHERE is_active = 1").then(r => r.map(mapCreditCard as any)),
     db.query('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice as any)),
@@ -44,7 +52,7 @@ router.get('/data', async (c) => {
   const paidMap = Object.fromEntries(igCounts.map(r => [r.installment_group_id, r.cnt]));
   const installmentGroups = igRows.map(r => mapInstallmentGroup(r, paidMap[(r as any).id] ?? 0));
 
-  return c.json({ accounts, connections, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, installmentGroups, investments });
+  return c.json({ accounts, transactions, budgets, goals, alerts, chatHistory, categories, creditCards, invoices, recurrences, familyMembers, installmentGroups, investments });
 });
 
 export default router;

@@ -28,19 +28,22 @@ export interface D1Stmt {
 }
 
 export class D1Client {
-  private readonly url: string;
+  private readonly queryUrl: string;
+  private readonly batchUrl: string;
   private readonly auth: string;
 
   constructor(accountId: string, databaseId: string, apiToken: string) {
-    this.url  = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
-    this.auth = `Bearer ${apiToken}`;
+    const base    = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}`;
+    this.queryUrl = `${base}/query`;
+    this.batchUrl = `${base}/batch`;
+    this.auth     = `Bearer ${apiToken}`;
   }
 
   async query<T = Record<string, unknown>>(
     sql: string,
     params: D1Param[] = [],
   ): Promise<T[]> {
-    const resp = await fetch(this.url, {
+    const resp = await fetch(this.queryUrl, {
       method: 'POST',
       headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql, params }),
@@ -66,7 +69,7 @@ export class D1Client {
     sql: string,
     params: D1Param[] = [],
   ): Promise<{ changes: number; lastRowId: number }> {
-    const resp = await fetch(this.url, {
+    const resp = await fetch(this.queryUrl, {
       method: 'POST',
       headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql, params }),
@@ -81,10 +84,17 @@ export class D1Client {
     return { changes, lastRowId: last_row_id };
   }
 
-  // Executa múltiplos statements sequencialmente (não atômico — MVP)
   async batch(stmts: D1Stmt[]): Promise<void> {
-    for (const { sql, params } of stmts) {
-      await this.exec(sql, params ?? []);
+    if (stmts.length === 0) return;
+    const resp = await fetch(this.batchUrl, {
+      method: 'POST',
+      headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ statements: stmts.map(({ sql, params }) => ({ sql, params: params ?? [] })) }),
+    });
+
+    const data = await resp.json() as D1ApiResponse<never>;
+    if (!data.success) {
+      throw new Error(`D1 batch: ${JSON.stringify(data.errors)}`);
     }
   }
 }

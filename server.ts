@@ -711,7 +711,7 @@ async function startServer() {
       if (r.ok) storage = true;
     } catch {}
     try {
-      const rows = await d1q("SELECT id FROM lgpd_aceites WHERE policy_version = '1.0' LIMIT 1");
+      const rows = await d1q("SELECT id FROM lgpd_aceites WHERE policy_version = '2.0' LIMIT 1");
       lgpdAccepted = rows.length > 0;
     } catch {}
     res.json({
@@ -729,7 +729,7 @@ async function startServer() {
   app.get('/api/lgpd/status', async (_req, res) => {
     try {
       const rows = await d1q<any>(
-        "SELECT policy_version, accepted_at FROM lgpd_aceites WHERE policy_version = '1.0' ORDER BY id DESC LIMIT 1"
+        "SELECT policy_version, accepted_at FROM lgpd_aceites WHERE policy_version = '2.0' ORDER BY id DESC LIMIT 1"
       );
       res.json({
         accepted: rows.length > 0,
@@ -749,13 +749,13 @@ async function startServer() {
     const userAgent = req.headers['user-agent'] || '';
     try {
       const existing = await d1q<any>(
-        "SELECT id FROM lgpd_aceites WHERE policy_version = '1.0' LIMIT 1"
+        "SELECT id FROM lgpd_aceites WHERE policy_version = '2.0' LIMIT 1"
       );
       if (existing.length > 0) {
         return res.json({ ok: true, alreadyAccepted: true });
       }
       await d1q(
-        "INSERT INTO lgpd_aceites (policy_version, ip_address, user_agent) VALUES ('1.0', ?, ?)",
+        "INSERT INTO lgpd_aceites (policy_version, ip_address, user_agent) VALUES ('2.0', ?, ?)",
         [ip, userAgent]
       );
       res.json({ ok: true, alreadyAccepted: false });
@@ -2395,6 +2395,12 @@ REGRAS:
       res.json({ cleanDescription: parsed.cleanDescription || merchantName, category: parsed.category || 'Outros' });
     } catch { res.json(classifyLocally(merchantName)); }
   });
+
+  // ── Static legal pages (must come before SPA catch-all) ──────────────────
+  const landingDir = path.join(process.cwd(), 'landing');
+  app.get('/termos',      (_req, res) => res.sendFile(path.join(landingDir, 'termos.html')));
+  app.get('/privacidade', (_req, res) => res.sendFile(path.join(landingDir, 'privacidade.html')));
+  app.get('/lgpd',        (_req, res) => res.sendFile(path.join(landingDir, 'lgpd.html')));
 
   // ── VITE / SPA ─────────────────────────────────────────────────────────────
 

@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Termos de Uso — Finanças Livre</title>
+  <meta name="description" content="Termos de Uso da plataforma Finanças Livre. Leia antes de utilizar nossos serviços.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --green:  #00A67C;
+      --green2: #00C492;
+      --navy:   #0D1B2A;
+      --coral:  #FF4F6D;
+      --cream:  #FAFAF5;
+      --t1:     #0D1B2A;
+      --t2:     #4A5568;
+      --t3:     #A0AEC0;
+      --bdr:    #E8EDF2;
+    }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+           background: var(--cream); color: var(--t1); line-height: 1.7; }
+
+    /* NAV */
+    nav {
+      position: sticky; top: 0; z-index: 200;
+      background: rgba(250,250,245,.92); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--bdr); padding: 0 28px;
+    }
+    .nav-inner {
+      max-width: 1120px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between; height: 64px;
+    }
+    .logo { display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 18px; color: var(--t1); text-decoration: none; letter-spacing: -.3px; }
+    .logo-mark { width: 36px; height: 36px; border-radius: 10px;
+      background: var(--green); display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: #fff; }
+    .btn-back { display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--t2); text-decoration: none;
+      padding: 8px 16px; border: 1px solid var(--bdr); border-radius: 8px;
+      transition: all .15s; }
+    .btn-back:hover { background: #fff; color: var(--green); border-color: var(--green); }
+
+    /* HERO */
+    .page-hero {
+      background: var(--navy); color: #fff;
+      padding: 64px 28px 52px;
+    }
+    .page-hero-inner { max-width: 760px; margin: 0 auto; }
+    .page-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(0,166,124,.18); border: 1px solid rgba(0,166,124,.35);
+      color: var(--green2); font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; padding: 4px 12px; border-radius: 100px; margin-bottom: 18px;
+    }
+    .page-hero h1 { font-size: clamp(26px, 4vw, 38px); font-weight: 900;
+      letter-spacing: -.5px; line-height: 1.2; margin-bottom: 14px; }
+    .page-hero p { font-size: 15px; color: rgba(255,255,255,.6); }
+    .page-meta { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 20px; }
+    .page-meta span { font-size: 12px; color: rgba(255,255,255,.45);
+      display: flex; align-items: center; gap: 6px; }
+    .page-meta strong { color: rgba(255,255,255,.8); }
+
+    /* CONTENT */
+    .content { max-width: 760px; margin: 0 auto; padding: 52px 28px 80px; }
+
+    .toc {
+      background: #fff; border: 1px solid var(--bdr); border-radius: 14px;
+      padding: 24px 28px; margin-bottom: 48px;
+    }
+    .toc h3 { font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--t3); margin-bottom: 14px; }
+    .toc ol { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+    .toc li a { font-size: 14px; color: var(--green); text-decoration: none; font-weight: 500; }
+    .toc li a:hover { text-decoration: underline; }
+
+    .section { margin-bottom: 52px; }
+    .section-header {
+      display: flex; align-items: flex-start; gap: 14px;
+      margin-bottom: 24px; padding-bottom: 16px;
+      border-bottom: 2px solid var(--bdr);
+    }
+    .section-num {
+      min-width: 36px; height: 36px; background: var(--navy); color: #fff;
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; margin-top: 2px;
+    }
+    .section-header h2 { font-size: 20px; font-weight: 800; color: var(--t1); line-height: 1.3; }
+    .section-header p { font-size: 13px; color: var(--t3); margin-top: 4px; }
+
+    .clause { margin-bottom: 20px; }
+    .clause-label {
+      display: inline-block; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em; color: var(--t3);
+      margin-bottom: 6px;
+    }
+    .clause p { font-size: 15px; color: var(--t2); line-height: 1.75; }
+    .clause ul { padding-left: 20px; font-size: 15px; color: var(--t2); line-height: 1.75; }
+    .clause ul li { margin-bottom: 6px; }
+
+    .callout {
+      border-radius: 12px; padding: 16px 20px; margin: 20px 0;
+      font-size: 14px; line-height: 1.7;
+    }
+    .callout-warning { background: #fffbeb; border: 1.5px solid #fde68a; color: #78350f; }
+    .callout-info    { background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1e3a8a; }
+    .callout-danger  { background: #fef2f2; border: 1.5px solid #fecaca; color: #7f1d1d; }
+    .callout-green   { background: #f0fdf4; border: 1.5px solid #86efac; color: #14532d; }
+    .callout strong  { font-weight: 700; }
+
+    /* FOOTER */
+    footer { background: var(--navy); color: rgba(255,255,255,.4); padding: 52px 28px 32px; }
+    .footer-inner { max-width: 1120px; margin: 0 auto; }
+    .footer-top { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 36px; margin-bottom: 44px; }
+    @media (max-width: 760px) { .footer-top { grid-template-columns: 1fr 1fr; } }
+    .footer-brand { color: #fff; font-weight: 800; font-size: 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .footer-desc { font-size: 13px; line-height: 1.7; max-width: 260px; margin-bottom: 16px; }
+    .footer-cnpj { font-size: 11px; line-height: 1.8; }
+    .footer-col h4 { color: rgba(255,255,255,.7); font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+    .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .footer-col li a { font-size: 13px; color: rgba(255,255,255,.4); transition: color .15s; text-decoration: none; }
+    .footer-col li a:hover { color: rgba(255,255,255,.9); }
+    .footer-bottom { border-top: 1px solid rgba(255,255,255,.06); padding-top: 24px;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+    @media (max-width: 768px) { .nav-links { display: none; } }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo">
+      <div class="logo-mark">🌱</div>
+      Finanças Livre
+    </a>
+    <a href="/" class="btn-back">← Voltar ao início</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="page-hero">
+  <div class="page-hero-inner">
+    <div class="page-badge">📄 Documento Legal</div>
+    <h1>Termos de Uso</h1>
+    <p>Leia com atenção antes de utilizar a plataforma Finanças Livre. Ao acessar o sistema, você concorda com estes termos.</p>
+    <div class="page-meta">
+      <span>📅 Versão <strong>2.0</strong></span>
+      <span>🗓️ Vigente desde <strong>26/05/2026</strong></span>
+      <span>🏢 <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong></span>
+    </div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+  <!-- Índice -->
+  <div class="toc">
+    <h3>Índice</h3>
+    <ol>
+      <li><a href="#s1">Natureza do Serviço e Limitação de Responsabilidade da IA</a></li>
+      <li><a href="#s2">Cadastro e Condições de Acesso</a></li>
+      <li><a href="#s3">Proteção de Dados, LGPD e Papéis Legais</a></li>
+      <li><a href="#s4">Arquitetura de Segurança e Autenticação</a></li>
+      <li><a href="#s5">Retenção, Minimização de Dados e Exclusão Irreversível</a></li>
+      <li><a href="#s6">Propriedade Intelectual</a></li>
+      <li><a href="#s7">Gratuidade, Disponibilidade e Prevenção a Abusos</a></li>
+      <li><a href="#s8">Modificações, Rescisão e Suspensão</a></li>
+      <li><a href="#s9">Foro e Legislação Aplicável</a></li>
+    </ol>
+  </div>
+
+  <!-- Preâmbulo -->
+  <div class="callout callout-info" style="margin-bottom: 44px;">
+    <strong>Partes deste Acordo:</strong> O presente instrumento é celebrado entre
+    <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong>, CNPJ 64.293.212/0001-97,
+    com sede em São Paulo – SP (<strong>"Plataforma"</strong>) e o usuário pessoa física ou
+    jurídica que acessa ou utiliza o sistema Finanças Livre (<strong>"Usuário"</strong>).
+  </div>
+
+  <!-- Seção 1 -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div>
+        <h2>Natureza do Serviço e Limitação de Responsabilidade da IA</h2>
+        <p>Entenda o que a Plataforma é — e o que ela não é.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-warning">
+      ⚠️ <strong>Atenção:</strong> As sugestões geradas pela Inteligência Artificial são <strong>hipóteses algorítmicas</strong> e não substituem a análise profissional qualificada.
+    </div>
+
+    <div class="clause" style="margin-top: 20px;">
+      <span class="clause-label">1.1 — Ferramenta de Apoio</span>
+      <p>A Plataforma é fornecida de forma gratuita como uma ferramenta de apoio à gestão financeira pessoal e familiar. O sistema <strong>não substitui o julgamento profissional</strong>, a análise técnica de um contador, consultor financeiro certificado ou advogado.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">1.2 — Hipóteses Algorítmicas</span>
+      <p>As análises, projeções, sugestões de orçamento, alertas de gastos e avaliações de risco geradas pela Inteligência Artificial são hipóteses baseadas nos dados inseridos pelo Usuário. A Plataforma <strong>não garante</strong> a precisão matemática absoluta, a compatibilidade com regulamentos financeiros em vigor nem a adequação das sugestões à situação individual do Usuário.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">1.3 — Responsabilidade Exclusiva do Usuário</span>
+      <p>O Usuário é o único e exclusivo responsável por validar, revisar e aprovar qualquer informação ou sugestão gerada pela IA antes de tomar decisões financeiras. A Plataforma exime-se de qualquer responsabilidade civil ou material decorrente de prejuízos originados pela aplicação não supervisionada das sugestões do sistema.</p>
+    </div>
+  </div>
+
+  <!-- Seção 2 -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div>
+        <h2>Cadastro e Condições de Acesso</h2>
+        <p>Requisitos para criar e manter uma conta na Plataforma.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">2.1 — Elegibilidade</span>
+      <p>O acesso à Plataforma é destinado a pessoas físicas maiores de 18 anos, capazes civilmente nos termos da legislação brasileira, ou a representantes devidamente autorizados de pessoas jurídicas.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">2.2 — Cadastro e Veracidade</span>
+      <p>O Usuário compromete-se a fornecer informações verídicas, completas e atualizadas no momento do cadastro. O fornecimento de dados falsos ou de terceiros sem autorização constitui violação destes Termos e poderá resultar no cancelamento imediato da conta.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">2.3 — Unicidade da Conta</span>
+      <p>É vedado o cadastro de múltiplas contas para o mesmo CPF. Cada CPF é vinculado a um único ambiente familiar isolado. A tentativa de contornar essa regra resultará no bloqueio de todas as contas associadas.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">2.4 — Aceite dos Termos</span>
+      <p>O Usuário confirma o aceite integral destes Termos de Uso, da Política de Privacidade e das diretrizes LGPD no primeiro acesso ao sistema, mediante ato positivo de concordância. O aceite é registrado com data, hora e endereço IP como prova de conformidade.</p>
+    </div>
+  </div>
+
+  <!-- Seção 3 -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div>
+        <h2>Proteção de Dados, LGPD e Papéis Legais</h2>
+        <p>Como tratamos os dados e quais são as responsabilidades de cada parte.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">3.1 — Papéis nos termos da LGPD</span>
+      <p>Para os fins da Lei Geral de Proteção de Dados (Lei nº 13.709/2018), fica estipulado que:</p>
+      <ul>
+        <li>O Usuário atua como <strong>Controlador</strong> dos dados financeiros de sua família ou de seus clientes inseridos na Plataforma;</li>
+        <li>A <strong>MKS Brasil Software e Gestão Empresarial Ltda</strong> atua estritamente como <strong>Operadora</strong>, processando os dados conforme as instruções e finalidades definidas pelo Usuário.</li>
+      </ul>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">3.2 — Dever de Consentimento</span>
+      <p>Quando o Usuário inserir dados de terceiros (familiares, clientes ou dependentes), é sua obrigação integral obter o <strong>consentimento explícito</strong> desses titulares ou estabelecer outra base legal válida conforme o Art. 7º da LGPD.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">3.3 — Sanitização Recomendada</span>
+      <p>A Plataforma recomenda que dados de terceiros sejam inseridos de forma <strong>pseudonimizada</strong> (iniciais, apelidos ou códigos internos), minimizando o tráfego de Dados Pessoais Identificáveis (PII) em sistemas de IA.</p>
+    </div>
+  </div>
+
+  <!-- Seção 4 -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <div>
+        <h2>Arquitetura de Segurança e Autenticação</h2>
+        <p>Como protegemos seu ambiente e como funciona o acesso.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">4.1 — Isolamento de Infraestrutura</span>
+      <p>Cada conta possui um banco de dados exclusivo e isolado (modelo Silo/Tenant), garantindo que os dados de um Usuário nunca sejam acessíveis ou compartilhados com outros usuários da Plataforma.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">4.2 — Autenticação Zero Trust</span>
+      <p>O acesso opera sob modelo <strong>Zero Trust</strong> com envio de códigos de uso único (OTP) ao e-mail cadastrado, dispensando senhas estáticas. O Usuário é integralmente responsável pela segurança de sua caixa de entrada.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">4.3 — Responsabilidade do Usuário</span>
+      <p>Todo acesso validado pelo código OTP enviado ao e-mail cadastrado será considerado <strong>legítimo e de inteira responsabilidade do Usuário</strong>. Recomenda-se ativar autenticação de dois fatores no provedor de e-mail.</p>
+    </div>
+
+    <div class="callout callout-info" style="margin-top: 16px;">
+      🔒 A Plataforma utiliza criptografia em trânsito (TLS 1.3) e em repouso para todos os dados armazenados. Infraestrutura hospedada na Cloudflare com múltiplas camadas de proteção contra ataques DDoS e intrusões.
+    </div>
+  </div>
+
+  <!-- Seção 5 -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div>
+        <h2>Retenção, Minimização de Dados e Exclusão Irreversível</h2>
+        <p>O que fazemos com seus dados e o que acontece ao encerrar a conta.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">5.1 — CPF como Hash Criptográfico</span>
+      <p>O CPF do Usuário é coletado exclusivamente no momento do cadastro para fins de prevenção a fraudes e garantia de unicidade da conta. Ele é armazenado <strong>exclusivamente sob formato de hash criptográfico unidirecional</strong> (HMAC-SHA-256 com chave secreta), sendo impossível recuperar o CPF original a partir do hash.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">5.2 — Encerramento e Hard Delete</span>
+      <p>Em caso de encerramento da conta, a Plataforma executará a <strong>exclusão física, permanente e irreversível (Hard Delete)</strong> de todo o banco de dados e dos arquivos de armazenamento do Tenant. Não haverá possibilidade de recuperação de dados após a exclusão.</p>
+    </div>
+
+    <div class="callout callout-danger" style="margin-top: 8px;">
+      ⚠️ <strong>Aviso importante:</strong> O Hard Delete é definitivo. Recomendamos que o Usuário exporte todos os dados desejados <strong>antes</strong> de solicitar o encerramento da conta.
+    </div>
+
+    <div class="clause" style="margin-top: 20px;">
+      <span class="clause-label">5.3 — Dados de Log e Auditoria</span>
+      <p>Registros de acesso (IP, user-agent, data/hora) e logs de aceite de termos podem ser retidos por até <strong>5 anos</strong> após o encerramento da conta, conforme obrigações legais e regulatórias.</p>
+    </div>
+  </div>
+
+  <!-- Seção 6 -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <div class="section-num">6</div>
+      <div>
+        <h2>Propriedade Intelectual</h2>
+        <p>O que pertence à Plataforma e o que é do Usuário.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">6.1 — Titularidade da Plataforma</span>
+      <p>Todo o código-fonte, design, algoritmos, modelos de IA, marca Finanças Livre, logotipos e demais elementos da Plataforma são de titularidade exclusiva da MKS Brasil Software e Gestão Empresarial Ltda, protegidos pela Lei nº 9.610/1998 (Lei de Direitos Autorais) e pela Lei nº 9.279/1996 (Propriedade Industrial).</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">6.2 — Dados do Usuário</span>
+      <p>Os dados financeiros inseridos pelo Usuário pertencem exclusivamente ao próprio Usuário. A Plataforma não reivindica propriedade sobre esses dados e não os utiliza para fins de treinamento de modelos de IA sem consentimento explícito.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">6.3 — Licença de Uso</span>
+      <p>A Plataforma concede ao Usuário uma licença limitada, não exclusiva, intransferível e revogável para utilizar o sistema exclusivamente para as finalidades descritas nestes Termos. É vedada qualquer reprodução, redistribuição, engenharia reversa ou tentativa de extração do código-fonte.</p>
+    </div>
+  </div>
+
+  <!-- Seção 7 -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <div class="section-num">7</div>
+      <div>
+        <h2>Gratuidade, Disponibilidade e Prevenção a Abusos</h2>
+        <p>Condições de uso do serviço gratuito e proteção contra uso indevido.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">7.1 — Serviço "As Is" (No Estado em que se Encontra)</span>
+      <p>Por se tratar de uma ferramenta gratuita de impacto social, a Plataforma é fornecida <strong>"no estado em que se encontra" (as is)</strong>, sem garantias expressas ou implícitas de disponibilidade contínua, tempo de resposta da IA, precisão das análises ou retenção de dados de longo prazo.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">7.2 — Limitação de Responsabilidade por Indisponibilidade</span>
+      <p>A Plataforma reserva-se o direito de limitar recursos, suspender temporariamente ou descontinuar o serviço a qualquer momento, mediante aviso prévio razoável aos usuários ativos. Não há obrigação de SLA para o plano gratuito.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">7.3 — Uso Aceitável e Anti-Bot</span>
+      <p>É estritamente proibido:</p>
+      <ul>
+        <li>Burlar validações de tráfego humano (Turnstile/CAPTCHA);</li>
+        <li>Realizar engenharia reversa ou extrair código-fonte;</li>
+        <li>Executar scripts automatizados para sobrecarregar a infraestrutura (scraping/DoS);</li>
+        <li>Criar contas fictícias ou em nome de terceiros sem autorização;</li>
+        <li>Utilizar a Plataforma para fins ilegais, fraudulentos ou que violem direitos de terceiros.</li>
+      </ul>
+    </div>
+
+    <div class="callout callout-danger" style="margin-top: 8px;">
+      🚫 O descumprimento do item 7.3 resultará no <strong>banimento imediato e irreversível</strong> do Usuário, além de potenciais medidas legais cabíveis.
+    </div>
+  </div>
+
+  <!-- Seção 8 -->
+  <div class="section" id="s8">
+    <div class="section-header">
+      <div class="section-num">8</div>
+      <div>
+        <h2>Modificações, Rescisão e Suspensão</h2>
+        <p>Como este documento pode mudar e o que pode encerrar o acesso.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">8.1 — Atualização dos Termos</span>
+      <p>A Plataforma poderá atualizar estes Termos de Uso a qualquer momento, sendo as alterações comunicadas aos usuários ativos por e-mail e mediante novo aceite obrigatório no acesso seguinte. A versão vigente estará sempre disponível nesta página.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">8.2 — Rescisão pelo Usuário</span>
+      <p>O Usuário pode encerrar sua conta a qualquer momento mediante solicitação ao suporte. O encerramento implica a execução do Hard Delete descrito no item 5.2.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">8.3 — Suspensão pela Plataforma</span>
+      <p>A Plataforma reserva-se o direito de suspender ou encerrar contas que violem estes Termos, sem aviso prévio em casos de abusos graves, fraudes ou ameaças à segurança da infraestrutura.</p>
+    </div>
+  </div>
+
+  <!-- Seção 9 -->
+  <div class="section" id="s9">
+    <div class="section-header">
+      <div class="section-num">9</div>
+      <div>
+        <h2>Foro e Legislação Aplicável</h2>
+        <p>Jurisdição e lei que regem este contrato.</p>
+      </div>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">9.1 — Lei Aplicável</span>
+      <p>Estes Termos de Uso são regidos pelas leis da República Federativa do Brasil, incluindo, sem limitação, o Código Civil Brasileiro (Lei nº 10.406/2002), o Código de Defesa do Consumidor (Lei nº 8.078/1990), a Lei Geral de Proteção de Dados (Lei nº 13.709/2018) e o Marco Civil da Internet (Lei nº 12.965/2014).</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">9.2 — Foro Eleito</span>
+      <p>Fica eleito o foro da Comarca de <strong>São Paulo – SP</strong> para dirimir quaisquer controvérsias decorrentes destes Termos, com renúncia a qualquer outro, por mais privilegiado que seja.</p>
+    </div>
+
+    <div class="clause">
+      <span class="clause-label">9.3 — Contato</span>
+      <p>Dúvidas, solicitações ou notificações relativas a estes Termos devem ser encaminhadas para:</p>
+      <ul>
+        <li>📧 <strong>E-mail:</strong> <a href="mailto:juridico@financaslivre.com" style="color: var(--green);">juridico@financaslivre.com</a></li>
+        <li>📞 <strong>Telefone:</strong> (11) 3135-5688</li>
+        <li>🏢 <strong>Empresa:</strong> MKS Brasil Software e Gestão Empresarial Ltda — CNPJ 64.293.212/0001-97</li>
+      </ul>
+    </div>
+
+    <div class="callout callout-green" style="margin-top: 20px;">
+      ✅ Ao utilizar a Plataforma, você confirma que leu, compreendeu e concordou integralmente com estes Termos de Uso na sua versão atual (v2.0, vigente desde 26/05/2026).
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div>
+        <div class="footer-brand">🌱 Finanças Livre</div>
+        <p class="footer-desc">Gestão financeira familiar com IA. Seguro, privado e totalmente gratuito.</p>
+        <p class="footer-cnpj">
+          MKS Brasil Software e Gestão Empresarial Ltda<br>
+          CNPJ: 64.293.212/0001-97<br>
+          📞 (11) 3135-5688
+        </p>
+      </div>
+      <div class="footer-col">
+        <h4>Produto</h4>
+        <ul>
+          <li><a href="/#ia">Consultor IA</a></li>
+          <li><a href="/#modulos">Módulos</a></li>
+          <li><a href="/#seguranca">Segurança</a></li>
+          <li><a href="/#cadastro">Cadastro</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Empresa</h4>
+        <ul>
+          <li><a href="/sobre">Sobre nós</a></li>
+          <li><a href="mailto:contato@financaslivre.com">Contato</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="/privacidade">Privacidade</a></li>
+          <li><a href="/termos">Termos de Uso</a></li>
+          <li><a href="/lgpd">LGPD</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Finanças Livre — Todos os direitos reservados</span>
+      <span>Desenvolvido com ❤️ no Brasil · Hospedado na Cloudflare</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

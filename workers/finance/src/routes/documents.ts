@@ -8,6 +8,34 @@ import { D1Stmt } from '../lib/d1';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+// ── GET /api/documents — lista documentos do tenant no R2 ────────────────────
+router.get('/documents', async (c) => {
+  const tenant = c.get('tenant');
+  const prefix = `${tenant.r2Prefix}/documents/`;
+  const listed = await c.env.MKS_DOCUMENTS.list({ prefix, limit: 500 });
+  const docs = listed.objects.map(obj => ({
+    key:        obj.key,
+    name:       obj.key.split('/').pop() ?? obj.key,
+    size:       obj.size,
+    uploadedAt: obj.uploaded.toISOString(),
+  }));
+  docs.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+  return c.json({ documents: docs });
+});
+
+// ── DELETE /api/documents/* — remove documento do R2 ─────────────────────────
+router.delete('/documents/*', async (c) => {
+  const key = c.req.param('*');
+  if (!key) return c.json({ error: 'key obrigatória' }, 400);
+  const tenant = c.get('tenant');
+  // Security: ensure the key belongs to this tenant's prefix
+  if (!key.startsWith(tenant.r2Prefix + '/')) {
+    return c.json({ error: 'Acesso negado.' }, 403);
+  }
+  await c.env.MKS_DOCUMENTS.delete(key);
+  return c.json({ success: true });
+});
+
 // ── POST /api/documents/analyze — Groq Vision ─────────────────────────────────
 router.post('/documents/analyze', async (c) => {
   const { base64, mimeType, documentType } = await c.req.json<any>();
@@ -101,6 +129,11 @@ router.post('/import/invoice', async (c) => {
 router.get('/documents/*', async (c) => {
   const key = c.req.param('*');
   if (!key) return c.json({ error: 'key obrigatória' }, 400);
+
+  const tenant = c.get('tenant');
+  if (!key.startsWith(tenant.r2Prefix + '/')) {
+    return c.json({ error: 'Acesso negado.' }, 403);
+  }
 
   const doc = await r2Get(c.env.MKS_DOCUMENTS, key);
   if (!doc) return c.json({ error: 'Documento não encontrado.' }, 404);

@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useErrorNotify } from './components/ErrorNotifier';
 import {
   Building2,
   Database,
@@ -21,7 +22,11 @@ import {
   Tag,
   Layers,
   TrendingUp,
-  BrainCircuit
+  BrainCircuit,
+  FolderOpen,
+  ShieldAlert,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -36,16 +41,18 @@ import FamilyModule from './components/FamilyModule';
 import CategoriesModule from './components/CategoriesModule';
 import InstallmentsModule from './components/InstallmentsModule';
 import InvestmentsModule from './components/InvestmentsModule';
+import UsersModule from './components/UsersModule';
 import HealthReport from './components/HealthReport';
 import PredictiveAIModule from './components/PredictiveAIModule';
 import MarketWidget from './components/MarketWidget';
+import DocumentsModule from './components/DocumentsModule';
+import DebtModule from './components/DebtModule';
 import { LGPDModal } from './components/LGPDModal';
 
 import {
   UserProfile,
   FinancialAccount,
   Transaction,
-  BankConnection,
   CategoryBudget,
   FinancialGoal,
   NotificationAlert,
@@ -58,22 +65,25 @@ import {
   Investment
 } from './types';
 
-type TabType = 'DASHBOARD' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS' | 'PREDICTIVE_AI';
+type TabType = 'DASHBOARD' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS' | 'PREDICTIVE_AI' | 'USERS' | 'DOCUMENTS' | 'DEBTS';
 
 export default function App() {
+  const { showError } = useErrorNotify();
+
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // User profile — populated from /api/auth/status on load
   const [user, setUser] = useState<UserProfile>({
-    id: '', name: 'Carregando...', email: '',
+    id: '', name: '', email: '',
+    role: 'member', memberId: null,
     mfaEnabled: false, mfaPendingSetup: false, avatarUrl: '',
   });
 
   // State loaded from the backend APIs
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
-  const [connections, setConnections] = useState<BankConnection[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<CategoryBudget[]>([]);
   const [goals, setGoals] = useState<FinancialGoal[]>([]);
@@ -86,7 +96,67 @@ export default function App() {
   const [installmentGroups, setInstallmentGroups] = useState<InstallmentGroup[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+
+  const PRESET_AVATARS = [
+    'https://api.dicebear.com/9.x/avataaars/svg?seed=Felix',
+    'https://api.dicebear.com/9.x/avataaars/svg?seed=Ana',
+    'https://api.dicebear.com/9.x/avataaars/svg?seed=Carlos',
+    'https://api.dicebear.com/9.x/avataaars/svg?seed=Sofia',
+    'https://api.dicebear.com/9.x/bottts/svg?seed=Robot1',
+    'https://api.dicebear.com/9.x/bottts/svg?seed=Robot2',
+    'https://api.dicebear.com/9.x/bottts/svg?seed=Bot3',
+    'https://api.dicebear.com/9.x/fun-emoji/svg?seed=Smile',
+    'https://api.dicebear.com/9.x/fun-emoji/svg?seed=Cool',
+    'https://api.dicebear.com/9.x/fun-emoji/svg?seed=Happy',
+    'https://api.dicebear.com/9.x/lorelei/svg?seed=Luna',
+    'https://api.dicebear.com/9.x/lorelei/svg?seed=Mars',
+    'https://api.dicebear.com/9.x/micah/svg?seed=Micah1',
+    'https://api.dicebear.com/9.x/micah/svg?seed=Micah2',
+    'https://api.dicebear.com/9.x/pixel-art/svg?seed=Pixel1',
+    'https://api.dicebear.com/9.x/pixel-art/svg?seed=Pixel2',
+    'https://api.dicebear.com/9.x/pixel-art/svg?seed=Pixel3',
+    'https://api.dicebear.com/9.x/open-peeps/svg?seed=Peep1',
+    'https://api.dicebear.com/9.x/open-peeps/svg?seed=Peep2',
+    'https://api.dicebear.com/9.x/open-peeps/svg?seed=Peep3',
+  ];
+
+  // Receita média mensal (últimos 3 meses) para o simulador de investimentos
+  const avgMonthlyIncomeInCents = useMemo(() => {
+    const now = new Date();
+    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const recTxs = (transactions as any[]).filter((t: any) =>
+      t.type === 'REC' && new Date(t.date) >= threeMonthsAgo,
+    );
+    return recTxs.length > 0
+      ? Math.round(recTxs.reduce((s: number, t: any) => s + t.amountInCents, 0) / 3)
+      : 0;
+  }, [transactions]);
+
+  // Instituições únicas já cadastradas em investimentos
+  const investmentInstitutions = useMemo(
+    () => [...new Set((investments as any[]).map((i: any) => i.institution).filter(Boolean))] as string[],
+    [investments],
+  );
   const [lgpdAccepted, setLgpdAccepted] = useState<boolean | null>(null);
+
+  // Auto-logout por inatividade — 30 minutos
+  useEffect(() => {
+    const TIMEOUT_MS = 30 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout>;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { handleLogout(); }, TIMEOUT_MS);
+    };
+    const events = ['click', 'keydown', 'mousemove', 'touchstart', 'scroll'];
+    events.forEach(ev => window.addEventListener(ev, reset, true));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach(ev => window.removeEventListener(ev, reset, true));
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchAllData = useCallback(async () => {
     try {
@@ -108,6 +178,7 @@ export default function App() {
       }
     } catch (e) {
       console.error('Erro ao buscar dados:', e);
+      showError('Falha ao carregar os dados. Verifique sua conexão.');
     } finally {
       setIsLoading(false);
     }
@@ -118,9 +189,17 @@ export default function App() {
       try {
         // CF Access handles auth — just check user + LGPD status
         const res = await fetch('/api/auth/status');
-        if (!res.ok) { setIsLoading(false); return; }
+        if (!res.ok) {
+          // 401/403 = JWT ausente ou inválido para este subdomínio → redireciona ao login CF Access
+          if (res.status === 401 || res.status === 403) {
+            window.location.href = window.location.origin + '/cdn-cgi/access/login';
+            return;
+          }
+          setIsLoading(false);
+          return;
+        }
         const data = await res.json();
-        setUser(prev => ({ ...prev, id: data.user.id, name: data.user.name, email: data.user.email }));
+        setUser(prev => ({ ...prev, id: data.user.id, name: data.user.name, email: data.user.email, role: data.user.role ?? 'member', memberId: data.user.memberId ?? null, avatarUrl: data.user.avatarUrl ?? '' }));
         if (data.lgpdRequired) {
           setLgpdAccepted(false);
           setIsLoading(false);
@@ -154,7 +233,7 @@ export default function App() {
         return true;
       }
     } catch (err) {
-      console.error(err);
+      console.error(err); showError();
     }
     return false;
   };
@@ -171,7 +250,7 @@ export default function App() {
         return true;
       }
     } catch (err) {
-      console.error(err);
+      console.error(err); showError();
     }
     return false;
   };
@@ -188,7 +267,7 @@ export default function App() {
         return true;
       }
     } catch (err) {
-      console.error(err);
+      console.error(err); showError();
     }
     return false;
   };
@@ -205,7 +284,7 @@ export default function App() {
         return true;
       }
     } catch (err) {
-      console.error(err);
+      console.error(err); showError();
     }
     return false;
   };
@@ -222,7 +301,7 @@ export default function App() {
         return true;
       }
     } catch (err) {
-      console.error(err);
+      console.error(err); showError();
     }
     return false;
   };
@@ -231,7 +310,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
       if (response.ok) { await fetchAllData(); return true; }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); showError(); }
     return false;
   };
 
@@ -239,7 +318,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/transactions/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       if (res.ok) { await fetchAllData(); return true; }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); showError(); }
     return false;
   };
 
@@ -247,7 +326,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/accounts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       if (res.ok) { await fetchAllData(); return true; }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); showError(); }
     return false;
   };
 
@@ -255,7 +334,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
       if (res.ok) { await fetchAllData(); return true; }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); showError(); }
     return false;
   };
 
@@ -433,8 +512,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    // CF Access logout — clears the JWT cookie and redirects to OTP login
-    window.location.href = 'https://mks-personnal-finance-manager.cloudflareaccess.com/cdn-cgi/access/logout';
+    // CF Access logout — usa URL relativa ao subdomínio atual para garantir
+    // que o cookie correto é limpo e o redirect volta para a tela de login correta.
+    window.location.href = window.location.origin + '/cdn-cgi/access/logout';
   };
 
   const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
@@ -565,6 +645,9 @@ export default function App() {
     { id: 'CATEGORIES',   label: 'Módulo 9: Categorias',         icon: Tag },
     { id: 'INSTALLMENTS', label: 'Módulo 10: Parcelamentos',     icon: Layers },
     { id: 'INVESTMENTS',  label: 'Módulo 11: Investimentos',     icon: TrendingUp },
+    { id: 'USERS',        label: 'Módulo 12: Usuários',          icon: Users },
+    { id: 'DOCUMENTS',    label: 'Documentos',                   icon: FolderOpen },
+    { id: 'DEBTS',        label: 'Crédito & CPF',                icon: ShieldAlert },
   ];
 
   if (isLoading) {
@@ -582,7 +665,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col antialiased">
+    <div className="h-screen flex bg-slate-50 text-slate-900 font-sans antialiased">
       {lgpdAccepted === false && (
         <LGPDModal onAccept={async () => {
           await fetch('/api/lgpd/accept', { method: 'POST' });
@@ -591,86 +674,33 @@ export default function App() {
         }} />
       )}
       
-      {/* Upper Global Header / Status indicators */}
-      <header className="sticky top-0 z-45 bg-white text-slate-800 px-6 md:px-8 py-4 flex items-center justify-between border-b border-slate-200 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg lg:hidden transition-colors"
-            title="Menu lateral"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-          
-          <div className="flex items-center gap-2.5">
-            <span className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-lg font-bold shadow-sm">
-              M
-            </span>
-            <div>
-              <h1 className="font-black text-xs md:text-sm tracking-widest text-indigo-600 uppercase">MKS OPEN FINANCE</h1>
-              <p className="text-[9px] text-slate-400 font-bold leading-none uppercase tracking-wider">Controle de Gastos e Ativos Inteligente</p>
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Sidebar — full height from top */}
+      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-slate-900 text-slate-100 border-r border-slate-800 flex flex-col fixed lg:static h-screen z-40 transition-all duration-200 lg:translate-x-0 ${
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
+
+        {/* Branding */}
+        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-5'} py-4 border-b border-slate-800 shrink-0`}>
+          <span className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-base font-black shadow-sm shrink-0">F</span>
+          {!sidebarCollapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-sm text-white leading-tight">Finanças Livre</p>
+              <p className="text-[10px] text-slate-400 leading-tight">Gestão financeira inteligente</p>
             </div>
-          </div>
+          )}
+          {!sidebarCollapsed && (
+            <button onClick={() => setSidebarOpen(false)} className="lg:hidden ml-1 text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        {/* Aggregate Worth Tracker */}
-        <div className="flex items-center gap-4 md:gap-6">
-          <div className="hidden sm:block text-right">
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block">Ativos Totais Líquidos</span>
-            <span className="text-xl font-bold text-slate-900 italic font-mono leading-tight">
-              {(netWorthCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            </span>
-          </div>
-
-          {/* User profile dropdown simple info */}
-          <div className="flex items-center gap-2.5 pl-4 border-l border-slate-200">
-            <img 
-              referrerPolicy="no-referrer"
-              src={user.avatarUrl} 
-              alt={user.name} 
-              className="w-8 h-8 rounded-full object-cover border border-slate-300"
-            />
-            <div className="hidden md:block text-left">
-              <p className="text-[10px] font-bold text-slate-700 leading-none">{user.name}</p>
-              <p className="text-[9px] text-slate-400 font-mono mt-0.5">{user.email}</p>
-            </div>
-          </div>
-
-          <button
-            onClick={fetchAllData}
-            title="Sincronizar Ledger com Servidor"
-            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={handleLogout}
-            title="Sair"
-            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
-      {/* Primary body grid */}
-      <div className="flex-1 flex relative">
-        
-        {/* Sidebar Nav section */}
-        <aside className={`w-72 bg-slate-900 text-slate-100 border-r border-slate-800 flex flex-col justify-between p-5 absolute lg:relative inset-y-0 left-0 z-40 transition-transform lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}>
-          
-          <div className="space-y-6">
-            <div className="flex items-center justify-between lg:hidden pb-2 border-b border-slate-800">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Navegar Módulos</span>
-              <button onClick={() => setSidebarOpen(false)} className="text-slate-400 hover:text-slate-100 p-1 rounded-md hover:bg-slate-800">
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
-
-            <nav className="space-y-1 pt-2">
+        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
               {sidebarNavItems.map(item => {
                 const Icon = item.icon;
                 const isSelected = activeTab === item.id;
@@ -681,45 +711,165 @@ export default function App() {
                       setActiveTab(item.id as TabType);
                       setSidebarOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all ${
+                    title={sidebarCollapsed ? item.label : undefined}
+                    className={`w-full flex items-center ${
+                      sidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'
+                    } py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all ${
                       isSelected 
                         ? 'bg-indigo-500/10 text-indigo-400 shadow-xs' 
                         : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <Icon className={`w-4.5 h-4.5 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
+                    <div className={`flex items-center ${sidebarCollapsed ? '' : 'gap-3'}`}>
+                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-slate-400'}`} />
+                      {!sidebarCollapsed && <span>{item.label}</span>}
                     </div>
-
-                    {item.badge !== undefined && item.badge > 0 ? (
-                      <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-extrabold ${isSelected ? 'bg-indigo-900/50 text-indigo-300' : 'bg-rose-500/20 text-rose-400'}`}>
+                    {!sidebarCollapsed && item.badge !== undefined && item.badge > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-extrabold ${isSelected ? 'bg-indigo-900/50 text-indigo-300' : 'bg-rose-500/20 text-rose-400'}`}>
                         {item.badge}
                       </span>
-                    ) : null}
+                    )}
                   </button>
                 );
               })}
-            </nav>
-          </div>
+        </nav>
 
-          {/* Quick config settings inside sidebar bottom */}
-          <div className="pt-4 border-t border-slate-800 space-y-3.5">
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-indigo-400" /> Cloudflare Workers
-            </div>
-            
-            <button 
-              onClick={handleResetDB}
-              className="w-full text-left text-[10px] font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-3 py-1.5 rounded-lg transition-all uppercase tracking-widest"
+        {/* Sidebar footer */}
+        <div className={`pt-3 border-t border-slate-800 shrink-0 ${sidebarCollapsed ? 'px-2 pb-3 space-y-1' : 'px-5 pb-5 space-y-3'}`}>
+            {!sidebarCollapsed && (
+              <>
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-indigo-400" /> Cloudflare Workers
+                </div>
+                <button 
+                  onClick={handleResetDB}
+                  className="w-full text-left text-[10px] font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-3 py-1.5 rounded-lg transition-all uppercase tracking-widest"
+                >
+                  Limpar Todos os Dados
+                </button>
+              </>
+            )}
+            {/* Collapse toggle — desktop only */}
+            <button
+              onClick={() => setSidebarCollapsed(v => !v)}
+              className={`hidden lg:flex w-full items-center ${sidebarCollapsed ? 'justify-center' : 'gap-1.5'} py-1.5 px-2 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-all text-[10px] font-semibold`}
+              title={sidebarCollapsed ? 'Expandir sidebar' : 'Recolher sidebar'}
             >
-              Limpar Todos os Dados
+              {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <><ChevronLeft className="w-4 h-4" /><span>Recolher</span></>}
             </button>
           </div>
-        </aside>
+      </aside>
 
-        {/* Content canvas container */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">
+      {/* Right column: header + scrollable content */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+
+        {/* Slim top bar */}
+        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex items-center justify-between shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg lg:hidden transition-colors"
+            title="Menu lateral"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-4 md:gap-6 ml-auto">
+            <div className="hidden sm:block text-right">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block">Ativos Totais Líquidos</span>
+              <span className="text-xl font-bold text-slate-900 italic font-mono leading-tight">
+                {(netWorthCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2.5 pl-4 border-l border-slate-200">
+              <div className="relative">
+                <label className="relative cursor-pointer group" title="Alterar foto de perfil">
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]; if (!file) return;
+                      const fd = new FormData(); fd.append('avatar', file);
+                      const r = await fetch('/api/users/me/avatar', { method: 'PUT', body: fd });
+                      if (r.ok) setUser(prev => ({ ...prev, avatarUrl: `/api/users/me/avatar?t=${Date.now()}` }));
+                      e.target.value = '';
+                    }}
+                  />
+                  {user.avatarUrl ? (
+                    <img src={user.avatarUrl} alt={user.name}
+                      className="w-8 h-8 rounded-full object-cover border border-slate-300 group-hover:opacity-70 transition-opacity" />
+                  ) : user.name ? (
+                    <span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold border border-slate-300 group-hover:opacity-70 transition-opacity select-none">
+                      {user.name.charAt(0).toUpperCase()}
+                    </span>
+                  ) : (
+                    <span className="w-8 h-8 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center border border-slate-300 group-hover:opacity-70 transition-opacity">
+                      <Users className="w-4 h-4" />
+                    </span>
+                  )}
+                  <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-[8px] text-white bg-black/60 rounded-full px-1 py-0.5 font-bold leading-none">foto</span>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarPicker(v => !v)}
+                  title="Escolher avatar"
+                  className="absolute -bottom-1 -right-1 w-4 h-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full flex items-center justify-center text-[8px] font-bold transition-colors"
+                >✦</button>
+                {showAvatarPicker && (
+                  <div className="absolute top-10 right-0 z-50 bg-white border border-slate-200 rounded-xl shadow-xl p-3 w-56">
+                    <p className="text-[10px] font-bold text-slate-600 uppercase mb-2">Escolher Avatar</p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {PRESET_AVATARS.map((url, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={async () => {
+                            const r = await fetch('/api/users/me/avatar-url', {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ avatarUrl: url }),
+                            });
+                            if (r.ok) { setUser(prev => ({ ...prev, avatarUrl: url })); setShowAvatarPicker(false); }
+                          }}
+                          className={`w-9 h-9 rounded-lg overflow-hidden border-2 transition-all hover:scale-110 ${user.avatarUrl === url ? 'border-indigo-500' : 'border-transparent hover:border-indigo-300'}`}
+                        >
+                          <img src={url} alt={`avatar ${i + 1}`} className="w-full h-full" />
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAvatarPicker(false)}
+                      className="mt-2 w-full text-[10px] text-slate-400 hover:text-slate-600 font-semibold"
+                    >Fechar</button>
+                  </div>
+                )}
+              </div>
+              <div className="hidden md:block text-left">
+                <p className="text-[10px] font-bold text-slate-700 leading-none">{user.name}</p>
+                <p className="text-[9px] text-slate-400 font-mono mt-0.5">{user.email}</p>
+              </div>
+            </div>
+
+            <button
+              onClick={fetchAllData}
+              title="Sincronizar Ledger com Servidor"
+              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={handleLogout}
+              title="Sair"
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-24 lg:pb-8">
           
           {/* Dashboard Tab Default Landing */}
           {activeTab === 'DASHBOARD' && (
@@ -800,6 +950,8 @@ export default function App() {
                     categories={categories}
                     creditCards={creditCards}
                     members={familyMembers}
+                    userRole={user.role}
+                    userMemberId={user.memberId}
                     onAddTransaction={handleAddTransaction}
                     onEditTransaction={handleEditTransaction}
                     onAddAccount={handleAddAccount}
@@ -958,6 +1110,8 @@ export default function App() {
               categories={categories}
               creditCards={creditCards}
               members={familyMembers}
+              userRole={user.role}
+              userMemberId={user.memberId}
               onAddTransaction={handleAddTransaction}
               onEditTransaction={handleEditTransaction}
               onAddAccount={handleAddAccount}
@@ -1067,6 +1221,8 @@ export default function App() {
             <InvestmentsModule
               investments={investments}
               accounts={accounts}
+              monthlyIncomeInCents={avgMonthlyIncomeInCents}
+              institutionsInSystem={investmentInstitutions}
               onAdd={handleAddInvestment}
               onUpdate={handleUpdateInvestment}
               onDelete={handleDeleteInvestment}
@@ -1077,7 +1233,55 @@ export default function App() {
             <PredictiveAIModule />
           )}
 
+          {activeTab === 'USERS' && (
+            <UsersModule
+              members={familyMembers}
+              userRole={user.role}
+              currentUserId={user.id}
+            />
+          )}
+
+          {activeTab === 'DOCUMENTS' && (
+            <DocumentsModule />
+          )}
+
+          {activeTab === 'DEBTS' && (
+            <DebtModule />
+          )}
+
         </main>
+
+        {/* Mobile bottom navigation — app-like UX em telas pequenas */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex items-center justify-around px-1 py-1 z-40 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+          {([
+            { id: 'DASHBOARD',    label: 'Início',    icon: Building2 },
+            { id: 'CORE',         label: 'Contas',    icon: Database },
+            { id: 'CREDIT_CARDS', label: 'Cartões',   icon: CreditCardIcon },
+            { id: 'ANALYTICS',    label: 'Gráficos',  icon: BarChart3 },
+            { id: 'PREDICTIVE_AI',label: 'IA',        icon: BrainCircuit },
+          ] as { id: TabType; label: string; icon: React.ElementType }[]).map(item => {
+            const Icon = item.icon;
+            const isSelected = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-0 ${isSelected ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <Icon className="w-5 h-5 shrink-0" />
+                <span className="text-[9px] font-bold truncate">{item.label}</span>
+              </button>
+            );
+          })}
+          {/* More button opens sidebar */}
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all text-slate-400 hover:text-slate-600"
+          >
+            <Menu className="w-5 h-5 shrink-0" />
+            <span className="text-[9px] font-bold">Mais</span>
+          </button>
+        </nav>
 
       </div>
 

@@ -6,10 +6,12 @@ const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 router.post('/accounts', async (c) => {
   const db = c.get('db');
-  const { name, type, bankName, balanceInCents, color } = await c.req.json<any>();
+  const { name, type, bankName, balanceInCents, color, branch, accountNumber, accountDigit, managerName, managerPhone } = await c.req.json<any>();
 
   if (!name || !type || !bankName || balanceInCents === undefined)
     return c.json({ error: 'Preencha todos os campos obrigatórios.' }, 400);
+  if (String(name).length > 100 || String(bankName).length > 100)
+    return c.json({ error: 'name e bankName não podem ultrapassar 100 caracteres.' }, 400);
   if (!VALID_TYPES.includes(type))
     return c.json({ error: 'Tipo inválido.' }, 400);
 
@@ -19,8 +21,8 @@ router.post('/accounts', async (c) => {
 
   const id = `acc-usr-${Date.now()}`;
   await db.exec(
-    'INSERT INTO accounts VALUES (?,?,?,?,?,?,0)',
-    [id, name, type, bankName, balance, color ?? '#6B7280'],
+    'INSERT INTO accounts (id,name,type,bank_name,balance_in_cents,color,is_linked,branch,account_number,account_digit,manager_name,manager_phone) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)',
+    [id, name, type, bankName, balance, color ?? '#6B7280', branch ?? null, accountNumber ?? null, accountDigit ?? null, managerName ?? null, managerPhone ?? null],
   );
   return c.json({ id }, 201);
 });
@@ -28,7 +30,7 @@ router.post('/accounts', async (c) => {
 router.put('/accounts/:id', async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
-  const { name, bankName, type, color } = await c.req.json<any>();
+  const { name, bankName, type, color, branch, accountNumber, accountDigit, managerName, managerPhone } = await c.req.json<any>();
 
   if (!name || !bankName) return c.json({ error: 'name e bankName são obrigatórios.' }, 400);
   if (type && !VALID_TYPES.includes(type)) return c.json({ error: 'Tipo inválido.' }, 400);
@@ -37,8 +39,8 @@ router.put('/accounts/:id', async (c) => {
   if (!existing) return c.json({ error: 'Conta não encontrada.' }, 404);
 
   await db.exec(
-    'UPDATE accounts SET name=?,bank_name=?,type=?,color=? WHERE id=?',
-    [name, bankName, type ?? 'CHECKING', color ?? '#6B7280', id],
+    'UPDATE accounts SET name=?,bank_name=?,type=?,color=?,branch=?,account_number=?,account_digit=?,manager_name=?,manager_phone=? WHERE id=?',
+    [name, bankName, type ?? 'CHECKING', color ?? '#6B7280', branch ?? null, accountNumber ?? null, accountDigit ?? null, managerName ?? null, managerPhone ?? null, id],
   );
   return c.json({ success: true });
 });

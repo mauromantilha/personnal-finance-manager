@@ -1,6 +1,10 @@
-# MKS Finanças — Plataforma de Gestão Financeira Pessoal
+# Finanças Livre — Plataforma de Gestão Financeira Pessoal
 
-Plataforma completa de finanças pessoais com IA preditiva, mercado em tempo real, gestão multi-usuário e integração com dados reais da B3 e Banco Central. Desenvolvida em React 19 + Express + Cloudflare D1/R2, hospedada em `https://financas.mksbrasil.com`.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange.svg)](https://workers.cloudflare.com)
+
+Plataforma **open source** de finanças pessoais com IA preditiva, mercado em tempo real, gestão multi-usuário e integração com dados reais da B3 e Banco Central. Desenvolvida em React 19 + Cloudflare Workers (Hono) + D1/R2/KV.
 
 ---
 
@@ -225,3 +229,104 @@ Cache em memória no processo Node — sem Redis. Fallback stale-on-error: retor
 | 13 | Importação OFX/QFX + Auth real (usuários, convites, 2FA TOTP) |
 | 14 | IA Preditiva (análise completa + score + alertas + recomendações) |
 | 15 | Chat Financeiro IA + Widget Mercado ao Vivo (B3, moedas, notícias RSS) |
+
+---
+
+## 🤝 Contribuindo
+
+Contribuições são bem-vindas! Este projeto é open source sob licença MIT.
+
+### Como contribuir
+
+1. **Fork** o repositório no GitHub
+2. Crie uma branch descritiva: `git checkout -b feat/minha-feature`
+3. Faça suas alterações seguindo as convenções do projeto (veja [AGENTS.md](AGENTS.md))
+4. Commit com mensagem clara: `git commit -m "feat: descrição da feature"`
+5. Abra um **Pull Request** descrevendo o que foi feito e por quê
+
+### Diretrizes
+
+- Siga as convenções do [AGENTS.md](AGENTS.md): centavos para moeda, tipos em `src/types.ts`, sem Redux
+- Escreva código TypeScript tipado — sem `any` onde evitável
+- Não quebre rotas existentes sem deprecação
+- PRs que adicionam features devem incluir a migration SQL correspondente em `migrations/`
+
+### Reportar bugs ou sugerir features
+
+Abra uma [Issue no GitHub](../../issues) com o template adequado.
+
+---
+
+## 🚀 Deploy na sua conta Cloudflare
+
+> Você pode hospedar sua própria instância do Finanças Livre na Cloudflare gratuitamente (plan gratuito suporta uso pessoal).
+
+### Pré-requisitos
+
+- Conta [Cloudflare](https://cloudflare.com) (gratuita)
+- [Node.js 20+](https://nodejs.org) e npm
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/): `npm install -g wrangler`
+- Domínio próprio na Cloudflare (ou use o subdomínio `.workers.dev` gratuito)
+- Chave de API [Groq](https://console.groq.com) (gratuita — veja abaixo)
+
+### Passos
+
+```bash
+# 1. Clone o repositório
+git clone https://github.com/seu-usuario/financas-livre
+cd financas-livre
+
+# 2. Instale as dependências
+npm install
+cd workers/finance && npm install && cd ../..
+
+# 3. Autentique no Cloudflare
+npx wrangler login
+
+# 4. Crie os recursos necessários
+npx wrangler kv namespace create MKS_TENANTS
+npx wrangler kv namespace create MKS_CACHE
+npx wrangler r2 bucket create mks-documents
+
+# 5. Atualize os IDs gerados em workers/finance/wrangler.toml
+#    Substitua os valores de id nas seções [[kv_namespaces]] e [[r2_buckets]]
+
+# 6. Crie o banco D1 para sua família
+npx wrangler d1 create mks-minha-familia
+# Anote o database_id gerado
+
+# 7. Configure as variáveis em workers/finance/wrangler.toml
+#    CF_ACCOUNT_ID, CF_ZONE_ID, BASE_DOMAIN
+
+# 8. Configure os secrets
+cd workers/finance
+npx wrangler secret put GROQ_API_KEY    # sua chave Groq
+npx wrangler secret put APP_SECRET      # string aleatória (openssl rand -hex 32)
+
+# 9. Aplique as migrations no D1
+npx wrangler d1 execute mks-minha-familia --file=../../migrations/0001_schema.sql
+# repita para 0002 até 0014
+
+# 10. Deploy do Worker
+npx wrangler deploy
+
+# 11. Build e deploy do frontend
+cd ../..
+npm run build
+npx wrangler pages deploy dist --project-name financas-livre
+```
+
+### Obtendo sua chave Groq (gratuita)
+
+A IA preditiva usa a API da [Groq](https://groq.com), que oferece um **plano gratuito** generoso:
+
+1. Acesse [console.groq.com](https://console.groq.com)
+2. Crie uma conta gratuita (não requer cartão de crédito)
+3. Vá em **API Keys** → **Create API Key**
+4. Copie a chave (começa com `gsk_...`)
+5. Configure: `npx wrangler secret put GROQ_API_KEY`
+
+O plano gratuito inclui ~14.400 requisições/dia com `llama-3.3-70b-versatile`, mais que suficiente para uso pessoal.
+
+> **Nota:** O módulo Admin multi-tenant não está incluído neste guia de self-deploy individual. Para hospedar múltiplas famílias, veja a documentação em [scripts/README.md](scripts/README.md).
+

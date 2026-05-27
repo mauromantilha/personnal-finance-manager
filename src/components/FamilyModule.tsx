@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Users, Plus, Trash2, CheckCircle, AlertCircle, TrendingDown, TrendingUp } from 'lucide-react';
+import { Users, Plus, Trash2, CheckCircle, AlertCircle, TrendingDown, TrendingUp, Camera } from 'lucide-react';
 import { FamilyMember, Transaction } from '../types';
 
 interface FamilyModuleProps {
@@ -7,6 +7,38 @@ interface FamilyModuleProps {
   transactions: Transaction[];
   onAddMember: (name: string, avatarColor: string) => Promise<boolean>;
   onDeleteMember: (id: string) => Promise<boolean>;
+}
+
+// ── Family avatar (group photo) ───────────────────────────────────────────────
+function FamilyAvatarUpload() {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  return (
+    <label className="relative cursor-pointer group" title="Alterar foto da família">
+      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]; if (!file) return;
+          setLoading(true);
+          const fd = new FormData(); fd.append('avatar', file);
+          const r = await fetch('/api/family/avatar', { method: 'PUT', body: fd });
+          if (r.ok) setUrl(`/api/family/avatar?t=${Date.now()}`);
+          setLoading(false); e.target.value = '';
+        }}
+      />
+      <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-slate-200 bg-indigo-50 flex items-center justify-center group-hover:opacity-80 transition-opacity">
+        {loading ? (
+          <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+        ) : url ? (
+          <img src={url} alt="Família" className="w-full h-full object-cover" />
+        ) : (
+          <Users className="w-7 h-7 text-indigo-400" />
+        )}
+      </div>
+      <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center shadow-md">
+        <Camera className="w-3 h-3 text-white" />
+      </span>
+    </label>
+  );
 }
 
 const AVATAR_COLORS = ['#6366F1', '#0284C7', '#059669', '#EA580C', '#DC2626', '#DB2777', '#8B5CF6', '#0891B2', '#EAB308'];
@@ -84,14 +116,17 @@ export default function FamilyModule({ members, transactions, onAddMember, onDel
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-            <Users className="w-5 h-5 text-indigo-600" />
-            Família & Membros
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Associe gastos a membros da família e acompanhe o consumo individual.
-          </p>
+        <div className="flex items-center gap-4">
+          <FamilyAvatarUpload />
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
+              <Users className="w-5 h-5 text-indigo-600" />
+              Família &amp; Membros
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Associe gastos a membros da família e acompanhe o consumo individual.
+            </p>
+          </div>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}

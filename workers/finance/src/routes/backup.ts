@@ -9,6 +9,9 @@ const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ── POST /api/backup — snapshot para R2 ──────────────────────────────────────
 router.post('/backup', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'owner') return c.json({ error: 'Apenas o owner pode criar backups.' }, 403);
+
   const db     = c.get('db');
   const tenant = c.get('tenant');
 
