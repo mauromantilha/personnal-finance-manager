@@ -62,8 +62,8 @@ app.use('*', async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' https://api.dicebear.com data:; connect-src 'self'; frame-ancestors 'none'");
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' https://api.dicebear.com data:; connect-src 'self' https://api.resend.com; frame-ancestors 'none'");
 });
 
 // ── Tenant frontend proxy ─────────────────────────────────────────────────────
