@@ -865,13 +865,20 @@ function renderNOC(data) {
     + nocCard('R2 Buckets', r2.length, 'Armazenamento de arquivos')
     + '</div>';
 
-  // D1 chart
+  // D1 chart — só renderiza se houver pelo menos um banco com tamanho conhecido
+  var hasD1Size = dbs.some(function(db) { return (db.fileSize || 0) > 0; });
   var chartHtml = '';
-  if (dbs.length > 0) {
+  if (dbs.length > 0 && hasD1Size) {
+    var chartH = Math.min(dbs.length, 15) * 32 + 20;
     chartHtml = '<div class="chart-card" style="margin-bottom:18px;">'
       + '<div class="chart-ttl">Armazenamento D1 por Família (Top ' + Math.min(dbs.length, 15) + ')</div>'
-      + '<canvas id="chart-noc-d1" height="' + (Math.min(dbs.length, 15) * 28 + 20) + '"></canvas>'
-      + '</div>';
+      + '<div style="position:relative;height:' + chartH + 'px;">'
+      + '<canvas id="chart-noc-d1"></canvas>'
+      + '</div></div>';
+  } else if (dbs.length > 0) {
+    chartHtml = '<div class="alr alr-ok" style="margin-bottom:18px;">'
+      + '<span>ℹ</span><span>A CF D1 API reporta tamanho 0 para bancos pequenos (&lt; 1 MB). '
+      + 'O armazenamento real existe mas não é quantificável via API de gestão neste nível.</span></div>';
   }
 
   // D1 Table
@@ -917,7 +924,7 @@ function renderNOC(data) {
   el('noc-wrap').innerHTML = kpiHtml + chartHtml + tableHtml + r2Html;
 
   // NOC D1 chart
-  if (dbs.length > 0) {
+  if (dbs.length > 0 && hasD1Size) {
     var top = dbs.slice(0, 15);
     var labels = top.map(function(db) { return db.subdomain; });
     var values = top.map(function(db) { return Math.round((db.fileSize || 0) / 1024); });
