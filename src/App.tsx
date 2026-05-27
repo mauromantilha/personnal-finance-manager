@@ -512,9 +512,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    // CF Access logout — usa URL relativa ao subdomínio atual para garantir
-    // que o cookie correto é limpo e o redirect volta para a tela de login correta.
-    window.location.href = window.location.origin + '/cdn-cgi/access/logout';
+    // Team-level logout invalida a sessão compartilhada do CF Access em todos os subdomínios.
+    // O cookie de sessão fica no team domain, não no subdomínio — por isso o /cdn-cgi/access/logout
+    // relativo retorna "No Access cookie found".
+    const returnTo = encodeURIComponent(window.location.origin);
+    window.location.href = `https://mks-personnal-finance-manager.cloudflareaccess.com/cdn-cgi/access/logout?returnTo=${returnTo}`;
   };
 
   const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
