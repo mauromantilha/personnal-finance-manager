@@ -515,8 +515,7 @@ export default function App() {
     // Team-level logout invalida a sessão compartilhada do CF Access em todos os subdomínios.
     // O cookie de sessão fica no team domain, não no subdomínio — por isso o /cdn-cgi/access/logout
     // relativo retorna "No Access cookie found".
-    const returnTo = encodeURIComponent(window.location.origin);
-    window.location.href = `https://mks-personnal-finance-manager.cloudflareaccess.com/cdn-cgi/access/logout?returnTo=${returnTo}`;
+    window.location.href = 'https://mks-personnal-finance-manager.cloudflareaccess.com/cdn-cgi/access/logout';
   };
 
   const handleAddFamilyMember = async (name: string, avatarColor: string): Promise<boolean> => {
