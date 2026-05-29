@@ -1,9 +1,51 @@
 // CF Access JWT verification via JWKS (RS256)
-// JWKS is fetched from CF's edge, which respects Cache-Control: max-age=3600
+// JWKS é cacheado em KV (1h) + memória local do isolate, evitando round-trip
+// ao CF Access edge a cada request.
 
 export interface AccessClaims {
   email: string;
   sub: string;
+}
+
+type JwkLike = JsonWebKey & { kid?: string };
+
+// Cache de memória local — válido só dentro do mesmo isolate
+const MEMORY_JWKS_CACHE = new Map<string, { keys: JwkLike[]; expiresAt: number }>();
+const MEMORY_TTL_MS = 5 * 60 * 1000; // 5 min
+const KV_TTL_SECONDS = 60 * 60;       // 1 h
+
+async function fetchJwks(teamDomain: string, cache?: KVNamespace): Promise<JwkLike[]> {
+  const cacheKey = `jwks:${teamDomain}`;
+  const now = Date.now();
+
+  // Memory cache
+  const mem = MEMORY_JWKS_CACHE.get(teamDomain);
+  if (mem && mem.expiresAt > now) return mem.keys;
+
+  // KV cache
+  if (cache) {
+    try {
+      const cached = await cache.get<{ keys: JwkLike[] }>(cacheKey, 'json');
+      if (cached?.keys?.length) {
+        MEMORY_JWKS_CACHE.set(teamDomain, { keys: cached.keys, expiresAt: now + MEMORY_TTL_MS });
+        return cached.keys;
+      }
+    } catch { /* fallthrough */ }
+  }
+
+  // Origem
+  const iss = `https://${teamDomain}.cloudflareaccess.com`;
+  const resp = await fetch(`${iss}/cdn-cgi/access/certs`);
+  if (!resp.ok) throw new Error('Falha ao buscar JWKS');
+  const { keys } = await resp.json() as { keys: JwkLike[] };
+  if (!keys?.length) throw new Error('JWKS vazio');
+
+  MEMORY_JWKS_CACHE.set(teamDomain, { keys, expiresAt: now + MEMORY_TTL_MS });
+  if (cache) {
+    // Não bloquear se KV falhar — apenas best-effort
+    cache.put(cacheKey, JSON.stringify({ keys }), { expirationTtl: KV_TTL_SECONDS }).catch(() => {});
+  }
+  return keys;
 }
 
 interface JWTPayload {
@@ -26,6 +68,7 @@ export async function verifyAccessJWT(
   jwt: string,
   teamDomain: string,
   expectedAud: string,
+  jwksCache?: KVNamespace,
 ): Promise<AccessClaims> {
   if (!expectedAud) throw new Error('expectedAud é obrigatório');
 
@@ -47,10 +90,8 @@ export async function verifyAccessJWT(
   const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!aud.includes(expectedAud)) throw new Error('JWT audience inválido');
 
-  // JWKS — CF edge faz cache por 1h automaticamente
-  const jwksResp = await fetch(`${iss}/cdn-cgi/access/certs`);
-  if (!jwksResp.ok) throw new Error('Falha ao buscar JWKS');
-  const { keys } = await jwksResp.json() as { keys: (JsonWebKey & { kid?: string })[] };
+  // JWKS — memória local 5min + KV 1h + fetch origem como fallback
+  const keys = await fetchJwks(teamDomain, jwksCache);
 
   // CF Access sempre emite com kid presente; aceitar JWT sem kid abre brecha
   // para forjar JWTs cujo cabeçalho omita kid e cair em fallback ao primeiro JWK.

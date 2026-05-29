@@ -8,3 +8,9 @@ data/
 .env*
 !.env.example
 .ipynb_checkpoints/
+
+# wrangler build cache
+.wrangler/
+
+# local utility scripts (não fazem parte do produto)
+rename_zt.py

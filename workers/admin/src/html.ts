@@ -211,6 +211,9 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
     <div class="sb-item" id="nav-communications" data-nav="communications">
       <span class="sb-ico">✉</span>Comunicados
     </div>
+    <div class="sb-item" id="nav-storage-upgrades" data-nav="storage-upgrades">
+      <span class="sb-ico">💾</span>Upgrades Storage
+    </div>
     <div class="sb-sec">Observabilidade</div>
     <div class="sb-item" id="nav-telemetry" data-nav="telemetry">
       <span class="sb-ico">◎</span>Telemetria
@@ -439,6 +442,23 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
     </div>
   </div>
 
+  <!-- STORAGE UPGRADES ─────────────────────────────────────── -->
+  <div class="page" id="page-storage-upgrades">
+    <div style="margin-top:6px;">
+      <div class="tbl-card">
+        <div class="tbl-head">
+          <span class="tbl-ttl">💾 Pedidos de Upgrade de Armazenamento</span>
+          <button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadStorageUpgrades()">↺ Atualizar</button>
+        </div>
+        <div style="padding:10px 16px;font-size:12px;color:var(--t2);border-bottom:1px solid var(--bdr);">
+          Famílias que solicitaram upgrade do plano Free (300 MB) para o Paid (1 GB) por R$5,00/mês.
+          Ao aprovar, o limite é imediatamente liberado. Confirme o pagamento externamente antes.
+        </div>
+        <div id="storage-upgrades-list"><div class="empty" style="padding:18px 16px;">Carregando…</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- TELEMETRIA GLOBAL ─────────────────────────────────────── -->
   <div class="page" id="page-telemetry">
     <div style="margin-top:6px;">
@@ -546,7 +566,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
       <div id="m-stats"></div>
     </div>
     <div class="mftr">
-      <a id="m-link" href="#" target="_blank" class="btn btn-sec" style="font-size:11px;padding:5px 10px;">↗ Abrir Site</a>
+      <a id="m-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sec" style="font-size:11px;padding:5px 10px;">↗ Abrir Site</a>
       <button id="m-toggle" class="btn btn-warn" style="font-size:11px;padding:5px 10px;"></button>
       <div style="flex:1;"></div>
       <button id="m-delete" class="btn btn-err" style="font-size:11px;padding:5px 10px;">Excluir</button>
@@ -653,6 +673,7 @@ var PAGE_TITLES = {
   families: 'Famílias',
   provision: 'Provisionar Nova Família',
   communications: 'Comunicados',
+  'storage-upgrades': 'Upgrades de Storage',
   telemetry: 'Telemetria Global',
   'fam-telemetry': 'Telemetria da Família',
   security: 'Segurança & Ataques'
@@ -672,6 +693,7 @@ function nav(name) {
   if (name === 'telemetry') loadTelemetry();
   if (name === 'security') loadSecurity();
   if (name === 'communications') loadCommunications();
+  if (name === 'storage-upgrades') loadStorageUpgrades();
 }
 
 function refreshCurrent() {
@@ -1560,6 +1582,56 @@ function doLogout() {
   });
   reset();
 })();
+
+// ── Storage Upgrade Requests ─────────────────────────────────────
+async function loadStorageUpgrades() {
+  el('storage-upgrades-list').innerHTML = spinner('Carregando pedidos…');
+  var d = await api('GET', '/storage/upgrade-requests');
+  if (d.error) { el('storage-upgrades-list').innerHTML = err(esc(d.error)); return; }
+  var requests = d.requests || [];
+  var pending = requests.filter(function(r) { return r.status === 'pending'; });
+  if (!requests.length) {
+    el('storage-upgrades-list').innerHTML = '<div class="empty" style="padding:18px 16px;">Nenhum pedido de upgrade registrado.</div>';
+    return;
+  }
+  var rows = requests.map(function(r) {
+    var isPending = r.status === 'pending';
+    var statusBadge = isPending
+      ? '<span class="bdg" style="background:rgba(224,146,16,.15);color:#e09210;border:1px solid rgba(224,146,16,.3);">Pendente</span>'
+      : '<span class="bdg bdg-active">Aprovado</span>';
+    var mb = r.usedBytes ? (r.usedBytes / (1024*1024)).toFixed(1) + ' MB' : '—';
+    return '<tr>'
+      + '<td class="row-fam-name">' + esc(r.tenantName || r.subdomain) + '</td>'
+      + '<td><span class="mono" style="font-size:12px;color:var(--acc2);">' + esc(r.subdomain || '') + '</span></td>'
+      + '<td style="font-size:12px;">' + esc(r.userEmail || '—') + '</td>'
+      + '<td style="font-size:12px;color:var(--t2);">' + mb + '</td>'
+      + '<td style="font-size:12px;color:var(--ok);font-weight:600;">R$ ' + ((r.price || 5).toFixed(2)) + '/mês</td>'
+      + '<td>' + statusBadge + '</td>'
+      + '<td style="font-size:11px;color:var(--t3);">' + (r.requestedAt ? fmtDate(r.requestedAt) : '—') + '</td>'
+      + '<td style="text-align:right;">'
+      + (isPending
+        ? '<button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" onclick="approveUpgrade(\'' + esc(r.subdomain) + '\')">✓ Aprovar</button>'
+        : '<span style="font-size:11px;color:var(--t3);">Aprovado em ' + (r.approvedAt ? fmtDate(r.approvedAt) : '—') + '</span>')
+      + '</td>'
+      + '</tr>';
+  }).join('');
+  el('storage-upgrades-list').innerHTML = '<div style="padding:8px 16px;font-size:11px;color:var(--t2);">'
+    + pending.length + ' pendente(s) · ' + requests.length + ' total'
+    + '</div>'
+    + '<table><thead><tr><th>Família</th><th>Subdomínio</th><th>Email</th><th>Uso</th><th>Valor</th><th>Status</th><th>Solicitado em</th><th style="text-align:right;">Ação</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table>';
+}
+
+async function approveUpgrade(sub) {
+  if (!confirm('Aprovar upgrade de 1 GB para "' + sub + '"? Confirme que o pagamento foi processado.')) return;
+  var data = await api('POST', '/storage/upgrade-requests/' + sub + '/approve');
+  if (data.success) {
+    showToast('Upgrade aprovado! Família "' + sub + '" agora tem 1 GB.');
+    loadStorageUpgrades();
+  } else {
+    showToast(data.error || 'Erro ao aprovar.', false);
+  }
+}
 
 // ── Init ──────────────────────────────────────────────────────────
 nav('dashboard');

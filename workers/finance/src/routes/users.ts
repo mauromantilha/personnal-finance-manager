@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { r2Put, r2Get } from '../lib/r2';
+import { checkQuota, incrementStorage, formatBytes, STORAGE_UPGRADE_PRICE, STORAGE_PAID_BYTES } from '../lib/storage';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -67,16 +68,35 @@ async function accessRevokeByEmail(
   } catch { /* best-effort */ }
 }
 
+/** LGPD: mascara email para visualização não-owner. user@example.com → u***@example.com */
+function maskEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at <= 0) return '***';
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  const visible = local.slice(0, 1);
+  return `${visible}${'*'.repeat(Math.max(3, local.length - 1))}${domain}`;
+}
+
 router.get('/users', async (c) => {
-  const db = c.get('db');
+  const db   = c.get('db');
+  const user = c.get('user');
   const rows = await db.query<Record<string, unknown>>(
     'SELECT id, name, email, role, member_id, is_active, created_at, relationship FROM users ORDER BY created_at ASC',
   );
-  return c.json(rows.map(r => ({
-    id: r.id, name: r.name, email: r.email,
-    role: r.role, memberId: r.member_id ?? null, isActive: r.is_active === 1, createdAt: r.created_at,
-    relationship: r.relationship ?? null,
-  })));
+  // LGPD — minimização: members não veem email completo de outros usuários.
+  // O próprio user sempre vê seu próprio email.
+  const isOwner = user.role === 'owner';
+  return c.json(rows.map(r => {
+    const email = String(r.email ?? '');
+    const isSelf = r.id === user.id;
+    return {
+      id: r.id, name: r.name,
+      email: (isOwner || isSelf) ? email : maskEmail(email),
+      role: r.role, memberId: r.member_id ?? null, isActive: r.is_active === 1, createdAt: r.created_at,
+      relationship: r.relationship ?? null,
+    };
+  }));
 });
 
 // Pré-registra um usuário: na próxima vez que ele logar via CF Access,
@@ -174,9 +194,23 @@ router.put('/users/me/avatar', async (c) => {
   if (!ALLOWED_TYPES.has(file.type)) return c.json({ error: 'Tipo de arquivo não suportado. Use JPEG, PNG, WebP ou GIF.' }, 400);
   if (file.size > MAX_SIZE) return c.json({ error: 'Arquivo muito grande. Máximo: 2 MB.' }, 400);
 
+  // Verificar cota antes de fazer upload
+  const quotaErr = await checkQuota(c.env.MKS_TENANTS, tenant.familyId, tenant.storageTierBytes, file.size);
+  if (quotaErr) {
+    return c.json({
+      error: 'QUOTA_EXCEEDED', code: 'QUOTA_EXCEEDED',
+      usedBytes: quotaErr.usedBytes, limitBytes: quotaErr.limitBytes,
+      usedFormatted: formatBytes(quotaErr.usedBytes),
+      limitFormatted: formatBytes(quotaErr.limitBytes),
+      upgradePrice: STORAGE_UPGRADE_PRICE,
+      upgradeLimitBytes: STORAGE_PAID_BYTES,
+    }, 402);
+  }
+
   const buffer = await file.arrayBuffer();
   const key = `${tenant.r2Prefix}/avatars/user-${user.id}`;
   await r2Put(bucket, key, buffer, file.type);
+  c.executionCtx.waitUntil(incrementStorage(c.env.MKS_TENANTS, tenant.familyId, file.size));
 
   const avatarUrl = `/api/users/me/avatar`;
   await db.exec('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, user.id]);
@@ -222,9 +256,21 @@ router.put('/family/avatar', async (c) => {
   if (!ALLOWED_TYPES.has(file.type)) return c.json({ error: 'Tipo de arquivo não suportado. Use JPEG, PNG, WebP ou GIF.' }, 400);
   if (file.size > MAX_SIZE) return c.json({ error: 'Arquivo muito grande. Máximo: 2 MB.' }, 400);
 
+  const quotaErr = await checkQuota(c.env.MKS_TENANTS, tenant.familyId, tenant.storageTierBytes, file.size);
+  if (quotaErr) {
+    return c.json({
+      error: 'QUOTA_EXCEEDED', code: 'QUOTA_EXCEEDED',
+      usedBytes: quotaErr.usedBytes, limitBytes: quotaErr.limitBytes,
+      usedFormatted: formatBytes(quotaErr.usedBytes),
+      limitFormatted: formatBytes(quotaErr.limitBytes),
+      upgradePrice: STORAGE_UPGRADE_PRICE, upgradeLimitBytes: STORAGE_PAID_BYTES,
+    }, 402);
+  }
+
   const buffer = await file.arrayBuffer();
   const key = `${tenant.r2Prefix}/avatars/family`;
   await r2Put(bucket, key, buffer, file.type);
+  c.executionCtx.waitUntil(incrementStorage(c.env.MKS_TENANTS, tenant.familyId, file.size));
 
   return c.json({ success: true, avatarUrl: '/api/family/avatar' });
 });

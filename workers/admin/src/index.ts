@@ -50,8 +50,9 @@ export interface Tenant {
   accessAppAud:   string;
   accessPolicyId: string;
   ownerEmailHash: string;
-  status:         'pending' | 'active' | 'suspended' | 'deleted';
-  createdAt:      string;
+  status:            'pending' | 'active' | 'suspended' | 'deleted';
+  createdAt:         string;
+  storageTierBytes?: number;  // undefined = plano free (300 MB)
 }
 
 export interface Variables {
@@ -79,6 +80,10 @@ app.use('*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  c.header('Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), ' +
+    'accelerometer=(), gyroscope=(), interest-cohort=()');
   c.header('Content-Security-Policy',
     `default-src 'self'; ` +
     `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +

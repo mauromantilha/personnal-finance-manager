@@ -7,6 +7,11 @@ const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 const DELETE_RL_MAX    = 3;
 const DELETE_RL_WINDOW = 60; // seconds
 
+/** Sanitiza string p/ logging — strip CR/LF/CTRL para evitar log injection. */
+function safeLog(s: string): string {
+  return String(s).replace(/[\r\n\t\x00-\x1F\x7F]+/g, '_').slice(0, 80);
+}
+
 async function writeAudit(
   kv: KVNamespace,
   entry: { action: string; actor: string; target: string; ip: string; result: string; details?: unknown },
@@ -49,6 +54,13 @@ router.put('/families/:subdomain', async (c) => {
   }
   if (updates.status !== undefined) tenant.status = updates.status;
   if (updates.tier   !== undefined) tenant.tier   = updates.tier;
+  // Admin pode aprovar upgrade de storage via storageTierBytes
+  const rawTierBytes = (updates as any).storageTierBytes;
+  if (rawTierBytes !== undefined) {
+    const tb = parseInt(String(rawTierBytes), 10);
+    if (isNaN(tb) || tb < 0) return c.json({ error: 'storageTierBytes inválido.' }, 400);
+    (tenant as any).storageTierBytes = tb > 0 ? tb : undefined; // 0 = volta ao free
+  }
 
   await c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant));
 
@@ -118,7 +130,7 @@ router.delete('/families/:subdomain', async (c) => {
       const deletedCount = await deleteR2ObjectsWithPrefix(
         CF_ACCOUNT_ID, CF_API_TOKEN, tenant.r2Bucket, tenant.r2Prefix
       );
-      console.log(`[DELETE ${subdomain}] R2: ${deletedCount} objetos deletados`);
+      console.log(`[DELETE ${safeLog(subdomain)}] R2: ${deletedCount} objetos deletados`);
     } catch (e) {
       errors.push(`R2: ${(e as Error).message}`);
     }
@@ -128,7 +140,7 @@ router.delete('/families/:subdomain', async (c) => {
   if (tenant.d1DatabaseId) {
     try {
       await deleteD1Database(CF_ACCOUNT_ID, CF_API_TOKEN, tenant.d1DatabaseId);
-      console.log(`[DELETE ${subdomain}] D1 database ${tenant.d1DatabaseId} deletado`);
+      console.log(`[DELETE ${safeLog(subdomain)}] D1 database ${safeLog(tenant.d1DatabaseId)} deletado`);
     } catch (e) {
       errors.push(`D1: ${(e as Error).message}`);
     }
@@ -138,7 +150,7 @@ router.delete('/families/:subdomain', async (c) => {
   if (tenant.accessAppId) {
     try {
       await deleteAccessApp(CF_ACCOUNT_ID, CF_API_TOKEN, tenant.accessAppId);
-      console.log(`[DELETE ${subdomain}] CF Access app ${tenant.accessAppId} deletado`);
+      console.log(`[DELETE ${safeLog(subdomain)}] CF Access app ${safeLog(tenant.accessAppId)} deletado`);
     } catch (e) {
       errors.push(`CF Access: ${(e as Error).message}`);
     }
@@ -149,7 +161,7 @@ router.delete('/families/:subdomain', async (c) => {
     await removeCfAccessDnsPlaceholder(CF_ZONE_ID, CF_API_TOKEN, `${subdomain}.${BASE_DOMAIN}`);
   } catch (e) {
     // Non-critical, just log
-    console.log(`[DELETE ${subdomain}] DNS cleanup: ${(e as Error).message}`);
+    console.log(`[DELETE ${safeLog(subdomain)}] DNS cleanup: ${safeLog((e as Error).message)}`);
   }
 
   // Step 5: Remove from KV (tenant record + index)
@@ -162,7 +174,7 @@ router.delete('/families/:subdomain', async (c) => {
     c.env.MKS_TENANTS.put('tenants:count', String(newIndex.length)),
   ]);
 
-  console.log(`[DELETE ${subdomain}] Família completamente removida. Errors: ${errors.length}`);
+  console.log(`[DELETE ${safeLog(subdomain)}] Família completamente removida. Errors: ${errors.length}`);
 
   await writeAudit(c.env.MKS_ADMIN, {
     action: 'family.delete', actor, target: subdomain, ip,
@@ -228,6 +240,47 @@ router.post('/access/rename-apps', async (c) => {
     }
   }
   return c.json({ renamed: results.length, results });
+});
+
+// ── GET /api/storage/upgrade-requests — lista pedidos de upgrade pendentes ────
+router.get('/storage/upgrade-requests', async (c) => {
+  const { keys } = await c.env.MKS_TENANTS.list({ prefix: 'upgrade-req:', limit: 100 });
+  const requests = await Promise.all(
+    keys.map(async k => {
+      const raw = await c.env.MKS_TENANTS.get(k.name);
+      return raw ? JSON.parse(raw) : null;
+    }),
+  );
+  return c.json({ requests: requests.filter(Boolean) });
+});
+
+// ── POST /api/storage/upgrade-requests/:subdomain/approve ─────────────────────
+// Ativa o plano pago (1 GB) para a família e limpa o pedido.
+router.post('/storage/upgrade-requests/:subdomain/approve', async (c) => {
+  const { subdomain } = c.req.param();
+  const actor = c.get('adminEmail') ?? c.get('adminSub') ?? 'unknown';
+  const ip    = c.req.header('CF-Connecting-IP') ?? 'unknown';
+
+  const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
+  if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
+
+  const PAID_BYTES = 1_073_741_824; // 1 GB
+  (tenant as any).storageTierBytes = PAID_BYTES;
+  await c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant));
+
+  // Marcar pedido como aprovado
+  const reqKey = `upgrade-req:${tenant.familyId}`;
+  const existing = await c.env.MKS_TENANTS.get<any>(reqKey, 'json');
+  if (existing) {
+    await c.env.MKS_TENANTS.put(reqKey, JSON.stringify({ ...existing, status: 'approved', approvedAt: new Date().toISOString(), approvedBy: actor }), { expirationTtl: 7 * 24 * 3600 });
+  }
+
+  await writeAudit(c.env.MKS_ADMIN, {
+    action: 'storage.upgrade.approve', actor, target: subdomain, ip,
+    result: 'success', details: { newLimitBytes: PAID_BYTES },
+  });
+
+  return c.json({ success: true, storageTierBytes: PAID_BYTES });
 });
 
 export default router;

@@ -235,7 +235,7 @@ function GroqKeyPanel({ onSave }: GroqKeyPanelProps) {
         />
         <button
           disabled={!val.startsWith('gsk_') || val.length < 20}
-          onClick={() => { sessionStorage.setItem('groq_key', val); onSave(val); }}
+          onClick={() => { sessionStorage.setItem('__userGroqKey', val); onSave(val); }}
           className="px-3 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
         >
           Salvar e tentar
@@ -251,7 +251,7 @@ function ChatTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showKeyPanel, setShowKeyPanel] = useState(false);
-  const [userGroqKey, setUserGroqKey] = useState(() => sessionStorage.getItem('groq_key') ?? '');
+  const [userGroqKey, setUserGroqKey] = useState(() => sessionStorage.getItem('__userGroqKey') ?? '');
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
@@ -266,7 +266,7 @@ function ChatTab() {
     try {
       const history = messages.map(m => ({ role: m.role, content: m.content }));
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const groqKey = sessionStorage.getItem('groq_key') ?? userGroqKey;
+      const groqKey = sessionStorage.getItem('__userGroqKey') ?? userGroqKey;
       if (groqKey) headers['X-Groq-Api-Key'] = groqKey;
       const res = await fetch('/api/ai/agent-chat', {
         method: 'POST',
@@ -417,7 +417,7 @@ export default function PredictiveAIModule() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showKeyPanel, setShowKeyPanel] = useState(false);
-  const [userGroqKey, setUserGroqKey] = useState(() => sessionStorage.getItem('groq_key') ?? '');
+  const [userGroqKey, setUserGroqKey] = useState(() => sessionStorage.getItem('__userGroqKey') ?? '');
 
   const runAnalysis = async (retryKey?: string) => {
     setLoading(true);
@@ -425,7 +425,7 @@ export default function PredictiveAIModule() {
     setShowKeyPanel(false);
     try {
       const headers: Record<string, string> = {};
-      const groqKey = retryKey ?? sessionStorage.getItem('groq_key') ?? userGroqKey;
+      const groqKey = retryKey ?? sessionStorage.getItem('__userGroqKey') ?? userGroqKey;
       if (groqKey) headers['X-Groq-Api-Key'] = groqKey;
       const res = await fetch('/api/ai/predictive', { method: 'POST', headers });
       const data = await res.json();

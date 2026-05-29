@@ -46,6 +46,7 @@ import MarketWidget from './components/MarketWidget';
 import DocumentsModule from './components/DocumentsModule';
 import DebtModule from './components/DebtModule';
 import { LGPDModal } from './components/LGPDModal';
+import { StorageQuotaModal } from './components/StorageQuotaModal';
 
 import {
   UserProfile,
@@ -137,6 +138,12 @@ export default function App() {
     [investments],
   );
   const [lgpdAccepted, setLgpdAccepted] = useState<boolean | null>(null);
+
+  // ── Storage quota modal ──────────────────────────────────────────────────────
+  const [storageQuota, setStorageQuota] = useState<{
+    usedFormatted: string; limitFormatted: string; percentage: number;
+    upgradePrice: number; upgradeLimitBytes: number;
+  } | null>(null);
 
   // Auto-logout por inatividade — 20 minutos
   useEffect(() => {
@@ -344,6 +351,24 @@ export default function App() {
     return { imported: 0, errors: ['Erro de conexão com o servidor.'] };
   };
 
+  /** Exibe o modal de cota se a resposta for 402 QUOTA_EXCEEDED. */
+  async function handleQuota402(res: Response): Promise<boolean> {
+    if (res.status !== 402) return false;
+    try {
+      const data = await res.json() as any;
+      if (data.code === 'QUOTA_EXCEEDED') {
+        setStorageQuota({
+          usedFormatted:     data.usedFormatted   ?? `${data.usedBytes} B`,
+          limitFormatted:    data.limitFormatted  ?? `${data.limitBytes} B`,
+          percentage:        data.limitBytes > 0 ? Math.min(100, (data.usedBytes / data.limitBytes) * 100) : 100,
+          upgradePrice:      data.upgradePrice    ?? 5,
+          upgradeLimitBytes: data.upgradeLimitBytes ?? 1_073_741_824,
+        });
+      }
+    } catch { /* ignore */ }
+    return true;
+  }
+
   const handleAnalyzeDocument = async (base64: string, mimeType: string): Promise<{ description?: string; amountInCents?: number; dueDate?: string; documentKey?: string }> => {
     try {
       const res = await fetch('/api/documents/analyze', {
@@ -351,6 +376,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base64, mimeType, documentType: 'BILL' }),
       });
+      if (await handleQuota402(res)) return {};
       if (res.ok) return await res.json();
     } catch (err) { console.error(err); }
     return {};
@@ -363,6 +389,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base64, mimeType, documentType: 'INVOICE', creditCardId }),
       });
+      if (await handleQuota402(res)) return {};
       if (res.ok) return await res.json();
     } catch (err) { console.error(err); }
     return {};
@@ -672,7 +699,15 @@ export default function App() {
           await fetchAllData();
         }} />
       )}
-      
+
+      {/* Storage quota modal — exibido quando upload retorna 402 QUOTA_EXCEEDED */}
+      {storageQuota && (
+        <StorageQuotaModal
+          {...storageQuota}
+          onClose={() => setStorageQuota(null)}
+        />
+      )}
+
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />

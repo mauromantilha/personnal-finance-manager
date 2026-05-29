@@ -23,6 +23,7 @@ import documentRoutes     from './routes/documents';
 import importerRoutes     from './routes/importers';
 import backupRoutes       from './routes/backup';
 import debtRoutes         from './routes/debts';
+import storageRoutes      from './routes/storage';
 
 const LGPD_CURRENT_VERSION = '2.0';
 
@@ -53,8 +54,9 @@ export interface Tenant {
   accessAppAud:   string;
   accessPolicyId: string;
   ownerEmailHash: string;
-  status:         'pending' | 'active' | 'suspended' | 'deleted';
-  createdAt:      string;
+  status:             'pending' | 'active' | 'suspended' | 'deleted';
+  createdAt:          string;
+  storageTierBytes?:  number;  // undefined = plano free (300 MB)
 }
 
 // ── Variáveis de contexto Hono ────────────────────────────────────────────────
@@ -76,6 +78,10 @@ app.use('*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  c.header('Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), ' +
+    'accelerometer=(), gyroscope=(), interest-cohort=()');
   c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
 });
 
@@ -105,6 +111,10 @@ app.use('*', async (c, next) => {
   if (tenant.status === 'suspended')  return c.json({ error: 'Conta suspensa.' },         403);
   if (tenant.status === 'deleted')    return c.json({ error: 'Conta encerrada.' },         410);
   if (!tenant.d1DatabaseId)           return c.json({ error: 'Banco não configurado.' },  503);
+  // Invariante de isolamento R2: sem prefixo válido, qualquer chamada R2 vazaria
+  // entre tenants (key.startsWith('' + '/') = key.startsWith('/')).
+  if (!tenant.r2Prefix || tenant.r2Prefix.length < 4)
+    return c.json({ error: 'Tenant mal configurado (r2Prefix).' }, 503);
 
   c.set('tenant',   tenant);
   c.set('familyId', tenant.familyId);
@@ -135,7 +145,7 @@ app.use('/api/*', async (c, next) => {
     if (!tenant.accessAppAud) {
       return c.json({ error: 'Tenant sem audience configurado.', code: 'TENANT_MISCONFIGURED' }, 503);
     }
-    const claims = await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, tenant.accessAppAud);
+    const claims = await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, tenant.accessAppAud, c.env.MKS_CACHE);
     c.set('email', claims.email);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'JWT inválido';
@@ -243,6 +253,7 @@ app.route('/api', documentRoutes);
 app.route('/api', importerRoutes);
 app.route('/api', backupRoutes);
 app.route('/api', debtRoutes);
+app.route('/api', storageRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.all('*', (c) => c.json({ error: 'Rota não encontrada' }, 404));

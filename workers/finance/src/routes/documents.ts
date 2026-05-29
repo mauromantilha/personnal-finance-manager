@@ -5,8 +5,12 @@ import { r2Put, r2Get } from '../lib/r2';
 import { mapCreditCard, DbCreditCard } from '../lib/mappers';
 import { recalculateBudgets } from '../lib/helpers';
 import { D1Stmt } from '../lib/d1';
+import { checkQuota, incrementStorage, decrementStorage, formatBytes, STORAGE_UPGRADE_PRICE, STORAGE_PAID_BYTES } from '../lib/storage';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// Nota: tenant.r2Prefix é validado no middleware de tenant em index.ts.
+// Aqui podemos confiar que existe e tem comprimento mínimo.
 
 // ── Validação de upload (base64 + magic bytes) ──────────────────────────────
 const MAX_DOC_BYTES = 8 * 1024 * 1024; // 8 MB
@@ -71,7 +75,15 @@ router.delete('/documents/*', async (c) => {
   if (!key.startsWith(tenant.r2Prefix + '/')) {
     return c.json({ error: 'Acesso negado.' }, 403);
   }
+  // Obter tamanho antes de deletar para decrementar o contador de storage
+  const existing = await c.env.MKS_DOCUMENTS.head(key);
+  const fileSize = existing?.size ?? 0;
   await c.env.MKS_DOCUMENTS.delete(key);
+  if (fileSize > 0) {
+    c.executionCtx.waitUntil(
+      decrementStorage(c.env.MKS_TENANTS, tenant.familyId, fileSize),
+    );
+  }
   return c.json({ success: true });
 });
 
@@ -100,8 +112,24 @@ router.post('/documents/analyze', async (c) => {
   if (realMime !== mimeType)
     return c.json({ error: `MIME informado (${mimeType}) não corresponde ao conteúdo (${realMime}).` }, 415);
 
+  // ── Verificação de cota de storage ───────────────────────────────────────────
+  const tenant = c.get('tenant');
+  const quotaErr = await checkQuota(c.env.MKS_TENANTS, tenant.familyId, tenant.storageTierBytes, buf.byteLength);
+  if (quotaErr) {
+    return c.json({
+      error: 'QUOTA_EXCEEDED',
+      code:  'QUOTA_EXCEEDED',
+      usedBytes:  quotaErr.usedBytes,
+      limitBytes: quotaErr.limitBytes,
+      usedFormatted:  formatBytes(quotaErr.usedBytes),
+      limitFormatted: formatBytes(quotaErr.limitBytes),
+      upgradePrice:   STORAGE_UPGRADE_PRICE,
+      upgradeLimitBytes: STORAGE_PAID_BYTES,
+    }, 402);
+  }
+
   const key   = c.env.GROQ_API_KEY;
-  const r2key = buildDocKey(c.get('tenant').r2Prefix, realMime);
+  const r2key = buildDocKey(tenant.r2Prefix, realMime);
   let extracted: Record<string, unknown> = {};
 
   const billPrompt   = `Analise este documento financeiro brasileiro e extraia em JSON: {"description":"nome do serviço","amountInCents":número em centavos,"dueDate":"YYYY-MM-DD","payerName":"string|null","payerDoc":"CPF/CNPJ|null"}. Retorne APENAS o JSON.`;
@@ -131,6 +159,11 @@ router.post('/documents/analyze', async (c) => {
   // buf vem de `new Uint8Array(bin.length)` em decodeBase64Strict, então o
   // backing buffer é sempre ArrayBuffer (nunca SharedArrayBuffer) — cast seguro.
   await r2Put(c.env.MKS_DOCUMENTS, r2key, buf.buffer as ArrayBuffer, realMime);
+
+  // Atualizar contador de storage de forma assíncrona (não bloqueia resposta)
+  c.executionCtx.waitUntil(
+    incrementStorage(c.env.MKS_TENANTS, tenant.familyId, buf.byteLength),
+  );
 
   return c.json({ ...extracted, documentKey: r2key });
 });

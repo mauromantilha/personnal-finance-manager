@@ -99,7 +99,7 @@ function GroqKeyPanel({ onSave }: { onSave: (k: string) => void }) {
           className="flex-1 text-xs border border-amber-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
         <button
           disabled={!val.startsWith('gsk_') || val.length < 20}
-          onClick={() => { sessionStorage.setItem('groq_key', val); onSave(val); }}
+          onClick={() => { sessionStorage.setItem('__userGroqKey', val); onSave(val); }}
           className="px-3 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap">
           Salvar
         </button>
@@ -215,7 +215,7 @@ export default function DebtModule() {
     setAnalyzeError('');
     setShowKeyPanel(false);
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const groqKey = retryKey ?? sessionStorage.getItem('groq_key') ?? '';
+    const groqKey = retryKey ?? sessionStorage.getItem('__userGroqKey') ?? '';
     if (groqKey) headers['X-Groq-Api-Key'] = groqKey;
     try {
       const res  = await fetch('/api/debts/analyze', { method: 'POST', headers });
