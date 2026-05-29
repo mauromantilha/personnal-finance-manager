@@ -27,7 +27,7 @@ router.post('/investments', async (c) => {
   const invested = parseInt(String(investedInCents ?? 0), 10);
   const current  = parseInt(String(currentValueInCents ?? invested), 10);
   const cls      = VALID_CLASSES.includes(assetClass) ? assetClass : 'other';
-  const id       = `inv-${Date.now()}`;
+  const id       = `inv-${crypto.randomUUID()}`;
 
   await db.exec(
     'INSERT INTO investments (id,name,ticker,asset_class,institution,invested_in_cents,current_value_in_cents,annual_rate,start_date,maturity_date,account_id,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',

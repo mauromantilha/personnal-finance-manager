@@ -52,10 +52,11 @@ export async function verifyAccessJWT(
   if (!jwksResp.ok) throw new Error('Falha ao buscar JWKS');
   const { keys } = await jwksResp.json() as { keys: (JsonWebKey & { kid?: string })[] };
 
-  const jwk = header.kid
-    ? (keys.find(k => k.kid === header.kid) ?? keys[0])
-    : keys[0];
-  if (!jwk) throw new Error('JWK não encontrado');
+  // CF Access sempre emite com kid presente; aceitar JWT sem kid abre brecha
+  // para forjar JWTs cujo cabeçalho omita kid e cair em fallback ao primeiro JWK.
+  if (!header.kid) throw new Error('JWT sem kid');
+  const jwk = keys.find(k => k.kid === header.kid);
+  if (!jwk) throw new Error('JWK não encontrado para o kid informado');
 
   const cryptoKey = await crypto.subtle.importKey(
     'jwk', jwk,

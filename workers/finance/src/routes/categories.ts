@@ -15,7 +15,7 @@ router.post('/categories', async (c) => {
   const { name, parentId, icon, color, type } = await c.req.json<any>();
   if (!name) return c.json({ error: 'name obrigatório.' }, 400);
 
-  const id = `cat-usr-${Date.now()}`;
+  const id = `cat-usr-${crypto.randomUUID()}`;
   await db.exec('INSERT INTO categories VALUES (?,?,?,?,?,?)',
     [id, name, parentId ?? null, icon ?? '📦', color ?? '#6B7280', type ?? 'both']);
   return c.json({ id }, 201);

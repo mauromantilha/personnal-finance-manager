@@ -57,7 +57,7 @@ router.post('/debts', async (c) => {
   if (!creditor || !type || !originalAmountInCents || !currentAmountInCents)
     return c.json({ error: 'creditor, type, originalAmountInCents e currentAmountInCents são obrigatórios.' }, 400);
 
-  const id = `debt-${Date.now()}`;
+  const id = `debt-${crypto.randomUUID()}`;
   await db.exec(
     'INSERT INTO debts (id,creditor,type,original_amount_in_cents,current_amount_in_cents,due_date,months_overdue,status,notes) VALUES (?,?,?,?,?,?,?,?,?)',
     [id, creditor, type, originalAmountInCents, currentAmountInCents,

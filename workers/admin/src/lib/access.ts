@@ -77,9 +77,11 @@ export async function verifyAccessJWT(
   const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!aud.includes(expectedAud)) throw new Error('AUD inválido');
 
+  // Exigir kid: sem kid, qualquer JWT cai no primeiro JWK (vetor de forja).
+  if (!header.kid) throw new Error('JWT sem kid');
   const keys   = await getPublicKeys(teamDomain);
-  const jwkKey = keys.find(k => k.kid === header.kid) ?? keys[0];
-  if (!jwkKey) throw new Error('Chave pública não encontrada');
+  const jwkKey = keys.find(k => k.kid === header.kid);
+  if (!jwkKey) throw new Error('Chave pública não encontrada para o kid');
 
   const cryptoKey = await importRSAKey(jwkKey);
   const sigInput  = new TextEncoder().encode(`${headerB64}.${payloadB64}`);

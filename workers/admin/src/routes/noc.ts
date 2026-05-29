@@ -87,13 +87,16 @@ router.get('/families/:subdomain/stats', async (c) => {
   const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
   if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
 
-  const tables = [
+  const ALLOWED_TABLES = new Set([
     'transactions', 'accounts', 'credit_cards', 'categories',
     'investments', 'users', 'goals', 'recurrences',
-  ];
+  ]);
+  const tables = Array.from(ALLOWED_TABLES);
   const rows: Record<string, number> = {};
 
   await Promise.allSettled(tables.map(async (table) => {
+    // Defesa em profundidade: nunca enviar nome de tabela vindo de input ao D1.
+    if (!ALLOWED_TABLES.has(table)) throw new Error('table not allowed');
     const ctrl = new AbortController();
     const tid  = setTimeout(() => ctrl.abort(), 5000);
     try {

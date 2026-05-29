@@ -45,7 +45,7 @@ export async function checkBudgetThresholds(
   if (ratioAfter >= 1.0 && ratioBefore < 1.0) {
     await db.exec(
       'INSERT INTO alerts VALUES (?,?,?,?,?,?)',
-      [`alert-ovr-${Date.now()}`, 'WARNING',
+      [`alert-ovr-${crypto.randomUUID()}`, 'WARNING',
         `Orçamento Estourado: ${category}`,
         `Você ultrapassou 100% em ${category}. Gasto: R$ ${(spent / 100).toFixed(2)} de R$ ${limitFmt}.`,
         new Date().toISOString(), 0],
@@ -53,7 +53,7 @@ export async function checkBudgetThresholds(
   } else if (ratioAfter >= 0.8 && ratioBefore < 0.8) {
     await db.exec(
       'INSERT INTO alerts VALUES (?,?,?,?,?,?)',
-      [`alert-warn-${Date.now()}`, 'WARNING',
+      [`alert-warn-${crypto.randomUUID()}`, 'WARNING',
         `Alerta de Gastos: ${category}`,
         `Você atingiu ${pct}% do limite de ${category}. Teto: R$ ${limitFmt}.`,
         new Date().toISOString(), 0],

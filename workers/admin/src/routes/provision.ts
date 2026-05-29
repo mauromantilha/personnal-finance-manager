@@ -156,7 +156,8 @@ async function applySchema(accountId: string, token: string, dbId: string): Prom
 
 async function hashEmail(email: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.toLowerCase()));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  // 32 chars = 128 bits para evitar colisões por aniversário
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
 }
 
 export default router;

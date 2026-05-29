@@ -247,7 +247,8 @@ router.post('/public/register', async (c) => {
   } catch (_) { /* non-fatal */ }
 
   // ── 7. KV: tenant (pending) + CPF index ───────────────────────────────────
-  const ownerEmailHash = (await sha256hex(email.toLowerCase())).slice(0, 16);
+  // 32 chars = 128 bits — birthday collision exige ~1.8×10^19 registros.
+  const ownerEmailHash = (await sha256hex(email.toLowerCase())).slice(0, 32);
   const tenant = {
     name: nameStr, subdomain, familyId,
     tier: 1 as const,

@@ -17,7 +17,7 @@ router.post('/credit-cards', async (c) => {
   if (!name || !bankName || !limitInCents)
     return c.json({ error: 'name, bankName e limitInCents são obrigatórios.' }, 400);
 
-  const id = `cc-usr-${Date.now()}`;
+  const id = `cc-usr-${crypto.randomUUID()}`;
   await db.exec('INSERT INTO credit_cards VALUES (?,?,?,?,?,?,?,?,1)',
     [id, name, bankName, lastFour ?? null,
      parseInt(String(limitInCents), 10),

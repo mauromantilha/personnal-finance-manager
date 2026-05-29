@@ -15,7 +15,7 @@ router.post('/family', async (c) => {
   const { name, avatarColor } = await c.req.json<any>();
   if (!name) return c.json({ error: 'name obrigatório.' }, 400);
 
-  const id = `fm-usr-${Date.now()}`;
+  const id = `fm-usr-${crypto.randomUUID()}`;
   await db.exec(
     "INSERT INTO family_members (id,name,avatar_color,created_at) VALUES (?,?,?,datetime('now'))",
     [id, name, avatarColor ?? '#6366F1'],

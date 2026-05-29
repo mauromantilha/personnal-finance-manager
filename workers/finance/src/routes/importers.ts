@@ -6,12 +6,18 @@ import { D1Stmt } from '../lib/d1';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+const MAX_OFX_TRANSACTIONS = 5000;
+const MAX_CSV_LINES         = 5000;
+const FITID_REGEX = /^[A-Za-z0-9_\-.]{1,64}$/;
+
 // ── POST /api/import/ofx ──────────────────────────────────────────────────────
 router.post('/import/ofx', async (c) => {
   const db = c.get('db');
   const { transactions, accountId } = await c.req.json<any>();
   if (!accountId || !Array.isArray(transactions) || !transactions.length)
     return c.json({ error: 'accountId e transactions[] são obrigatórios.' }, 400);
+  if (transactions.length > MAX_OFX_TRANSACTIONS)
+    return c.json({ error: `Máximo ${MAX_OFX_TRANSACTIONS} transações por importação.` }, 413);
 
   const acc = await db.first('SELECT id FROM accounts WHERE id = ?', [accountId]);
   if (!acc) return c.json({ error: 'Conta não encontrada.' }, 404);
@@ -20,7 +26,12 @@ router.post('/import/ofx', async (c) => {
   let imported = 0, skipped = 0;
 
   for (const tx of transactions) {
-    const txId = `tx-ofx-${tx.fitid}`;
+    // fitid vem do banco do usuário; sanitizar para evitar colisão com IDs
+    // internos (ex.: tx-rec-*, tx-usr-*) e injeção de caracteres especiais.
+    const rawFitid = typeof tx.fitid === 'string' ? tx.fitid : '';
+    const fitid = FITID_REGEX.test(rawFitid) ? rawFitid : null;
+    if (!fitid) { skipped++; continue; }
+    const txId = `tx-ofx-${fitid}`;
     const dup  = await db.first('SELECT id FROM transactions WHERE id = ?', [txId]);
     if (dup) { skipped++; continue; }
 
@@ -48,11 +59,16 @@ router.post('/import/csv', async (c) => {
   const db = c.get('db');
   const { csv, accountId } = await c.req.json<any>();
   if (!csv || !accountId) return c.json({ error: 'csv e accountId são obrigatórios.' }, 400);
+  // 5000 linhas × ~200 bytes = ~1 MB, suficiente para CSV mensal.
+  if (typeof csv !== 'string' || csv.length > 2 * 1024 * 1024)
+    return c.json({ error: 'CSV muito grande (máx. 2 MB).' }, 413);
 
   const acc = await db.first('SELECT id FROM accounts WHERE id = ?', [accountId]);
   if (!acc) return c.json({ error: 'Conta não encontrada.' }, 404);
 
   const lines  = String(csv).split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length > MAX_CSV_LINES)
+    return c.json({ error: `Máximo ${MAX_CSV_LINES} linhas por importação.` }, 413);
   const stmts: D1Stmt[]  = [];
   const errors: string[] = [];
   let imported = 0, balanceDelta = 0;

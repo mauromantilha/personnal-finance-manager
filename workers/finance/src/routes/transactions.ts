@@ -44,8 +44,8 @@ router.post('/transactions', async (c) => {
 
   const numInstallments = installments && parseInt(String(installments), 10) > 1
     ? Math.min(parseInt(String(installments), 10), 48) : 1;
-  const installmentGroupId = numInstallments > 1 ? `grp-${Date.now()}` : null;
-  const baseId = `tx-usr-${Date.now()}`;
+  const installmentGroupId = numInstallments > 1 ? `grp-${crypto.randomUUID()}` : null;
+  const baseId = `tx-usr-${crypto.randomUUID()}`;
   const stmts: D1Stmt[] = [];
 
   try {

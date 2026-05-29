@@ -30,7 +30,7 @@ router.post('/recurrences', async (c) => {
   if (isNaN(amount) || amount <= 0)
     return c.json({ error: 'Valor deve ser inteiro positivo em centavos.' }, 400);
 
-  const id = `rec-usr-${Date.now()}`;
+  const id = `rec-usr-${crypto.randomUUID()}`;
   await db.exec(
     'INSERT INTO recurrences (id,description,amount_in_cents,type,category,account_id,credit_card_id,frequency,day_of_month,start_date,end_date,is_active) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)',
     [id, description, amount, type, category,

@@ -206,11 +206,14 @@ export async function addPagesDomain(
 }
 
 /**
- * Deletes any A or CNAME record planted by CF Access for this exact hostname.
- * With a wildcard DNS (*.domain) already in place we only need to remove the
- * specific placeholder record (100.64.0.1) that CF Access creates; the
- * wildcard then takes over automatically.
+ * Deletes ONLY the specific A placeholder (100.64.0.1) planted by CF Access
+ * for this exact hostname. With a wildcard DNS (*.domain) already in place
+ * the wildcard takes over automatically once the placeholder is gone.
+ *
+ * Importante: jamais remover outros A/CNAME do hostname — outros records
+ * (legítimos, do dono do domínio, ou de outras integrações) ficariam órfãos.
  */
+export const CF_ACCESS_PLACEHOLDER_IP = '100.64.0.1';
 export async function removeCfAccessDnsPlaceholder(
   zoneId: string, token: string, hostname: string,
 ): Promise<void> {
@@ -218,8 +221,8 @@ export async function removeCfAccessDnsPlaceholder(
     token, `/zones/${zoneId}/dns_records?name=${encodeURIComponent(hostname)}&per_page=50`,
   );
   for (const rec of list) {
-    // Only remove records that look like CF Access placeholders (non-wildcard A/CNAME)
-    if (rec.type === 'A' || rec.type === 'CNAME') {
+    // Apenas o A record 100.64.0.1 (assinatura do placeholder do CF Access)
+    if (rec.type === 'A' && rec.content === CF_ACCESS_PLACEHOLDER_IP) {
       await fetch(`${CF}/zones/${zoneId}/dns_records/${rec.id}`, {
         method: 'DELETE', headers: h(token),
       });

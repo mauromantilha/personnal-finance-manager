@@ -29,8 +29,8 @@ router.post('/installments', async (c) => {
   const total    = parseInt(String(totalInCents), 10);
   const count    = Math.min(parseInt(String(installmentCount), 10), 48);
   const instAmt  = Math.round(total / count);
-  const groupId  = `grp-usr-${Date.now()}`;
-  const baseId   = `tx-inst-${Date.now()}`;
+  const groupId  = `grp-usr-${crypto.randomUUID()}`;
+  const baseId   = `tx-inst-${crypto.randomUUID()}`;
 
   const stmts: D1Stmt[] = [{
     sql: 'INSERT INTO installment_groups (id,description,total_in_cents,installment_count,installment_amount_in_cents,category,account_id,credit_card_id,member_id,start_date,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime(\'now\'))',

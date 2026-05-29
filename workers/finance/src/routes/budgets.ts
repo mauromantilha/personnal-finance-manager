@@ -15,7 +15,7 @@ router.post('/budgets/update', async (c) => {
   if (existing) {
     await db.exec('UPDATE budgets SET limit_in_cents = ? WHERE LOWER(category) = LOWER(?)', [limit, category]);
   } else {
-    await db.exec('INSERT INTO budgets VALUES (?,?,?,0)', [`b-usr-${Date.now()}`, category, limit]);
+    await db.exec('INSERT INTO budgets VALUES (?,?,?,0)', [`b-usr-${crypto.randomUUID()}`, category, limit]);
   }
   await recalculateBudgets(db);
   return c.json({ success: true });
@@ -37,7 +37,7 @@ router.post('/goals', async (c) => {
   if (!name || !targetInCents || parseInt(String(targetInCents), 10) <= 0 || !targetDate)
     return c.json({ error: 'Parâmetros inválidos para criação da meta.' }, 400);
 
-  const id = `g-usr-${Date.now()}`;
+  const id = `g-usr-${crypto.randomUUID()}`;
   await db.exec('INSERT INTO goals VALUES (?,?,?,?,?,?)',
     [id, name, parseInt(String(targetInCents), 10),
      currentInCents ? parseInt(String(currentInCents), 10) : 0,

@@ -157,18 +157,21 @@ router.get('/telemetry/family/:sub', async (c) => {
   const tenant = await MKS_TENANTS.get<Tenant>(`tenant:${sub}`, 'json');
   if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
 
-  const tables = [
+  const ALLOWED_TABLES = new Set([
     'accounts', 'transactions', 'credit_cards', 'categories',
     'investments', 'users', 'goals', 'recurrences', 'documents',
     'budgets', 'alerts', 'installment_groups',
-  ];
+  ]);
+  const tables = Array.from(ALLOWED_TABLES);
 
   const [dbMeta, ...tableCounts] = await Promise.all([
     cfGet<any>(CF_API_TOKEN, `/accounts/${CF_ACCOUNT_ID}/d1/database/${tenant.d1DatabaseId}`),
-    ...tables.map(tbl =>
-      d1q(CF_ACCOUNT_ID, CF_API_TOKEN, tenant.d1DatabaseId,
-        `SELECT COUNT(*) AS n FROM ${tbl}`).then(r => ({ table: tbl, count: r[0]?.n ?? 0 })),
-    ),
+    ...tables.map(tbl => {
+      // Defesa em profundidade contra inadvertida interpolação de input
+      if (!ALLOWED_TABLES.has(tbl)) return Promise.resolve({ table: tbl, count: 0 });
+      return d1q(CF_ACCOUNT_ID, CF_API_TOKEN, tenant.d1DatabaseId,
+        `SELECT COUNT(*) AS n FROM ${tbl}`).then(r => ({ table: tbl, count: r[0]?.n ?? 0 }));
+    }),
   ]);
 
   // Last 7 days transaction volume
