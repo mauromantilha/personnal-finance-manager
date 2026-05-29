@@ -35,6 +35,7 @@ export interface Env {
   RESEND_API_KEY:      string;
   TURNSTILE_SECRET_KEY: string;
   CPF_SALT:            string;
+  APP_SECRET:          string;  // HMAC para tokens de verificação de email
 }
 
 export interface Tenant {
@@ -49,21 +50,43 @@ export interface Tenant {
   accessAppAud:   string;
   accessPolicyId: string;
   ownerEmailHash: string;
-  status:         'active' | 'suspended' | 'deleted';
+  status:         'pending' | 'active' | 'suspended' | 'deleted';
   createdAt:      string;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+export interface Variables {
+  adminEmail: string;
+  adminSub:   string;
+  cspNonce:   string;
+}
+
+const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ── Security headers ──────────────────────────────────────────────────────────
+// Gera um nonce por request (CSP strict). Salvo em c.var para o handler do SPA usar.
+function genNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
 app.use('*', async (c, next) => {
+  const nonce = genNonce();
+  c.set('cspNonce', nonce);
   await next();
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' https://api.dicebear.com data:; connect-src 'self' https://api.resend.com; frame-ancestors 'none'");
+    `default-src 'self'; ` +
+    `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +
+    `script-src-elem 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +
+    `style-src 'self' 'unsafe-inline'; ` +
+    `img-src 'self' https://api.dicebear.com data:; ` +
+    `connect-src 'self' https://api.resend.com https://cloudflareinsights.com https://static.cloudflareinsights.com; ` +
+    `frame-ancestors 'none'`);
 });
 
 // ── Tenant frontend proxy ─────────────────────────────────────────────────────
@@ -76,10 +99,10 @@ app.all('*', async (c, next) => {
   // Public API paths (registration, etc.) — bypass proxy so Worker handles them
   if (url.pathname.startsWith('/public/') || url.pathname.startsWith('/api/public/')) return next();
 
-  // Only serve SPA for provisioned, active tenants — reject unknown subdomains
+  // Only serve SPA for provisioned, active tenants — reject unknown/pending subdomains
   const subdomain = hostname.split('.')[0];
   const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
-  if (!tenant || tenant.status !== 'active') {
+  if (!tenant) {
     return c.html(
       '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>404</title>' +
       '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
@@ -91,18 +114,56 @@ app.all('*', async (c, next) => {
       404,
     );
   }
+  if (tenant.status === 'pending') {
+    return c.html(
+      '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Confirmação pendente</title>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+      '<body style="font-family:sans-serif;text-align:center;padding:4rem;color:#374151">' +
+      '<h1 style="font-size:2.2rem;margin:0 0 1rem;color:#6366F1">📧 Confirmação pendente</h1>' +
+      '<p>Verifique seu e-mail e clique no link para ativar sua conta.</p>' +
+      '<p style="color:#6b7280;font-size:14px;">O link expira em 24 horas.</p>' +
+      `<p style="margin-top:2rem;"><a href="https://${c.env.BASE_DOMAIN}" style="color:#6366F1">← Voltar</a></p>` +
+      '</body></html>',
+      403,
+    );
+  }
+  if (tenant.status !== 'active') {
+    return c.html(
+      '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Conta indisponível</title></head>' +
+      '<body style="font-family:sans-serif;text-align:center;padding:4rem;color:#374151">' +
+      '<h1>Conta indisponível</h1><p>Esta conta está suspensa ou encerrada.</p>' +
+      `<p><a href="https://${c.env.BASE_DOMAIN}" style="color:#6366F1">financaslivre.com</a></p>` +
+      '</body></html>',
+      tenant.status === 'deleted' ? 410 : 403,
+    );
+  }
 
-  // Proxy to Pages project, preserving path + query
+  // Proxy to Pages project, preserving path + query.
+  // Strip auth-sensitive headers: o pages.dev é um origin diferente, não deve receber
+  // o JWT do CF Access nem cookies de sessão — risco de vazamento se houver
+  // comprometimento ou logging no Pages.
   const pagesUrl = `https://${c.env.CF_PAGES_PROJECT}.pages.dev${url.pathname}${url.search}`;
+  const filteredHeaders = new Headers(c.req.raw.headers);
+  filteredHeaders.delete('cf-access-jwt-assertion');
+  filteredHeaders.delete('cf-access-authenticated-user-email');
+  filteredHeaders.delete('cf-access-authenticated-user-id');
+  filteredHeaders.delete('cookie');
+  filteredHeaders.delete('authorization');
+  // host correto para o destino
+  filteredHeaders.set('host', `${c.env.CF_PAGES_PROJECT}.pages.dev`);
   const res = await fetch(pagesUrl, {
     method: c.req.method,
-    headers: c.req.raw.headers,
+    headers: filteredHeaders,
     body: c.req.raw.body,
     redirect: 'follow',
   });
+  // Também filtrar headers sensíveis da resposta (set-cookie do Pages não deve vazar
+  // ao tenant — qualquer cookie deve vir do nosso próprio Worker).
+  const respHeaders = new Headers(res.headers);
+  respHeaders.delete('set-cookie');
   return new Response(res.body, {
     status: res.status,
-    headers: res.headers,
+    headers: respHeaders,
   });
 });
 
@@ -119,14 +180,33 @@ app.use('/public/*', async (c, next) => {
 });
 app.route('/', registerRoutes);
 
+// ── CSRF: exigir header customizado em mutações ───────────────────────────────
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+app.use('/api/*', async (c, next) => {
+  // /api/public/* (registro) é chamado por origin de outro subdomínio — exige CORS
+  // (já configurado em /public/*) mas Turnstile já protege contra automação.
+  if (c.req.path.startsWith('/api/public/')) return next();
+  if (MUTATING.has(c.req.method)) {
+    const xrw = c.req.header('X-Requested-With');
+    if (xrw !== 'fetch') {
+      return c.json({ error: 'CSRF guard: header X-Requested-With ausente.', code: 'CSRF_GUARD' }, 403);
+    }
+  }
+  return next();
+});
+
 // ── Middleware: CF Access JWT ─────────────────────────────────────────────────
 app.use('/api/*', async (c, next) => {
   const jwt = c.req.header('Cf-Access-Jwt-Assertion') ?? getCookie(c, 'CF_Authorization');
   if (!jwt) return c.json({ error: 'Não autenticado', code: 'NO_JWT' }, 401);
 
   try {
-    const expectedAud = c.env.ZT_ADMIN_APP_AUD || undefined;
-    await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, expectedAud);
+    if (!c.env.ZT_ADMIN_APP_AUD) {
+      return c.json({ error: 'Admin app sem audience configurado.', code: 'ADMIN_MISCONFIGURED' }, 503);
+    }
+    const claims = await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, c.env.ZT_ADMIN_APP_AUD);
+    c.set('adminEmail', claims.email);
+    c.set('adminSub',   claims.sub);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'JWT inválido';
     return c.json({ error: msg, code: 'INVALID_JWT' }, 401);
@@ -192,7 +272,7 @@ app.route('/api', communicationsRoutes);
 // ── SPA ───────────────────────────────────────────────────────────────────────
 app.get('*', (c) => {
   c.header('Cache-Control', 'no-store');
-  return c.html(adminHtml(c.env.BASE_DOMAIN));
+  return c.html(adminHtml(c.env.BASE_DOMAIN, c.get('cspNonce')));
 });
 
 export default app;

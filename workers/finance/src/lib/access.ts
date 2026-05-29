@@ -25,8 +25,10 @@ function b64urlDecode(str: string): Uint8Array {
 export async function verifyAccessJWT(
   jwt: string,
   teamDomain: string,
-  expectedAud?: string,
+  expectedAud: string,
 ): Promise<AccessClaims> {
+  if (!expectedAud) throw new Error('expectedAud é obrigatório');
+
   const parts = jwt.split('.');
   if (parts.length !== 3) throw new Error('Formato JWT inválido');
 
@@ -34,18 +36,16 @@ export async function verifyAccessJWT(
   const header  = JSON.parse(atob(rawHeader))  as { kid?: string; alg: string };
   const payload = JSON.parse(atob(rawPayload)) as JWTPayload;
 
-  // Expiry
-  if (Math.floor(Date.now() / 1000) > payload.exp) throw new Error('JWT expirado');
+  // Expiry — 60s de tolerância para clock skew
+  if (Math.floor(Date.now() / 1000) > payload.exp + 60) throw new Error('JWT expirado');
 
   // Issuer
   const iss = `https://${teamDomain}.cloudflareaccess.com`;
   if (payload.iss !== iss) throw new Error(`JWT issuer inválido: ${payload.iss}`);
 
-  // Audience (opcional — tenants sem App provisionado pulam esta verificação)
-  if (expectedAud) {
-    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(expectedAud)) throw new Error('JWT audience inválido');
-  }
+  // Audience (obrigatório — impede JWTs de outros apps no mesmo team)
+  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!aud.includes(expectedAud)) throw new Error('JWT audience inválido');
 
   // JWKS — CF edge faz cache por 1h automaticamente
   const jwksResp = await fetch(`${iss}/cdn-cgi/access/certs`);

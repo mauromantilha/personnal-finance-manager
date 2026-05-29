@@ -4,9 +4,7 @@ compatibility_date = "2025-05-25"
 
 routes = [
   { pattern = "admin.financaslivre.com/*", zone_name = "financaslivre.com" },
-  { pattern = "*.financaslivre.com/*",     zone_name = "financaslivre.com" },
-  { pattern = "admin.mksbrasil.com/*",     zone_name = "mksbrasil.com" },
-  { pattern = "*.mksbrasil.com/*",         zone_name = "mksbrasil.com" }
+  { pattern = "*.financaslivre.com/*",     zone_name = "financaslivre.com" }
 ]
 
 # Importa arquivos .sql como strings para o migrations runner
@@ -26,14 +24,13 @@ id      = "593f7fe311e843df848bcb8c755e86c4"
 [vars]
 CF_ACCOUNT_ID    = "9b61f609fee4408fd1c4344feaf9b16a"
 CF_ZONE_ID       = "350977938b4449f053202db04e455be1"   # financaslivre.com
-CF_ZONE_ID_LEGACY = "9d58d8832a461d6e64a17307de32b553"  # mksbrasil.com
 CF_TUNNEL_ID     = "50e41496-a62b-452a-bd9f-d0f08c2a620d"
 CF_TEAM_DOMAIN   = "mks-personnal-finance-manager"
 BASE_DOMAIN      = "financaslivre.com"
 ZT_OTP_IDP_ID    = "9737c8ad-db9e-458e-a5ea-bf0cb9c145dd"
 ZT_ADMIN_APP_AUD  = "523b24f3dbbedfaa13534ff852a1580bd3901e80bf14272e1ca5db116db698e8"
 CF_PAGES_PROJECT  = "mks-financas"
-RESEND_FROM_DOMAIN = "mksbrasil.com"
+RESEND_FROM_DOMAIN = "financaslivre.com"
 D1_FREE_LIMIT    = "10"
 D1_PAID_LIMIT    = "50000"
 ZT_FREE_LIMIT    = "50"
@@ -44,6 +41,8 @@ ZT_FREE_LIMIT    = "50"
 # ADMIN_PASSWORD
 # RESEND_API_KEY
 # TURNSTILE_SECRET_KEY
+# CPF_SALT              — PBKDF2 salt para hash de CPF (gere com openssl rand -hex 32)
+# APP_SECRET            — HMAC para tokens de verificação de email (gere com openssl rand -hex 32)
 
 [observability]
 enabled = true

@@ -53,7 +53,7 @@ export interface Tenant {
   accessAppAud:   string;
   accessPolicyId: string;
   ownerEmailHash: string;
-  status:         'active' | 'suspended' | 'deleted';
+  status:         'pending' | 'active' | 'suspended' | 'deleted';
   createdAt:      string;
 }
 
@@ -79,6 +79,20 @@ app.use('*', async (c, next) => {
   c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
 });
 
+// ── CSRF: exigir header customizado em mutações ───────────────────────────────
+// Browsers só permitem headers custom em XHR/fetch same-origin OU CORS preflight.
+// Bloqueia POST/PUT/PATCH/DELETE forjados por <form> em outro site.
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+app.use('/api/*', async (c, next) => {
+  if (MUTATING.has(c.req.method)) {
+    const xrw = c.req.header('X-Requested-With');
+    if (xrw !== 'fetch') {
+      return c.json({ error: 'CSRF guard: header X-Requested-With ausente.', code: 'CSRF_GUARD' }, 403);
+    }
+  }
+  return next();
+});
+
 // ── Middleware 1: Tenant resolution ───────────────────────────────────────────
 app.use('*', async (c, next) => {
   const host      = c.req.header('host') ?? '';
@@ -87,6 +101,7 @@ app.use('*', async (c, next) => {
   const tenant = await c.env.MKS_TENANTS.get(`tenant:${subdomain}`, 'json') as Tenant | null;
 
   if (!tenant)                        return c.json({ error: 'Tenant não encontrado' },  404);
+  if (tenant.status === 'pending')    return c.json({ error: 'Conta aguardando verificação de email.', code: 'PENDING_VERIFICATION' }, 403);
   if (tenant.status === 'suspended')  return c.json({ error: 'Conta suspensa.' },         403);
   if (tenant.status === 'deleted')    return c.json({ error: 'Conta encerrada.' },         410);
   if (!tenant.d1DatabaseId)           return c.json({ error: 'Banco não configurado.' },  503);
@@ -117,8 +132,10 @@ app.use('/api/*', async (c, next) => {
 
   try {
     const tenant = c.get('tenant');
-    const expectedAud = tenant.accessAppAud || undefined;
-    const claims = await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, expectedAud);
+    if (!tenant.accessAppAud) {
+      return c.json({ error: 'Tenant sem audience configurado.', code: 'TENANT_MISCONFIGURED' }, 503);
+    }
+    const claims = await verifyAccessJWT(jwt, c.env.CF_TEAM_DOMAIN, tenant.accessAppAud);
     c.set('email', claims.email);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'JWT inválido';

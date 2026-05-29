@@ -88,23 +88,26 @@ router.post('/users', async (c) => {
 
   const { name, email, role, memberId: newMemberId, relationship } = await c.req.json<any>();
   if (!name || !email) return c.json({ error: 'name e email são obrigatórios.' }, 400);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+  const nameStr = String(name).trim();
+  if (nameStr.length < 2 || nameStr.length > 60 || !/^[\p{L}\p{N} .'\-]+$/u.test(nameStr))
+    return c.json({ error: 'name: 2-60 caracteres, apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || String(email).length > 254)
     return c.json({ error: 'Email inválido.' }, 400);
 
   const dup = await db.first('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]);
   if (dup) return c.json({ error: 'Usuário com este email já existe.' }, 409);
 
-  const id = `user-${Date.now()}`;
+  const id = `user-${crypto.randomUUID()}`;
   await db.exec(
     "INSERT INTO users (id,name,email,role,member_id,is_active,relationship,created_at) VALUES (?,?,?,?,?,1,?,datetime('now'))",
-    [id, name, email, role === 'owner' ? 'owner' : 'member', newMemberId || null, relationship || null],
+    [id, nameStr, email, role === 'owner' ? 'owner' : 'member', newMemberId || null, relationship || null],
   );
 
   // Cria policy no CF Access automaticamente
   const tenant = c.get('tenant');
   await accessCreatePolicy(
     c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.accessAppId,
-    `${name.trim()} — acesso automático`, email,
+    `${nameStr} — acesso automático`, email,
   );
 
   return c.json({ success: true, userId: id });

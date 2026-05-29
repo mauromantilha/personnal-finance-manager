@@ -1,8 +1,22 @@
 import { Hono } from 'hono';
-import type { Env, Tenant } from '../index';
+import type { Env, Tenant, Variables } from '../index';
 import { deleteAccessApp, addPagesDomain, removeCfAccessDnsPlaceholder, listAccessApps, updateAccessAppName, deleteD1Database, deleteR2ObjectsWithPrefix } from '../lib/cf-api';
 
-const router = new Hono<{ Bindings: Env }>();
+const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+const DELETE_RL_MAX    = 3;
+const DELETE_RL_WINDOW = 60; // seconds
+
+async function writeAudit(
+  kv: KVNamespace,
+  entry: { action: string; actor: string; target: string; ip: string; result: string; details?: unknown },
+): Promise<void> {
+  const ts = new Date().toISOString();
+  const id = `audit:${ts}:${entry.action}:${entry.target}`;
+  const rec = { ...entry, ts };
+  // 90 dias de retenção
+  await kv.put(id, JSON.stringify(rec), { expirationTtl: 90 * 24 * 3600 });
+}
 
 // GET /api/families
 router.get('/families', async (c) => {
@@ -27,11 +41,26 @@ router.put('/families/:subdomain', async (c) => {
   if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
 
   const updates = await c.req.json<Partial<Pick<Tenant, 'name' | 'status' | 'tier'>>>();
-  if (updates.name   !== undefined) tenant.name   = updates.name;
+  if (updates.name !== undefined) {
+    const n = String(updates.name).trim();
+    if (n.length < 2 || n.length > 60 || !/^[\p{L}\p{N} .'\-]+$/u.test(n))
+      return c.json({ error: 'name: 2-60 caracteres, apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
+    tenant.name = n;
+  }
   if (updates.status !== undefined) tenant.status = updates.status;
   if (updates.tier   !== undefined) tenant.tier   = updates.tier;
 
   await c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant));
+
+  await writeAudit(c.env.MKS_ADMIN, {
+    action: 'family.update',
+    actor: c.get('adminEmail') ?? c.get('adminSub') ?? 'unknown',
+    target: subdomain,
+    ip: c.req.header('CF-Connecting-IP') ?? 'unknown',
+    result: 'success',
+    details: updates,
+  });
+
   return c.json({ success: true, tenant });
 });
 
@@ -39,8 +68,46 @@ router.put('/families/:subdomain', async (c) => {
 // Deletes D1 database, R2 objects, CF Access app, and all KV records
 router.delete('/families/:subdomain', async (c) => {
   const { subdomain } = c.req.param();
+  const actor = c.get('adminEmail') ?? c.get('adminSub') ?? 'unknown';
+  const ip    = c.req.header('CF-Connecting-IP') ?? 'unknown';
+
+  // 1. Confirmação server-side: header deve bater com o path param
+  const confirmHeader = c.req.header('X-Confirm-Subdomain');
+  if (confirmHeader !== subdomain) {
+    await writeAudit(c.env.MKS_ADMIN, {
+      action: 'family.delete', actor, target: subdomain, ip,
+      result: 'rejected', details: 'missing or mismatched X-Confirm-Subdomain',
+    });
+    return c.json({
+      error: 'Confirmação ausente. Envie header X-Confirm-Subdomain com o subdomínio exato.',
+      code: 'CONFIRM_REQUIRED',
+    }, 400);
+  }
+
+  // 2. Rate limit por admin (sub do JWT) — 3 deletes/min
+  const rlKey = `ratelimit:family-delete:${c.get('adminSub') ?? actor}`;
+  const rlRaw = await c.env.MKS_ADMIN.get(rlKey);
+  const attempts = rlRaw ? parseInt(rlRaw, 10) : 0;
+  if (attempts >= DELETE_RL_MAX) {
+    await writeAudit(c.env.MKS_ADMIN, {
+      action: 'family.delete', actor, target: subdomain, ip,
+      result: 'rate_limited', details: `${attempts}/${DELETE_RL_MAX} per ${DELETE_RL_WINDOW}s`,
+    });
+    return c.json({
+      error: `Limite de ${DELETE_RL_MAX} exclusões por minuto atingido. Aguarde.`,
+      code: 'RATE_LIMITED',
+    }, 429);
+  }
+  await c.env.MKS_ADMIN.put(rlKey, String(attempts + 1), { expirationTtl: DELETE_RL_WINDOW });
+
   const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
-  if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
+  if (!tenant) {
+    await writeAudit(c.env.MKS_ADMIN, {
+      action: 'family.delete', actor, target: subdomain, ip,
+      result: 'not_found',
+    });
+    return c.json({ error: 'Família não encontrada.' }, 404);
+  }
 
   const { CF_ACCOUNT_ID, CF_API_TOKEN, CF_ZONE_ID, BASE_DOMAIN } = c.env;
   const errors: string[] = [];
@@ -96,6 +163,12 @@ router.delete('/families/:subdomain', async (c) => {
   ]);
 
   console.log(`[DELETE ${subdomain}] Família completamente removida. Errors: ${errors.length}`);
+
+  await writeAudit(c.env.MKS_ADMIN, {
+    action: 'family.delete', actor, target: subdomain, ip,
+    result: errors.length === 0 ? 'success' : 'partial',
+    details: { tenantName: tenant.name, d1: tenant.d1DatabaseId, errors },
+  });
 
   return c.json({
     success: true,

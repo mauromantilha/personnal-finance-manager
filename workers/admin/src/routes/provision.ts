@@ -1,11 +1,20 @@
 import { Hono } from 'hono';
-import type { Env } from '../index';
+import type { Env, Variables } from '../index';
 import { createD1Database, execD1Batch, createAccessApp, createAccessPolicy, addPagesDomain, removeCfAccessDnsPlaceholder } from '../lib/cf-api';
 import { sendWelcomeEmail } from '../lib/resend';
 // @ts-ignore — wrangler Text rule imports .sql as string
 import SCHEMA_SQL from '../schema.sql';
 
-const router = new Hono<{ Bindings: Env }>();
+const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+async function writeAudit(
+  kv: KVNamespace,
+  entry: { action: string; actor: string; target: string; ip: string; result: string; details?: unknown },
+): Promise<void> {
+  const ts = new Date().toISOString();
+  const id = `audit:${ts}:${entry.action}:${entry.target}`;
+  await kv.put(id, JSON.stringify({ ...entry, ts }), { expirationTtl: 90 * 24 * 3600 });
+}
 
 router.post('/provision', async (c) => {
   const body = await c.req.json<any>();
@@ -13,6 +22,9 @@ router.post('/provision', async (c) => {
 
   if (!name || !subdomain || !ownerEmail)
     return c.json({ error: 'name, subdomain e ownerEmail são obrigatórios.' }, 400);
+  const nameStr = String(name).trim();
+  if (nameStr.length < 2 || nameStr.length > 60 || !/^[\p{L}\p{N} .'\-]+$/u.test(nameStr))
+    return c.json({ error: 'name: 2-60 caracteres, apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
   if (!/^[a-z0-9-]+$/.test(subdomain))
     return c.json({ error: 'subdomain: use apenas letras minúsculas, números e hífens.' }, 400);
   if (!ownerEmail.includes('@'))
@@ -42,7 +54,7 @@ router.post('/provision', async (c) => {
     const [, app] = await Promise.all([
       applySchema(CF_ACCOUNT_ID, CF_API_TOKEN, d1DatabaseId),
       createAccessApp(CF_ACCOUNT_ID, CF_API_TOKEN, {
-        name: `Finanças Livre — ${name}`,
+        name: `Finanças Livre — ${nameStr}`,
         domain,
         otpIdpId: ZT_OTP_IDP_ID,
       }),
@@ -65,7 +77,7 @@ router.post('/provision', async (c) => {
   }
 
   // Step 4b: Remove the A 100.64.0.1 placeholder that CF Access plants for
-  // the subdomain. With *.mksbrasil.com wildcard in place, deleting the
+  // the subdomain. With *.financaslivre.com wildcard in place, deleting the
   // specific record is enough — the wildcard takes over automatically.
   try {
     await removeCfAccessDnsPlaceholder(
@@ -79,7 +91,7 @@ router.post('/provision', async (c) => {
   // Step 5: Build tenant record and write to KV
   const ownerEmailHash = await hashEmail(ownerEmail);
   const tenant = {
-    name,
+    name: nameStr,
     subdomain,
     familyId,
     tier: Number(tier) as 1 | 2,
@@ -115,8 +127,17 @@ router.post('/provision', async (c) => {
 
   // Step 6: Send welcome email (best-effort, non-blocking)
   c.executionCtx.waitUntil(
-    sendWelcomeEmail(RESEND_API_KEY, ownerEmail, name, subdomain, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
+    sendWelcomeEmail(RESEND_API_KEY, ownerEmail, nameStr, subdomain, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
   );
+
+  await writeAudit(c.env.MKS_ADMIN, {
+    action: 'family.provision',
+    actor: c.get('adminEmail') ?? c.get('adminSub') ?? 'unknown',
+    target: subdomain,
+    ip: c.req.header('CF-Connecting-IP') ?? 'unknown',
+    result: 'success',
+    details: { tenantName: nameStr, ownerEmail, d1: d1DatabaseId },
+  });
 
   return c.json({ success: true, tenant });
 });

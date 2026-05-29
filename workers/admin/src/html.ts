@@ -1,11 +1,11 @@
-export function adminHtml(baseDomain: string): string { return /* html */`<!DOCTYPE html>
+export function adminHtml(baseDomain: string, nonce: string): string { return /* html */`<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MKS Admin Console</title>
-  <script>const BASE_DOMAIN = '${baseDomain}';</script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script nonce="${nonce}">const BASE_DOMAIN = '${baseDomain}';</script>
+  <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root{
       /* main area - light */
@@ -557,7 +557,7 @@ export function adminHtml(baseDomain: string): string { return /* html */`<!DOCT
 <!-- TOAST -->
 <div id="toast"></div>
 
-<script>
+<script nonce="${nonce}">
 // ── State ─────────────────────────────────────────────────────────
 var allFams     = [];
 var nocLoaded   = false;
@@ -567,6 +567,14 @@ var charts      = {};
 
 // ── Helpers ───────────────────────────────────────────────────────
 function el(id) { return document.getElementById(id); }
+
+// HTML escape — aplicar em TODO dado vindo de tenants/usuários antes de injetar via innerHTML.
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 function fmt(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -582,7 +590,7 @@ function fmtDate(s) {
   return new Date(s).toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' });
 }
 
-function badge(s) { return '<span class="bdg bdg-' + s + '">' + s + '</span>'; }
+function badge(s) { var e = esc(s); return '<span class="bdg bdg-' + e + '">' + e + '</span>'; }
 
 function tierBadge(t) {
   return t === 2 ? '<span class="bdg bdg-paid">Paid</span>' : '<span class="bdg bdg-free">Free</span>';
@@ -605,14 +613,20 @@ function showToast(msg, ok) {
 }
 
 // ── API ───────────────────────────────────────────────────────────
-async function api(method, path, body, ms) {
+async function api(method, path, body, ms, extraHeaders) {
   if (ms === undefined) ms = 15000;
   var ctrl = new AbortController();
   var tid  = setTimeout(function() { ctrl.abort(); }, ms);
   try {
+    var headers = body ? { 'Content-Type': 'application/json' } : {};
+    // CSRF guard — header customizado em todas as chamadas (idempotente para GET)
+    headers['X-Requested-With'] = 'fetch';
+    if (extraHeaders) {
+      for (var k in extraHeaders) headers[k] = extraHeaders[k];
+    }
     var r = await fetch('/api' + path, {
       method: method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      headers: headers,
       body: body ? JSON.stringify(body) : undefined,
       credentials: 'same-origin',
       signal: ctrl.signal,
@@ -766,7 +780,7 @@ async function loadDashboard() {
 
   if (health.error) {
     el('kpi-fam').textContent = 'Erro';
-    el('dash-fam-table').innerHTML = '<div class="empty"><div class="alr alr-err" style="display:inline-flex;gap:6px;align-items:center;">⚠ ' + health.error + '</div></div>';
+    el('dash-fam-table').innerHTML = '<div class="empty"><div class="alr alr-err" style="display:inline-flex;gap:6px;align-items:center;">⚠ ' + esc(health.error) + '</div></div>';
     return;
   }
 
@@ -807,7 +821,7 @@ async function loadDashboard() {
   alertsEl.innerHTML = '';
   var alerts = (famData.alerts || (health.alerts) || []);
   alerts.forEach(function(a) {
-    alertsEl.innerHTML += '<div class="alr alr-warn"><span>⚠</span><span>' + a + '</span></div>';
+    alertsEl.innerHTML += '<div class="alr alr-warn"><span>⚠</span><span>' + esc(a) + '</span></div>';
   });
 
   // Charts
@@ -823,9 +837,9 @@ async function loadDashboard() {
     return;
   }
   var rows = recent.map(function(f) {
-    return '<tr data-action="detail" data-sub="' + f.subdomain + '">'
-      + '<td class="row-fam-name">' + f.name + '</td>'
-      + '<td><span class="mono" style="color:var(--acc2);font-size:12px;">' + f.subdomain + '</span></td>'
+    return '<tr data-action="detail" data-sub="' + esc(f.subdomain) + '">'
+      + '<td class="row-fam-name">' + esc(f.name) + '</td>'
+      + '<td><span class="mono" style="color:var(--acc2);font-size:12px;">' + esc(f.subdomain) + '</span></td>'
       + '<td>' + tierBadge(f.tier) + '</td>'
       + '<td>' + badge(f.status) + '</td>'
       + '<td style="color:var(--t2);font-size:12px;">' + fmtDate(f.createdAt) + '</td>'
@@ -845,7 +859,7 @@ async function loadNOC() {
   el('noc-wrap').innerHTML = '<div class="empty"><div class="spin" style="font-size:22px;">⟳</div><div style="margin-top:10px;">Consultando infraestrutura Cloudflare…</div></div>';
   var data = await api('GET', '/noc', null, 35000);
   if (data.error) {
-    el('noc-wrap').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + data.error + '</span></div>';
+    el('noc-wrap').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + esc(data.error) + '</span></div>';
     return;
   }
   nocLoaded = true;
@@ -885,11 +899,11 @@ function renderNOC(data) {
   var tableRows = dbs.map(function(db) {
     var pct = s.totalD1Bytes > 0 ? Math.min(db.fileSize / s.totalD1Bytes * 100, 100) : 0;
     var sizeColor = db.fileSize > 5000000 ? 'color:var(--warn)' : db.fileSize > 1000000 ? 'color:var(--t1)' : 'color:var(--t2)';
-    return '<tr data-action="detail" data-sub="' + db.subdomain + '">'
-      + '<td class="row-fam-name">' + db.name
-        + (db.error ? ' <span style="color:var(--err);font-size:10px;" title="' + db.error + '">⚠</span>' : '') + '</td>'
-      + '<td><span class="mono" style="color:var(--acc2);font-size:11px;">' + db.subdomain + '</span></td>'
-      + '<td><span class="mono" style="color:var(--t3);font-size:10px;">' + (db.dbId ? db.dbId.slice(0,12) + '…' : '—') + '</span></td>'
+    return '<tr data-action="detail" data-sub="' + esc(db.subdomain) + '">'
+      + '<td class="row-fam-name">' + esc(db.name)
+        + (db.error ? ' <span style="color:var(--err);font-size:10px;" title="' + esc(db.error) + '">⚠</span>' : '') + '</td>'
+      + '<td><span class="mono" style="color:var(--acc2);font-size:11px;">' + esc(db.subdomain) + '</span></td>'
+      + '<td><span class="mono" style="color:var(--t3);font-size:10px;">' + esc(db.dbId ? db.dbId.slice(0,12) + '…' : '—') + '</span></td>'
       + '<td style="' + sizeColor + '">' + (db.fileSize > 0 ? fmt(db.fileSize) : '<span style="color:var(--t3);font-size:11px;">< 1 KB</span>')
         + '<div class="d1-bar" style="width:80px;"><div class="d1-fill" style="width:' + pct.toFixed(1) + '%"></div></div></td>'
       + '<td style="color:var(--t2);">' + (db.numTables || 0) + ' tabelas</td>'
@@ -914,7 +928,7 @@ function renderNOC(data) {
     + (r2.length > 0
       ? r2.map(function(b) {
           return '<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:9px;padding:11px 14px;min-width:180px;">'
-            + '<div style="font-size:13px;font-weight:600;color:var(--t1);">' + b.name + '</div>'
+            + '<div style="font-size:13px;font-weight:600;color:var(--t1);">' + esc(b.name) + '</div>'
             + '<div style="font-size:11px;color:var(--t3);margin-top:3px;">' + (b.creation_date ? fmtDate(b.creation_date) : '—') + '</div>'
             + '</div>';
         }).join('')
@@ -990,14 +1004,15 @@ function renderFamilies(fams) {
     return;
   }
   var rows = fams.map(function(f) {
-    var actions = '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="detail" data-sub="' + f.subdomain + '">Detalhes</button>';
-    if (f.status === 'active')    actions += ' <button class="btn btn-warn" style="font-size:11px;padding:4px 9px;" data-action="suspend" data-sub="' + f.subdomain + '">Suspender</button>';
-    if (f.status === 'suspended') actions += ' <button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" data-action="activate" data-sub="' + f.subdomain + '">Reativar</button>';
-    if (f.status !== 'deleted')   actions += ' <button class="btn btn-err" style="font-size:11px;padding:4px 9px;" data-action="delete" data-sub="' + f.subdomain + '">Excluir</button>';
-    actions += ' <button class="btn" style="font-size:11px;padding:4px 9px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + f.subdomain + '">◎ Stats</button>';
+    var sub = esc(f.subdomain);
+    var actions = '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="detail" data-sub="' + sub + '">Detalhes</button>';
+    if (f.status === 'active')    actions += ' <button class="btn btn-warn" style="font-size:11px;padding:4px 9px;" data-action="suspend" data-sub="' + sub + '">Suspender</button>';
+    if (f.status === 'suspended') actions += ' <button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" data-action="activate" data-sub="' + sub + '">Reativar</button>';
+    if (f.status !== 'deleted')   actions += ' <button class="btn btn-err" style="font-size:11px;padding:4px 9px;" data-action="delete" data-sub="' + sub + '">Excluir</button>';
+    actions += ' <button class="btn" style="font-size:11px;padding:4px 9px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + sub + '">◎ Stats</button>';
     return '<tr>'
-      + '<td class="row-fam-name" style="cursor:pointer;" data-action="detail" data-sub="' + f.subdomain + '">' + f.name + '</td>'
-      + '<td><span class="mono" style="color:var(--acc2);font-size:12px;">' + f.subdomain + '</span></td>'
+      + '<td class="row-fam-name" style="cursor:pointer;" data-action="detail" data-sub="' + sub + '">' + esc(f.name) + '</td>'
+      + '<td><span class="mono" style="color:var(--acc2);font-size:12px;">' + sub + '</span></td>'
       + '<td>' + tierBadge(f.tier) + '</td>'
       + '<td>' + badge(f.status) + '</td>'
       + '<td style="color:var(--t2);font-size:12px;">' + fmtDate(f.createdAt) + '</td>'
@@ -1021,14 +1036,14 @@ async function updateStatus(sub, status) {
 
 async function deleteFamily(sub) {
   if (!confirm('Excluir família "' + sub + '"? A família será marcada como excluída.')) return;
-  var data = await api('DELETE', '/families/' + sub);
+  var data = await api('DELETE', '/families/' + sub, null, 30000, { 'X-Confirm-Subdomain': sub });
   if (data.success) { showToast('Família excluída.'); loadFamilies(); }
   else showToast(data.error || 'Erro ao excluir.', false);
 }
 
 async function deleteFamily(sub) {
   if (!confirm('Excluir família "' + sub + '"? A família será marcada como excluída.')) return;
-  var data = await api('DELETE', '/families/' + sub);
+  var data = await api('DELETE', '/families/' + sub, null, 30000, { 'X-Confirm-Subdomain': sub });
   if (data.success) { showToast('Família excluída.'); loadFamilies(); }
   else showToast(data.error || 'Erro ao excluir.', false);
 }
@@ -1039,7 +1054,7 @@ async function loadTelemetry() {
   el('tel-req').textContent = '—'; el('tel-d1').textContent = '—';
   el('tel-fam-table').innerHTML = spinner('Carregando telemetria…');
   var d = await api('GET', '/telemetry/global');
-  if (d.error) { el('tel-fam-table').innerHTML = err(d.error); return; }
+  if (d.error) { el('tel-fam-table').innerHTML = err(esc(d.error)); return; }
   var s = d.summary || {};
   el('tel-fam').textContent  = s.activeFamilies ?? '—';
   el('tel-fam-meta').textContent = (s.totalFamilies || 0) + ' total (' + (s.suspendedFamilies || 0) + ' susp / ' + (s.deletedFamilies || 0) + ' del)';
@@ -1069,13 +1084,14 @@ async function loadTelemetry() {
     var pct = maxD1 > 0 ? Math.round((f.d1FileSizeBytes || 0) / maxD1 * 100) : 0;
     var bar = '<div style="background:rgba(79,112,247,.12);border-radius:4px;height:8px;width:100%;margin-top:3px;">'
             + '<div style="background:var(--acc);border-radius:4px;height:8px;width:' + pct + '%;"></div></div>';
+    var sub = esc(f.subdomain);
     return '<tr>'
-      + '<td style="cursor:pointer;" data-action="telemetry" data-sub="' + f.subdomain + '">' + f.name + '</td>'
-      + '<td><span class="mono" style="font-size:12px;color:var(--acc2);">' + f.subdomain + '</span></td>'
-      + '<td style="color:var(--t2);font-size:12px;">' + f.users + '</td>'
-      + '<td style="color:var(--t2);font-size:12px;">' + f.txLast24h + '</td>'
+      + '<td style="cursor:pointer;" data-action="telemetry" data-sub="' + sub + '">' + esc(f.name) + '</td>'
+      + '<td><span class="mono" style="font-size:12px;color:var(--acc2);">' + sub + '</span></td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + (f.users | 0) + '</td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + (f.txLast24h | 0) + '</td>'
       + '<td style="min-width:120px;"><div style="font-size:11px;color:var(--t2);">' + mb + ' MB</div>' + bar + '</td>'
-      + '<td style="text-align:right;"><button class="btn" style="font-size:11px;padding:3px 8px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + f.subdomain + '">Detalhes</button></td>'
+      + '<td style="text-align:right;"><button class="btn" style="font-size:11px;padding:3px 8px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + sub + '">Detalhes</button></td>'
       + '</tr>';
   }).join('');
   el('tel-fam-table').innerHTML = '<table>'
@@ -1096,7 +1112,7 @@ async function openFamilyTelemetry(sub) {
   el('ftel-users-table').innerHTML = spinner('Carregando…');
   el('ftel-refresh').onclick = function() { openFamilyTelemetry(sub); };
   var d = await api('GET', '/telemetry/family/' + sub);
-  if (d.error) { el('ftel-users-table').innerHTML = err(d.error); return; }
+  if (d.error) { el('ftel-users-table').innerHTML = err(esc(d.error)); return; }
   var d1 = d.d1 || {}; var r2 = d.r2 || {};
   el('ftel-users').textContent = (d1.tables || {}).users || 0;
   el('ftel-tx').textContent    = fmtNum((d1.tables || {}).transactions || 0);
@@ -1118,10 +1134,11 @@ async function openFamilyTelemetry(sub) {
   var users = d.recentUsers || [];
   if (!users.length) { el('ftel-users-table').innerHTML = '<div class="empty">Nenhum usuário.</div>'; return; }
   var uRows = users.map(function(u) {
+    var roleClass = u.role === 'admin' ? 'warn' : 'ok';
     return '<tr>'
-      + '<td>' + (u.name || '—') + '</td>'
-      + '<td style="color:var(--t2);font-size:12px;">' + (u.email || '—') + '</td>'
-      + '<td><span class="badge badge-' + (u.role === 'admin' ? 'warn' : 'ok') + '">' + (u.role || 'user') + '</span></td>'
+      + '<td>' + esc(u.name || '—') + '</td>'
+      + '<td style="color:var(--t2);font-size:12px;">' + esc(u.email || '—') + '</td>'
+      + '<td><span class="badge badge-' + roleClass + '">' + esc(u.role || 'user') + '</span></td>'
       + '<td style="color:var(--t3);font-size:12px;">' + fmtDate(u.created_at) + '</td>'
       + '</tr>';
   }).join('');
@@ -1138,7 +1155,7 @@ async function loadSecurity() {
   el('sec-rl-table').innerHTML = spinner('Carregando…');
   el('sec-countries-table').innerHTML = spinner('Carregando…');
   var d = await api('GET', '/telemetry/security');
-  if (d.error) { el('sec-ips-table').innerHTML = err(d.error); return; }
+  if (d.error) { el('sec-ips-table').innerHTML = err(esc(d.error)); return; }
   var fw = d.firewall || {}; var rl = d.rateLimits || {};
 
   el('sec-blocked').textContent  = fmtNum(fw.totalBlocked || 0);
@@ -1170,9 +1187,9 @@ async function loadSecurity() {
       + '<thead><tr><th>IP</th><th>Bloqueios</th></tr></thead>'
       + '<tbody>' + ips.map(function(i) {
           var pct = maxC > 0 ? Math.round(i.count / maxC * 100) : 0;
-          return '<tr><td class="mono" style="font-size:12px;color:var(--err);">' + i.ip + '</td>'
+          return '<tr><td class="mono" style="font-size:12px;color:var(--err);">' + esc(i.ip) + '</td>'
             + '<td style="width:160px;">'
-            + '<div style="font-size:11px;color:var(--t2);">' + i.count + '</div>'
+            + '<div style="font-size:11px;color:var(--t2);">' + (i.count | 0) + '</div>'
             + '<div style="background:rgba(240,75,75,.12);border-radius:3px;height:6px;"><div style="background:var(--err);border-radius:3px;height:6px;width:' + pct + '%;"></div></div>'
             + '</td></tr>';
         }).join('') + '</tbody></table>';
@@ -1185,8 +1202,8 @@ async function loadSecurity() {
     el('sec-rl-table').innerHTML = '<table>'
       + '<thead><tr><th>Chave</th><th>Contagem</th></tr></thead>'
       + '<tbody>' + rlIPs.map(function(i) {
-          return '<tr><td class="mono" style="font-size:12px;color:var(--warn);">' + i.key + '</td>'
-            + '<td style="font-size:12px;color:var(--t2);">' + i.count + '</td></tr>';
+          return '<tr><td class="mono" style="font-size:12px;color:var(--warn);">' + esc(i.key) + '</td>'
+            + '<td style="font-size:12px;color:var(--t2);">' + (i.count | 0) + '</td></tr>';
         }).join('') + '</tbody></table>';
   }
 
@@ -1198,9 +1215,9 @@ async function loadSecurity() {
     + '<thead><tr><th>País</th><th>Eventos</th></tr></thead>'
     + '<tbody>' + countries.map(function(c) {
         var pct = maxCnt > 0 ? Math.round(c.count / maxCnt * 100) : 0;
-        return '<tr><td style="font-size:13px;">' + c.country + '</td>'
+        return '<tr><td style="font-size:13px;">' + esc(c.country) + '</td>'
           + '<td style="width:180px;">'
-          + '<div style="font-size:11px;color:var(--t2);">' + c.count + '</div>'
+          + '<div style="font-size:11px;color:var(--t2);">' + (c.count | 0) + '</div>'
           + '<div style="background:rgba(245,166,35,.12);border-radius:3px;height:6px;"><div style="background:var(--warn);border-radius:3px;height:6px;width:' + pct + '%;"></div></div>'
           + '</td></tr>';
       }).join('') + '</tbody></table>';
@@ -1283,7 +1300,7 @@ async function openModal(sub) {
   modalSub    = sub;
   modalTenant = allFams.find(function(f) { return f.subdomain === sub; }) || null;
 
-  el('m-name').textContent = modalTenant ? modalTenant.name : sub;
+  el('m-name').textContent = modalTenant ? (modalTenant.name || '') : sub;
   el('m-badges').innerHTML = modalTenant ? (badge(modalTenant.status) + ' ' + tierBadge(modalTenant.tier)) : spinner();
   el('m-info').innerHTML   = spinner();
   el('m-stats').innerHTML  = spinner('Consultando D1…');
@@ -1295,25 +1312,27 @@ async function openModal(sub) {
   if (!modalTenant) {
     var td = await api('GET', '/families/' + sub);
     if (td.error || !td.tenant) {
-      el('m-info').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + (td.error || 'Família não encontrada.') + '</span></div>';
+      el('m-info').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + esc(td.error || 'Família não encontrada.') + '</span></div>';
       return;
     }
     modalTenant = td.tenant;
   }
 
-  el('m-name').textContent  = modalTenant.name;
+  el('m-name').textContent  = modalTenant.name || '';
   el('m-badges').innerHTML  = badge(modalTenant.status) + ' ' + tierBadge(modalTenant.tier);
-  el('m-link').href         = 'https://' + modalTenant.subdomain + '.' + BASE_DOMAIN;
+  // m-link.href: validar subdomain ([a-z0-9-]) antes para evitar javascript:/data:
+  var safeSub = String(modalTenant.subdomain || '').replace(/[^a-z0-9-]/g, '');
+  el('m-link').href         = 'https://' + safeSub + '.' + BASE_DOMAIN;
   el('m-toggle').textContent = modalTenant.status === 'active' ? 'Suspender' : 'Reativar';
   el('m-toggle').className = 'btn ' + (modalTenant.status === 'active' ? 'btn-warn' : 'btn-ok') + ' btn-sm';
 
   el('m-info').innerHTML =
-    igItem('Subdomínio',    '<span class="mono" style="color:var(--acc2);">' + modalTenant.subdomain + '.' + BASE_DOMAIN + '</span>') +
+    igItem('Subdomínio',    '<span class="mono" style="color:var(--acc2);">' + esc(modalTenant.subdomain) + '.' + esc(BASE_DOMAIN) + '</span>') +
     igItem('Plano',         tierBadge(modalTenant.tier)) +
     igItem('Status',        badge(modalTenant.status)) +
     igItem('Criação',       fmtDate(modalTenant.createdAt)) +
-    igItem('Família ID',    '<span class="mono" style="font-size:11px;color:var(--t2);">' + (modalTenant.familyId || '—') + '</span>') +
-    igItem('D1 Database',   '<span class="mono" style="font-size:10px;color:var(--t2);">' + ((modalTenant.d1DatabaseId || '').slice(0,20) + (modalTenant.d1DatabaseId ? '…' : '—')) + '</span>');
+    igItem('Família ID',    '<span class="mono" style="font-size:11px;color:var(--t2);">' + esc(modalTenant.familyId || '—') + '</span>') +
+    igItem('D1 Database',   '<span class="mono" style="font-size:10px;color:var(--t2);">' + esc((modalTenant.d1DatabaseId || '').slice(0,20) + (modalTenant.d1DatabaseId ? '…' : '—')) + '</span>');
 
   loadModalStats(sub);
 }
@@ -1325,7 +1344,7 @@ function igItem(label, val) {
 async function loadModalStats(sub) {
   var data = await api('GET', '/families/' + sub + '/stats', null, 25000);
   if (data.error) {
-    el('m-stats').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + data.error + '</span></div>';
+    el('m-stats').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + esc(data.error) + '</span></div>';
     return;
   }
   var rows = data.rows || {};
@@ -1370,7 +1389,7 @@ async function modalToggle() {
 async function modalDelete() {
   if (!modalTenant) return;
   if (!confirm('Excluir família "' + modalTenant.name + '"?')) return;
-  var data = await api('DELETE', '/families/' + modalSub);
+  var data = await api('DELETE', '/families/' + modalSub, null, 30000, { 'X-Confirm-Subdomain': modalSub });
   if (data.success) { showToast('Família excluída.'); closeModal(); loadFamilies(); }
   else showToast(data.error || 'Erro ao excluir.', false);
 }
@@ -1388,18 +1407,19 @@ async function submitProvision(e) {
   btn.disabled = false;
   btn.textContent = 'Provisionar Família';
   if (data.success) {
+    var safeSub = String(body.subdomain || '').replace(/[^a-z0-9-]/g, '');
     el('prov-result').innerHTML =
       '<div class="alr alr-ok" style="flex-direction:column;align-items:flex-start;gap:8px;padding:14px 16px;">'
       + '<div style="font-weight:700;font-size:13px;">✓ Família provisionada com sucesso!</div>'
-      + '<div style="font-size:12px;color:var(--t2);">URL: <a href="https://' + body.subdomain + '.' + BASE_DOMAIN + '" target="_blank" style="color:var(--acc2);">https://' + body.subdomain + '.' + BASE_DOMAIN + '</a></div>'
-      + '<div class="mono" style="font-size:11px;color:var(--t3);">D1: ' + data.tenant.d1DatabaseId + '</div>'
+      + '<div style="font-size:12px;color:var(--t2);">URL: <a href="https://' + safeSub + '.' + esc(BASE_DOMAIN) + '" target="_blank" rel="noopener noreferrer" style="color:var(--acc2);">https://' + safeSub + '.' + esc(BASE_DOMAIN) + '</a></div>'
+      + '<div class="mono" style="font-size:11px;color:var(--t3);">D1: ' + esc(data.tenant.d1DatabaseId) + '</div>'
       + '</div>';
     e.target.reset();
     showToast('Família provisionada com sucesso!');
     allFams = [];
     nocLoaded = false;
   } else {
-    el('prov-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + (data.error || 'Erro desconhecido') + '</span></div>';
+    el('prov-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + esc(data.error || 'Erro desconhecido') + '</span></div>';
     showToast(data.error || 'Erro ao provisionar.', false);
   }
 }
@@ -1414,7 +1434,8 @@ async function loadCommunications() {
     allFams.filter(function(f) { return f.status === 'active'; }).forEach(function(f) {
       var opt = document.createElement('option');
       opt.value = f.subdomain;
-      opt.textContent = f.name + ' (' + f.subdomain + ')';
+      // textContent já escapa — safe
+      opt.textContent = (f.name || '') + ' (' + (f.subdomain || '') + ')';
       sel.appendChild(opt);
     });
     commFamsLoaded = true;
@@ -1422,7 +1443,7 @@ async function loadCommunications() {
 
   el('comm-history').innerHTML = spinner('Carregando histórico…');
   var d = await api('GET', '/communications');
-  if (d.error) { el('comm-history').innerHTML = err(d.error); return; }
+  if (d.error) { el('comm-history').innerHTML = err(esc(d.error)); return; }
   var items = d.items || [];
   if (!items.length) {
     el('comm-history').innerHTML = '<div class="empty">Nenhum comunicado enviado ainda.</div>';
@@ -1434,7 +1455,7 @@ async function loadCommunications() {
     return '<div style="padding:12px 16px;border-bottom:1px solid var(--bdr);">'
       + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">'
       + '<span style="font-size:14px;">' + icon + '</span>'
-      + '<span style="font-size:12px;font-weight:600;color:var(--t1);">' + item.subject + '</span>'
+      + '<span style="font-size:12px;font-weight:600;color:var(--t1);">' + esc(item.subject) + '</span>'
       + '</div>'
       + '<div style="font-size:11px;color:var(--t3);">' + fmtDate(item.sentAt)
       + ' · ' + (item.sent ? item.sent.length : 0) + ' enviado(s)'
@@ -1460,13 +1481,13 @@ async function sendCommunication() {
   btn.disabled = false;
   btn.textContent = '✉ Enviar Comunicado';
   if (data.success) {
-    el('comm-result').innerHTML = '<div class="alr alr-ok"><span>✓</span><span>' + data.sent + ' email(s) enviado(s) com sucesso.' + (data.errors && data.errors.length ? ' (' + data.errors.length + ' erro(s))' : '') + '</span></div>';
+    el('comm-result').innerHTML = '<div class="alr alr-ok"><span>✓</span><span>' + (data.sent | 0) + ' email(s) enviado(s) com sucesso.' + (data.errors && data.errors.length ? ' (' + (data.errors.length | 0) + ' erro(s))' : '') + '</span></div>';
     showToast(data.sent + ' comunicado(s) enviado(s).');
     el('comm-subject').value = '';
     el('comm-message').value = '';
     loadCommunications();
   } else {
-    el('comm-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + (data.error || 'Erro ao enviar.') + '</span></div>';
+    el('comm-result').innerHTML = '<div class="alr alr-err"><span>⚠</span><span>' + esc(data.error || 'Erro ao enviar.') + '</span></div>';
     showToast(data.error || 'Erro ao enviar.', false);
   }
 }

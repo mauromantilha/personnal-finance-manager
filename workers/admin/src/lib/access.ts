@@ -57,8 +57,10 @@ async function importRSAKey(key: JWKSKey): Promise<CryptoKey> {
 export async function verifyAccessJWT(
   jwt: string,
   teamDomain: string,
-  expectedAud?: string,
+  expectedAud: string,
 ): Promise<{ email: string; sub: string }> {
+  if (!expectedAud) throw new Error('expectedAud é obrigatório');
+
   const parts = jwt.split('.');
   if (parts.length !== 3) throw new Error('JWT malformado');
 
@@ -66,15 +68,14 @@ export async function verifyAccessJWT(
   const header  = JSON.parse(atob(headerB64.replace(/-/g, '+').replace(/_/g, '/')));
   const payload = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'))) as AccessClaims;
 
-  if (payload.exp < Date.now() / 1000) throw new Error('JWT expirado');
+  // 60s de tolerância para clock skew
+  if (payload.exp + 60 < Date.now() / 1000) throw new Error('JWT expirado');
 
   const issuer = `https://${teamDomain}.cloudflareaccess.com`;
   if (payload.iss !== issuer) throw new Error(`Issuer inválido: ${payload.iss}`);
 
-  if (expectedAud) {
-    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(expectedAud)) throw new Error('AUD inválido');
-  }
+  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!aud.includes(expectedAud)) throw new Error('AUD inválido');
 
   const keys   = await getPublicKeys(teamDomain);
   const jwkKey = keys.find(k => k.kid === header.kid) ?? keys[0];

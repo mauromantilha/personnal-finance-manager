@@ -14,7 +14,7 @@ import {
   createD1Database, execD1Batch, createAccessApp, createAccessPolicy,
   addPagesDomain, removeCfAccessDnsPlaceholder,
 } from '../lib/cf-api';
-import { sendWelcomeEmail } from '../lib/resend';
+import { sendVerificationEmail } from '../lib/resend';
 // @ts-ignore
 import SCHEMA_SQL from '../schema.sql';
 
@@ -22,6 +22,7 @@ const router = new Hono<{ Bindings: Env }>();
 
 const RATE_LIMIT_MAX    = 5;
 const RATE_LIMIT_WINDOW = 10 * 60; // 10 min
+const VERIFY_TTL_SECONDS = 24 * 3600; // 24 horas
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ async function sha256hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** HMAC-SHA-256 hex — use for all identity-sensitive hashes (CPF). */
+/** HMAC-SHA-256 hex — mantido apenas para compatibilidade com hashes legados (cpf:). */
 async function hmacSha256hex(text: string, secret: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw', new TextEncoder().encode(secret),
@@ -38,6 +39,25 @@ async function hmacSha256hex(text: string, secret: string): Promise<string> {
   );
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text));
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * PBKDF2-SHA-256 com 250k iterações — usado para hash determinístico de CPF (v2).
+ * Custo computacional alto inviabiliza brute-force de tabela arco-íris mesmo
+ * se CPF_SALT vazar: ~50 ms por candidato × 10^9 CPFs ≈ 1.500 anos em 1 CPU.
+ * Mantém-se determinístico (salt fixo) para permitir detecção de duplicidade.
+ */
+const PBKDF2_ITERATIONS = 250_000;
+async function pbkdf2Cpf(cpf: string, salt: string): Promise<string> {
+  const baseKey = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(cpf),
+    { name: 'PBKDF2' }, false, ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    baseKey, 256,
+  );
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** Brazilian CPF validation (check digits) */
@@ -66,6 +86,51 @@ async function verifyTurnstile(secret: string, token: string, ip: string): Promi
   });
   const data = await res.json<{ success: boolean }>();
   return data.success === true;
+}
+
+// ── Token de verificação assinado (HMAC-SHA-256) ─────────────────────────────
+function b64urlEncode(bytes: Uint8Array): string {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(str: string): Uint8Array {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - b64.length % 4);
+  return Uint8Array.from(atob(b64 + pad), c => c.charCodeAt(0));
+}
+async function hmac256(secret: string, msg: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg));
+  return new Uint8Array(sig);
+}
+async function signVerifyToken(payload: { sub: string; email: string; exp: number }, secret: string): Promise<string> {
+  const p = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = b64urlEncode(await hmac256(secret, p));
+  return `${p}.${sig}`;
+}
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+async function verifyVerifyToken(token: string, secret: string): Promise<{ sub: string; email: string } | null> {
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [p, sig] = parts;
+  try {
+    const expected = await hmac256(secret, p);
+    const given    = b64urlDecode(sig);
+    if (!timingSafeEqual(expected, given)) return null;
+    const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(p))) as { sub: string; email: string; exp: number };
+    if (typeof payload.exp !== 'number' || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    if (typeof payload.sub !== 'string' || typeof payload.email !== 'string') return null;
+    return { sub: payload.sub, email: payload.email };
+  } catch {
+    return null;
+  }
 }
 
 async function applySchema(accountId: string, token: string, dbId: string): Promise<void> {
@@ -103,6 +168,11 @@ router.post('/public/register', async (c) => {
   if (!name || !subdomain || !email || !cpf || !turnstileToken)
     return c.json({ error: 'Campos obrigatórios: nome, subdomínio, email, CPF e captcha.' }, 400);
 
+  // Whitelist Unicode: letras, números, espaço, ponto, apóstrofo, hífen. Bloqueia <>"'&/\`
+  const nameStr = String(name).trim();
+  if (nameStr.length < 2 || nameStr.length > 60 || !/^[\p{L}\p{N} .'\-]+$/u.test(nameStr))
+    return c.json({ error: 'Nome: 2-60 caracteres. Use apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
+
   if (!/^[a-z0-9-]{2,30}$/.test(subdomain))
     return c.json({ error: 'Subdomínio: 2-30 caracteres, letras minúsculas, números e hífens.' }, 400);
 
@@ -121,10 +191,17 @@ router.post('/public/register', async (c) => {
   const cpfDigits = cpf.replace(/\D/g, '');
   const cpfSalt   = c.env.CPF_SALT;
   if (!cpfSalt) return c.json({ error: 'Serviço temporariamente indisponível.' }, 503);
-  const cpfHash   = await hmacSha256hex(cpfDigits, cpfSalt);
 
-  const existingCpf = await c.env.MKS_TENANTS.get(`cpf:${cpfHash}`);
-  if (existingCpf)
+  // Dual lookup: v2 (PBKDF2) para registros novos + v1 (HMAC) para legacy.
+  // Escritas novas usam apenas v2.
+  const cpfHashV2 = await pbkdf2Cpf(cpfDigits, cpfSalt);
+  const cpfHashV1 = await hmacSha256hex(cpfDigits, cpfSalt);
+
+  const [existingV2, existingV1] = await Promise.all([
+    c.env.MKS_TENANTS.get(`cpf2:${cpfHashV2}`),
+    c.env.MKS_TENANTS.get(`cpf:${cpfHashV1}`),
+  ]);
+  if (existingV2 || existingV1)
     return c.json({ error: 'Este CPF já possui uma conta cadastrada.' }, 409);
 
   // ── 5. Subdomain uniqueness ────────────────────────────────────────────────
@@ -150,7 +227,7 @@ router.post('/public/register', async (c) => {
     const [, app] = await Promise.all([
       applySchema(CF_ACCOUNT_ID, CF_API_TOKEN, d1DatabaseId),
       createAccessApp(CF_ACCOUNT_ID, CF_API_TOKEN, {
-        name: `Finanças Livre — ${name}`,
+        name: `Finanças Livre — ${nameStr}`,
         domain,
         otpIdpId: ZT_OTP_IDP_ID,
       }),
@@ -161,32 +238,28 @@ router.post('/public/register', async (c) => {
     return c.json({ error: `Falha no provisionamento: ${(e as Error).message}` }, 500);
   }
 
-  let accessPolicyId: string;
-  try {
-    accessPolicyId = await createAccessPolicy(CF_ACCOUNT_ID, CF_API_TOKEN, accessAppId, {
-      name: `Owner — ${email}`,
-      email,
-    });
-  } catch (e) {
-    return c.json({ error: `Falha ao configurar acesso: ${(e as Error).message}` }, 500);
-  }
+  // Importante: NÃO criamos CF Access policy aqui. Ela só é criada quando o dono
+  // do email confirmar via /public/verify. Isso impede que alguém cadastre o
+  // email de outra pessoa e a vítima receba magic link de uma conta que não pediu.
 
   try {
     await removeCfAccessDnsPlaceholder(c.env.CF_ZONE_ID, CF_API_TOKEN, domain);
   } catch (_) { /* non-fatal */ }
 
-  // ── 7. KV: tenant + CPF index ─────────────────────────────────────────────
+  // ── 7. KV: tenant (pending) + CPF index ───────────────────────────────────
   const ownerEmailHash = (await sha256hex(email.toLowerCase())).slice(0, 16);
   const tenant = {
-    name, subdomain, familyId,
+    name: nameStr, subdomain, familyId,
     tier: 1 as const,
     d1DatabaseId,
     r2Bucket:       'mks-documents',
     r2Prefix:       familyId,
-    accessAppId, accessAppAud, accessPolicyId,
+    accessAppId, accessAppAud,
+    accessPolicyId: '',                 // criado em /public/verify
     ownerEmailHash,
-    status:    'active' as const,
-    createdAt: new Date().toISOString(),
+    ownerEmail:     email,              // necessário p/ criar policy ao verificar
+    status:         'pending' as const, // ativa só após verificação
+    createdAt:      new Date().toISOString(),
   };
 
   if (CF_PAGES_PROJECT) {
@@ -196,8 +269,8 @@ router.post('/public/register', async (c) => {
 
   await Promise.all([
     c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant)),
-    c.env.MKS_TENANTS.put(`cpf:${cpfHash}`, familyId),           // CPF → familyId
-    c.env.MKS_TENANTS.put(`email:${ownerEmailHash}`, subdomain),  // email index (16-char hash)
+    c.env.MKS_TENANTS.put(`cpf2:${cpfHashV2}`, familyId),          // CPF → familyId (v2 PBKDF2)
+    c.env.MKS_TENANTS.put(`email:${ownerEmailHash}`, subdomain),   // email index (16-char hash)
   ]);
 
   const index: string[] = JSON.parse(await c.env.MKS_TENANTS.get('tenants:index') ?? '[]');
@@ -207,14 +280,71 @@ router.post('/public/register', async (c) => {
     c.env.MKS_TENANTS.put('tenants:count', String(index.length)),
   ]);
 
-  // Decrement rate limit on success so genuine users aren't penalized
-  await c.env.MKS_TENANTS.put(rlKey, String(Math.max(0, attempts)), { expirationTtl: RATE_LIMIT_WINDOW });
+  // NÃO decrementar o rate-limit: permitir reset facilita enumeração de CPFs/subdomínios
+  // já cadastrados (atacante registra, ganha sucesso = HTTP 201, reseta contador, e itera).
+
+  // Token de verificação (24h) — assinado com APP_SECRET
+  if (!c.env.APP_SECRET) {
+    return c.json({ error: 'APP_SECRET não configurado no servidor.' }, 503);
+  }
+  const exp   = Math.floor(Date.now() / 1000) + VERIFY_TTL_SECONDS;
+  const token = await signVerifyToken({ sub: subdomain, email, exp }, c.env.APP_SECRET);
+  const verifyUrl = `https://admin.${BASE_DOMAIN}/public/verify?token=${encodeURIComponent(token)}`;
 
   c.executionCtx.waitUntil(
-    sendWelcomeEmail(RESEND_API_KEY, email, name, subdomain, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
+    sendVerificationEmail(RESEND_API_KEY, email, nameStr, verifyUrl, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
   );
 
-  return c.json({ success: true, url: `https://${domain}` }, 201);
+  return c.json({
+    success: true,
+    pending: true,
+    message: 'Verifique seu e-mail para ativar a conta.',
+  }, 201);
+});
+
+// ── GET /public/verify ────────────────────────────────────────────────────────
+// Confirma o cadastro: valida token assinado, cria CF Access policy e ativa o tenant.
+router.get('/public/verify', async (c) => {
+  const token = c.req.query('token');
+  if (!token) return c.json({ error: 'Token ausente.' }, 400);
+  if (!c.env.APP_SECRET) return c.json({ error: 'Serviço indisponível.' }, 503);
+
+  const claims = await verifyVerifyToken(token, c.env.APP_SECRET);
+  if (!claims) return c.json({ error: 'Token inválido ou expirado.' }, 400);
+
+  const tenantRaw = await c.env.MKS_TENANTS.get(`tenant:${claims.sub}`);
+  if (!tenantRaw) return c.json({ error: 'Conta não encontrada.' }, 404);
+  const tenant = JSON.parse(tenantRaw) as any;
+
+  // Idempotência: se já ativo, redireciona sem erro
+  if (tenant.status === 'active') {
+    return c.redirect(`https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`, 302);
+  }
+  if (tenant.status !== 'pending') {
+    return c.json({ error: 'Conta não pode ser ativada (status: ' + tenant.status + ').' }, 409);
+  }
+  if (tenant.ownerEmail !== claims.email) {
+    return c.json({ error: 'Token não corresponde ao email da conta.' }, 400);
+  }
+
+  // Cria CF Access policy agora que o email foi confirmado
+  let accessPolicyId: string;
+  try {
+    accessPolicyId = await createAccessPolicy(
+      c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.accessAppId,
+      { name: `Owner — ${claims.email}`, email: claims.email },
+    );
+  } catch (e) {
+    return c.json({ error: `Falha ao ativar acesso: ${(e as Error).message}` }, 500);
+  }
+
+  tenant.accessPolicyId = accessPolicyId;
+  tenant.status         = 'active';
+  tenant.activatedAt    = new Date().toISOString();
+  delete tenant.ownerEmail; // não precisamos mais armazenar em claro
+  await c.env.MKS_TENANTS.put(`tenant:${tenant.subdomain}`, JSON.stringify(tenant));
+
+  return c.redirect(`https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`, 302);
 });
 
 export default router;

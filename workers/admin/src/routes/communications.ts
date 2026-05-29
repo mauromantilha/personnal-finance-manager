@@ -1,10 +1,19 @@
 import { Hono } from 'hono';
-import type { Env, Tenant } from '../index';
+import type { Env, Tenant, Variables } from '../index';
 
 const CF  = 'https://api.cloudflare.com/client/v4';
 const hdr = (t: string) => ({ Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' });
 
-const router = new Hono<{ Bindings: Env }>();
+const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+async function writeAudit(
+  kv: KVNamespace,
+  entry: { action: string; actor: string; target: string; ip: string; result: string; details?: unknown },
+): Promise<void> {
+  const ts = new Date().toISOString();
+  const id = `audit:${ts}:${entry.action}:${entry.target}`;
+  await kv.put(id, JSON.stringify({ ...entry, ts }), { expirationTtl: 90 * 24 * 3600 });
+}
 
 const LEVELS: Record<string, { label: string; color: string; icon: string }> = {
   info:        { label: 'Informativo',           color: '#0aad68', icon: 'ℹ️'  },
@@ -103,30 +112,46 @@ router.post('/communications/send', async (c) => {
     MKS_ADMIN.put('comms:index', JSON.stringify(existing.slice(-100))),
   ]);
 
+  await writeAudit(c.env.MKS_ADMIN, {
+    action: 'communications.send',
+    actor: c.get('adminEmail') ?? c.get('adminSub') ?? 'unknown',
+    target: target || 'all',
+    ip: c.req.header('CF-Connecting-IP') ?? 'unknown',
+    result: errors.length === 0 ? 'success' : 'partial',
+    details: { subject, level, sentCount: sent.length, errorCount: errors.length, total: recipients.length },
+  });
+
   return c.json({ success: true, sent: sent.length, errors, total: recipients.length });
 });
+
+function escHtml(v: string): string {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 function buildEmailHtml(
   lvl: { label: string; color: string; icon: string },
   subject: string, message: string, familyName: string, baseDomain: string,
 ): string {
-  const escaped = message
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  const escSubject    = escHtml(subject);
+  const escFamilyName = escHtml(familyName);
+  const escBaseDomain = escHtml(baseDomain);
+  const escMessage    = escHtml(message).replace(/\n/g, '<br>');
   return `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f8fafc;">
   <div style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
     <div style="background:${lvl.color};padding:16px 24px;">
       <span style="color:#fff;font-weight:700;font-size:15px;">${lvl.icon} ${lvl.label}</span>
     </div>
     <div style="padding:24px;">
-      <h2 style="color:#1a2340;margin:0 0 16px;font-size:18px;">${subject}</h2>
-      <div style="color:#334155;font-size:14px;line-height:1.8;">${escaped}</div>
+      <h2 style="color:#1a2340;margin:0 0 16px;font-size:18px;">${escSubject}</h2>
+      <div style="color:#334155;font-size:14px;line-height:1.8;">${escMessage}</div>
     </div>
     <hr style="border:none;border-top:1px solid #e2e8f0;margin:0;">
     <div style="padding:16px 24px;background:#f8fafc;">
       <p style="color:#94a3b8;font-size:12px;margin:0;">
-        Enviado para a família <strong>${familyName}</strong> pelo painel administrativo.<br>
-        <a href="https://${baseDomain}" style="color:#6366f1;">Finanças Livre</a>
+        Enviado para a família <strong>${escFamilyName}</strong> pelo painel administrativo.<br>
+        <a href="https://${escBaseDomain}" style="color:#6366f1;">Finanças Livre</a>
       </p>
     </div>
   </div>
