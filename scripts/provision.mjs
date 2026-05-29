@@ -235,10 +235,10 @@ async function sendWelcomeEmail(to, name, subdomain, tempPassword, resendKey, dr
       Tratamos apenas dados operacionais mínimos (e-mail para acesso, logs técnicos) com base nas
       hipóteses legais da Lei nº 13.709/2018 (LGPD). Você pode exercer seus direitos de acesso,
       correção e exclusão a qualquer momento escrevendo para
-      <a href="mailto:privacidade@mksbrasil.com" style="color:#92400e">privacidade@mksbrasil.com</a>.
+      <a href="mailto:privacidade@financaslivre.com" style="color:#92400e">privacidade@financaslivre.com</a>.
     </p>
     <p style="margin:0;font-size:12px;color:#92400e">
-      Política completa: <a href="https://www.mksbrasil.com/politica-de-privacidade" style="color:#92400e">www.mksbrasil.com/politica-de-privacidade</a>
+      Política completa: <a href="https://financaslivre.com/privacidade" style="color:#92400e">financaslivre.com/privacidade</a>
       — Versão 1.0, vigente desde 29/03/2026.
     </p>
   </div>
@@ -247,12 +247,12 @@ async function sendWelcomeEmail(to, name, subdomain, tempPassword, resendKey, dr
     Ao acessar a plataforma, você confirma que leu e concorda com a Política de Privacidade da MKS Brasil.
   </p>
   <p style="font-size:13px;color:#64748b;margin:0">
-    Dúvidas? Escreva para <a href="mailto:contato@mksbrasil.com" style="color:#4f46e5">contato@mksbrasil.com</a>
+    Dúvidas? Escreva para <a href="mailto:contato@financaslivre.com" style="color:#4f46e5">contato@financaslivre.com</a>
   </p>
 </div>
 <p style="font-size:11px;color:#94a3b8;text-align:center;margin:16px 0 0">
   MKS Brasil Software e Gestão Empresarial Ltda · CNPJ 64.293.212/0001-97 ·
-  <a href="https://www.mksbrasil.com" style="color:#94a3b8">www.mksbrasil.com</a>
+  <a href="https://financaslivre.com" style="color:#94a3b8">financaslivre.com</a>
 </p>
 </body></html>`;
 
@@ -262,7 +262,7 @@ async function sendWelcomeEmail(to, name, subdomain, tempPassword, resendKey, dr
     method: 'POST',
     headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'MKS Finanças <financas@mksbrasil.com>',
+      from: 'MKS Finaças <financas@financaslivre.com>',
       to,
       subject: `[MKS Finanças] Sua plataforma está pronta — família ${name}`,
       html,

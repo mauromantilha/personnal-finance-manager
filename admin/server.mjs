@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * MKS Finanças — Painel Admin (Etapa 3 + 4)
- * Porta: 3999 | PM2: mks-admin | URL: https://admin.mksbrasil.com
+ * Porta: 3999 | PM2: mks-admin | URL: https://admin.financaslivre.com
  *
  * Requer ~/.mks-control/admin.env com:
  *   ADMIN_PASSWORD=...
@@ -22,7 +22,7 @@ import { spawn, execSync }                      from 'child_process';
 const __dirname    = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
 const CTRL         = join(process.env.HOME, '.mks-control');
-const BASE_DOMAIN  = 'mksbrasil.com';
+const BASE_DOMAIN  = 'financaslivre.com';
 const PORT         = 3999;
 
 const QUOTA_PATH    = join(CTRL, 'email-quota.json');
@@ -189,7 +189,7 @@ const HTML = `<!DOCTYPE html>
       <span class="text-2xl">🏛️</span>
       <div>
         <h1 class="font-bold text-white leading-tight">MKS Finanças Admin</h1>
-        <p class="text-xs text-slate-500">admin.mksbrasil.com</p>
+        <p class="text-xs text-slate-500">admin.financaslivre.com</p>
       </div>
     </div>
     <div class="flex items-center gap-4">
@@ -294,7 +294,7 @@ const HTML = `<!DOCTYPE html>
               <div class="flex items-center gap-2">
                 <input id="p-sub" type="text" placeholder="silva"
                   class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                <span class="text-slate-400 text-sm whitespace-nowrap">.mksbrasil.com</span>
+                <span class="text-slate-400 text-sm whitespace-nowrap">.financaslivre.com</span>
               </div>
               <p class="text-xs text-slate-500 mt-1">Apenas letras minúsculas, números e hífen</p>
             </div>
@@ -373,7 +373,7 @@ const HTML = `<!DOCTYPE html>
       <!-- API info -->
       <div class="mt-6 bg-slate-900 border border-slate-800 rounded-xl p-6">
         <h3 class="font-medium text-white mb-3">Endpoint para instâncias familiares</h3>
-        <div class="log-box text-xs leading-relaxed">POST https://admin.mksbrasil.com/api/email/send
+        <div class="log-box text-xs leading-relaxed">POST https://admin.financaslivre.com/api/email/send
 Authorization: Bearer {FAMILY_TOKEN}
 Content-Type: application/json
 
@@ -440,7 +440,7 @@ Content-Type: application/json
           o endpoint público <code class="text-indigo-400">/api/lgpd/status</code> de cada instância.
         </p>
         <p>
-          DPO / Encarregado: <a href="mailto:privacidade@mksbrasil.com" class="text-indigo-400 hover:text-indigo-300">privacidade@mksbrasil.com</a>
+          DPO / Encarregado: <a href="mailto:privacidade@financaslivre.com" class="text-indigo-400 hover:text-indigo-300">privacidade@financaslivre.com</a>
           · Prazo de resposta: até 15 dias corridos.
         </p>
       </div>
@@ -664,7 +664,7 @@ async function refreshHealth() {
             </span>
           </div>
           \${lgpdBadge ? '<div class="mb-3">' + lgpdBadge + '</div>' : '<div class="mb-3"></div>'}
-          <p class="text-xs text-slate-400 mb-1">🌐 \${esc(f.subdomain)}.mksbrasil.com</p>
+          <p class="text-xs text-slate-400 mb-1">🌐 \${esc(f.subdomain)}.financaslivre.com</p>
           <p class="text-xs text-slate-500 mb-4">⚙️ porta \${f.port || '—'}</p>
           <div class="grid grid-cols-3 gap-2 text-center">
             <div class="bg-slate-800 rounded-lg py-2">
@@ -723,7 +723,7 @@ async function loadFamilies() {
           <button onclick="startDelete('\${esc(f.subdomain)}')"
              class="text-red-400 hover:text-red-300 text-xs transition-colors">🗑 Destruir</button>
         \` : \`
-          <a href="https://\${esc(f.subdomain)}.mksbrasil.com" target="_blank" rel="noopener"
+          <a href="https://\${esc(f.subdomain)}.financaslivre.com" target="_blank" rel="noopener"
              class="text-indigo-400 hover:text-indigo-300 text-xs mr-3 transition-colors">↗ Abrir</a>
           <button onclick="doSuspend('\${esc(f.subdomain)}')"
              class="text-amber-400 hover:text-amber-300 text-xs mr-3 transition-colors">⏸ Suspender</button>
@@ -1029,7 +1029,7 @@ async function loadLGPD() {
         ? new Date(lgpd.acceptedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
         : '—';
       const version = lgpd.version || (ok ? '1.0' : '—');
-      const link    = \`<a href="https://\${esc(f.subdomain)}.mksbrasil.com" target="_blank" rel="noopener"
+      const link    = \`<a href="https://\${esc(f.subdomain)}.financaslivre.com" target="_blank" rel="noopener"
                           class="text-indigo-400 hover:text-indigo-300 text-xs transition-colors">↗ Abrir</a>\`;
       return \`
         <tr class="border-b border-slate-800/50 hover:bg-slate-900/50 transition-colors \${!ok ? 'bg-amber-950/5' : ''}">

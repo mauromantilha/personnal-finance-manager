@@ -4,8 +4,8 @@
  *
  * O que faz:
  *   1. Cria ~/.mks-control/admin.env com ADMIN_PASSWORD + CF token
- *   2. Configura rota no Cloudflare Tunnel: admin.mksbrasil.com → localhost:3999
- *   3. Cria registro DNS CNAME admin.mksbrasil.com
+ *   2. Configura rota no Cloudflare Tunnel: admin.financaslivre.com → localhost:3999
+ *   3. Cria registro DNS CNAME admin.financaslivre.com
  *   4. Inicia processo PM2 mks-admin
  *
  * Uso:
@@ -24,7 +24,7 @@ const PROJECT_ROOT = join(__dirname, '..');
 const CTRL        = join(process.env.HOME, '.mks-control');
 const CF_ACCOUNT  = '9b61f609fee4408fd1c4344feaf9b16a';
 const CF_TUNNEL   = '50e41496-a62b-452a-bd9f-d0f08c2a620d';
-const BASE_DOMAIN = 'mksbrasil.com';
+const BASE_DOMAIN = 'financaslivre.com';
 const ADMIN_SUB   = 'admin';
 const ADMIN_PORT  = 3999;
 

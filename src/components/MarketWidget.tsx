@@ -24,10 +24,11 @@ interface Rates {
   selic: number | null;
   fetchedAt: string | null;
   stale?: boolean;
+  error?: string;
 }
 
 interface NewsItem { title: string; link: string; pubDate: string; description: string; source: string }
-interface NewsData { items: NewsItem[]; fetchedAt: string | null; stale?: boolean }
+interface NewsData { items: NewsItem[]; fetchedAt: string | null; stale?: boolean; error?: string }
 
 function DeltaBadge({ pct, compact = false }: { pct: number; compact?: boolean }) {
   const up = pct > 0; const flat = pct === 0;
@@ -72,48 +73,79 @@ export default function MarketWidget() {
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const fetchAll = useCallback(async (showRefreshing = false) => {
+  const fetchJson = useCallback(async <T,>(url: string): Promise<T> => {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json() as Promise<T>;
+  }, []);
+
+  const fetchAll = useCallback(async (showRefreshing = false, forceFresh = false) => {
     if (showRefreshing) setRefreshing(true);
+
+    const query = forceFresh ? '?fresh=1' : '';
+
     try {
       const [qRes, rRes, nRes] = await Promise.allSettled([
-        fetch('/api/market/quotes').then(r => r.json()),
-        fetch('/api/market/rates').then(r => r.json()),
-        fetch('/api/market/news').then(r => r.json()),
+        fetchJson<QuotesData>(`/api/market/quotes${query}`),
+        fetchJson<Rates>(`/api/market/rates${query}`),
+        fetchJson<NewsData>('/api/market/news'),
       ]);
+
       if (qRes.status === 'fulfilled') setQuotes(qRes.value);
       if (rRes.status === 'fulfilled') setRates(rRes.value);
       if (nRes.status === 'fulfilled') setNews(nRes.value);
-      setLastRefresh(new Date());
+
+      const fetchedAts = [qRes, rRes, nRes]
+        .flatMap((result) => result.status === 'fulfilled' && result.value.fetchedAt ? [result.value.fetchedAt] : [])
+        .map((value) => new Date(value))
+        .filter((value) => !Number.isNaN(value.getTime()));
+
+      setLastRefresh(fetchedAts.length ? new Date(Math.max(...fetchedAts.map((value) => value.getTime()))) : new Date());
+
+      if (qRes.status === 'rejected' && rRes.status === 'rejected') {
+        setLoadError('Nao foi possivel atualizar cotacoes e cambio agora.');
+      } else if (qRes.status === 'rejected') {
+        setLoadError('Nao foi possivel atualizar cotacoes agora.');
+      } else if (rRes.status === 'rejected') {
+        setLoadError('Nao foi possivel atualizar cambio agora.');
+      } else {
+        setLoadError(null);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [fetchJson]);
 
   useEffect(() => {
     fetchAll();
-    // Cotações + câmbio: a cada 5 minutos (mantém último dado se falhar)
+    // Cotações + câmbio: a cada 30 segundos
     const quotesTimer = setInterval(async () => {
+      if (document.hidden) return;
+
       try {
         const [qRes, rRes] = await Promise.allSettled([
-          fetch('/api/market/quotes').then(r => r.json()),
-          fetch('/api/market/rates').then(r => r.json()),
+          fetchJson<QuotesData>('/api/market/quotes'),
+          fetchJson<Rates>('/api/market/rates'),
         ]);
         if (qRes.status === 'fulfilled') setQuotes(qRes.value);
         if (rRes.status === 'fulfilled') setRates(rRes.value);
         setLastRefresh(new Date());
       } catch { /* mantém último dado disponível */ }
-    }, 5 * 60 * 1000);
+    }, 30 * 1000);
     // Notícias: a cada 15 minutos (mantém últimas notícias se falhar)
     const newsTimer = setInterval(async () => {
+      if (document.hidden) return;
+
       try {
-        const res = await fetch('/api/market/news');
+        const res = await fetch('/api/market/news', { cache: 'no-store' });
         if (res.ok) setNews(await res.json());
       } catch { /* mantém últimas notícias */ }
     }, 15 * 60 * 1000);
     return () => { clearInterval(quotesTimer); clearInterval(newsTimer); };
-  }, [fetchAll]);
+  }, [fetchAll, fetchJson]);
 
   const ibov = quotes?.quotes?.find(q => q.symbol === 'IBOV');
   const stocks = quotes?.quotes?.filter(q => q.symbol !== 'IBOV') || [];
@@ -138,7 +170,7 @@ export default function MarketWidget() {
             </span>
           )}
           <button
-            onClick={() => fetchAll(true)}
+            onClick={() => fetchAll(true, true)}
             disabled={refreshing}
             className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all disabled:opacity-50"
           >
@@ -146,6 +178,12 @@ export default function MarketWidget() {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="px-5 py-2 border-b border-amber-100 bg-amber-50 text-[11px] font-medium text-amber-700">
+          {loadError}
+        </div>
+      )}
 
       <div className="p-5 space-y-5">
 

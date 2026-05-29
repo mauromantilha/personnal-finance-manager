@@ -331,7 +331,7 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
                       steps: [
                         'Registro como Integrador no portal B3 Área do Investidor (investidor.b3.com.br)',
                         'Obtenção de client_id e client_secret para OAuth 2.0',
-                        'Configuração do redirect_uri para o domínio mksbrasil.com',
+                        'Configuração do redirect_uri para o domínio financaslivre.com',
                         'Aprovação do cadastro (prazo estimado: 5–10 dias úteis)',
                       ],
                     },

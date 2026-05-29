@@ -134,7 +134,7 @@ async function r2GetBinary(key: string): Promise<{ body: ArrayBuffer; contentTyp
 
 const PLUGGY_CLIENT_ID = process.env.PLUGGY_CLIENT_ID || '';
 const PLUGGY_CLIENT_SECRET = process.env.PLUGGY_CLIENT_SECRET || '';
-const APP_URL = process.env.APP_URL || 'https://financas.mksbrasil.com';
+const APP_URL = process.env.APP_URL || 'https://financaslivre.com';
 
 let _pluggyApiKey: string | null = null;
 let _pluggyApiKeyExpiry = 0;
@@ -363,7 +363,7 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
 }
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const EMAIL_FROM = 'financas@mksbrasil.com';
+const EMAIL_FROM = 'financas@financaslivre.com';
 
 async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString('hex');

@@ -24,9 +24,7 @@ import {
   TrendingUp,
   BrainCircuit,
   FolderOpen,
-  ShieldAlert,
-  ChevronLeft,
-  ChevronRight
+  ShieldAlert
 } from 'lucide-react';
 
 // Subcomponents imports
@@ -687,21 +685,36 @@ export default function App() {
 
         {/* Branding */}
         <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-5'} py-4 border-b border-slate-800 shrink-0`}>
-          <span className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-base font-black shadow-sm shrink-0">F</span>
-          {!sidebarCollapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="font-black text-sm text-white leading-tight">Finanças Livre</p>
-              <p className="text-[10px] text-slate-400 leading-tight">Gestão financeira inteligente</p>
-            </div>
-          )}
-          {!sidebarCollapsed && (
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden ml-1 text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 shrink-0">
-              <X className="w-4 h-4" />
+          {sidebarCollapsed ? (
+            <button
+              onClick={() => setSidebarCollapsed(v => !v)}
+              className="hidden lg:flex p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+              title="Expandir sidebar"
+            >
+              <Menu className="w-5 h-5" />
             </button>
+          ) : (
+            <>
+              <span className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-base font-black shadow-sm shrink-0">F</span>
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-sm text-white leading-tight">Finanças Livre</p>
+                <p className="text-[10px] text-slate-400 leading-tight">Gestão financeira inteligente</p>
+              </div>
+              <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setSidebarCollapsed(v => !v)}
+                className="hidden lg:flex p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all shrink-0"
+                title="Recolher sidebar"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            </>
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
+        <nav className="flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-3 space-y-0.5 px-2">
               {sidebarNavItems.map(item => {
                 const Icon = item.icon;
                 const isSelected = activeTab === item.id;
@@ -750,14 +763,6 @@ export default function App() {
                 </button>
               </>
             )}
-            {/* Collapse toggle — desktop only */}
-            <button
-              onClick={() => setSidebarCollapsed(v => !v)}
-              className={`hidden lg:flex w-full items-center ${sidebarCollapsed ? 'justify-center' : 'gap-1.5'} py-1.5 px-2 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-all text-[10px] font-semibold`}
-              title={sidebarCollapsed ? 'Expandir sidebar' : 'Recolher sidebar'}
-            >
-              {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <><ChevronLeft className="w-4 h-4" /><span>Recolher</span></>}
-            </button>
           </div>
       </aside>
 
