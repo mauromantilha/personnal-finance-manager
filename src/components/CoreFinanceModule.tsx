@@ -32,6 +32,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard, FamilyMember } from '../types';
+import { FALLBACK_CATS, formatBRL, parseCsvPreview, computePeriodBounds, type PeriodFilter } from './CoreFinanceModule.utils';
 
 interface CoreFinanceModuleProps {
   accounts: FinancialAccount[];
@@ -50,8 +51,6 @@ interface CoreFinanceModuleProps {
   userRole?: 'owner' | 'member';
   userMemberId?: string | null;
 }
-
-type PeriodFilter = 'this_month' | 'last_month' | '30d' | '90d' | 'all';
 
 const PAGE_SIZE = 25;
 
@@ -128,16 +127,7 @@ export default function CoreFinanceModule({
   const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
 
   // Preview: parse first 5 non-header lines client-side
-  const csvPreview = useMemo(() => {
-    if (!csvText) return [];
-    return csvText.split('\n').map(l => l.trim()).filter(Boolean)
-      .filter(l => !/^(data|date|dia)/i.test(l))
-      .slice(0, 5)
-      .map(line => {
-        const cols = line.replace(/^﻿/, '').split(/[,;]/).map(c => c.trim().replace(/^"|"$/g, ''));
-        return { date: cols[0] || '', desc: cols[1] || '', amount: cols[2] || '' };
-      });
-  }, [csvText]);
+  const csvPreview = useMemo(() => parseCsvPreview(csvText), [csvText]);
 
   const handleImport = async () => {
     if (!csvText.trim() || !importAccountId) { fb('Cole o CSV e selecione a conta.', 'error'); return; }
@@ -189,13 +179,9 @@ export default function CoreFinanceModule({
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
-  const FALLBACK_CATS = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Educação', 'Receita', 'Investimentos', 'Outros'];
   const parentCategories = categories.filter(c => !c.parentId);
   const categoryNames = parentCategories.length > 0 ? parentCategories.map(c => c.name) : FALLBACK_CATS;
   const defaultCategory = categoryNames[0] || 'Alimentação';
-
-  const formatBRL = (cents: number) =>
-    (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const fb = (text: string, type: 'success' | 'error') => {
     setStatusMsg({ text, type });
@@ -203,30 +189,7 @@ export default function CoreFinanceModule({
   };
 
   // ── Period boundary helper ──────────────────────────────────────────────────
-  const periodBounds = useMemo(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth();
-    const pad = (n: number) => String(n).padStart(2, '0');
-
-    if (periodFilter === 'this_month') {
-      return { from: `${y}-${pad(m + 1)}-01`, to: `${y}-${pad(m + 1)}-31` };
-    }
-    if (periodFilter === 'last_month') {
-      const lm = m === 0 ? 12 : m;
-      const ly = m === 0 ? y - 1 : y;
-      return { from: `${ly}-${pad(lm)}-01`, to: `${ly}-${pad(lm)}-31` };
-    }
-    if (periodFilter === '30d') {
-      const d30 = new Date(now); d30.setDate(d30.getDate() - 30);
-      return { from: d30.toISOString().split('T')[0], to: now.toISOString().split('T')[0] };
-    }
-    if (periodFilter === '90d') {
-      const d90 = new Date(now); d90.setDate(d90.getDate() - 90);
-      return { from: d90.toISOString().split('T')[0], to: now.toISOString().split('T')[0] };
-    }
-    return { from: '', to: '' };
-  }, [periodFilter]);
+  const periodBounds = useMemo(() => computePeriodBounds(periodFilter), [periodFilter]);
 
   // ── Filtered + paginated transactions ──────────────────────────────────────
   const filtered = useMemo(() => {
