@@ -901,7 +901,7 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
                         <Pie data={byClass} dataKey="total" nameKey="label" cx="50%" cy="50%" outerRadius={100} paddingAngle={3} label={(props: any) => `${props.label} ${((props.percent ?? 0) * 100).toFixed(0)}%`} labelLine={false}>
                           {byClass.map(c => <Cell key={c.cls} fill={c.color} />)}
                         </Pie>
-                        <Tooltip formatter={(v: number) => fmt(v)} />
+                        <Tooltip formatter={(v) => fmt(Number(v))} />
                       </RechartsPie>
                     </ResponsiveContainer>
                   </div>
@@ -985,7 +985,7 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                         <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#94a3b8' }} interval={Math.floor(projectionMonths / 6)} />
                         <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={v => `R$${(v / 100).toLocaleString('pt-BR', { notation: 'compact' })}`} width={64} />
-                        <Tooltip formatter={(v: number) => fmt(v)} labelStyle={{ fontSize: 11 }} contentStyle={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v) => fmt(Number(v))} labelStyle={{ fontSize: 11 }} contentStyle={{ fontSize: 11 }} />
                         <Area type="monotone" dataKey="value" stroke="#16A34A" strokeWidth={2} fill="url(#projGrad)" dot={false} />
                       </AreaChart>
                     </ResponsiveContainer>
