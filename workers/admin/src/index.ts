@@ -12,6 +12,7 @@ import nocRoutes             from './routes/noc';
 import registerRoutes        from './routes/register';
 import telemetryRoutes       from './routes/telemetry';
 import communicationsRoutes  from './routes/communications';
+import maintenanceRoutes, { sweepPendingTenants } from './routes/maintenance';
 
 // ── Env bindings ──────────────────────────────────────────────────────────────
 export interface Env {
@@ -19,7 +20,6 @@ export interface Env {
   MKS_ADMIN:    KVNamespace;
   CF_ACCOUNT_ID:    string;
   CF_ZONE_ID:       string;
-  CF_TUNNEL_ID:     string;
   CF_TEAM_DOMAIN:   string;
   BASE_DOMAIN:      string;
   ZT_OTP_IDP_ID:    string;
@@ -36,6 +36,7 @@ export interface Env {
   TURNSTILE_SECRET_KEY: string;
   CPF_SALT:            string;
   APP_SECRET:          string;  // HMAC para tokens de verificação de email
+  AUTO_CLEANUP?:       string;  // "true" habilita o cron de limpeza de pendentes (destrutivo)
 }
 
 export interface Tenant {
@@ -53,6 +54,7 @@ export interface Tenant {
   status:            'pending' | 'active' | 'suspended' | 'deleted';
   createdAt:         string;
   storageTierBytes?: number;  // undefined = plano free (300 MB)
+  cpfHash?:          string;  // hash PBKDF2 do CPF (só em tenants pending — usado na limpeza)
 }
 
 export interface Variables {
@@ -273,6 +275,7 @@ app.route('/api', migrationRoutes);
 app.route('/api', nocRoutes);
 app.route('/api', telemetryRoutes);
 app.route('/api', communicationsRoutes);
+app.route('/api', maintenanceRoutes);
 
 // ── SPA ───────────────────────────────────────────────────────────────────────
 app.get('*', (c) => {
@@ -280,4 +283,17 @@ app.get('*', (c) => {
   return c.html(adminHtml(c.env.BASE_DOMAIN, c.get('cspNonce')));
 });
 
-export default app;
+// ── Handler exportado: fetch (Hono) + scheduled (cron de manutenção) ─────────
+// O cron de limpeza de pendentes só executa em modo destrutivo se AUTO_CLEANUP
+// === 'true' (opt-in no wrangler.toml). Caso contrário, roda dry-run e loga.
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const apply = env.AUTO_CLEANUP === 'true';
+    ctx.waitUntil(
+      sweepPendingTenants(env, apply)
+        .then(r => console.log(`[cron pending-cleanup] ${JSON.stringify(r)}`))
+        .catch(e => console.log(`[cron pending-cleanup] erro: ${(e as Error).message}`)),
+    );
+  },
+};

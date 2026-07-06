@@ -349,7 +349,7 @@ export default function InvestmentSimulator({ monthlyIncomeInCents = 0, institut
               />
               <Tooltip
                 labelFormatter={(_l, payload) => payload?.[0] ? (payload[0].payload as any).labelFull : ''}
-                formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                formatter={(v) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 contentStyle={{ fontSize: 11 }}
               />
               <Legend

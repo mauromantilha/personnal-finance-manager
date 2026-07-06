@@ -11,6 +11,22 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Separa dependências pesadas em chunks próprios (cacheáveis entre deploys
+          // e fora do bundle inicial). recharts/motion só carregam quando um módulo
+          // que os usa é aberto.
+          // recharts é o maior peso (~120 kB gzip) e só é usado por módulos lazy —
+          // isolá-lo garante que fique fora do bundle inicial. lucide-react (ícones)
+          // é usado no shell, então vira um vendor cacheável próprio.
+          manualChunks: {
+            'vendor-charts': ['recharts'],
+            'vendor-icons':  ['lucide-react'],
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

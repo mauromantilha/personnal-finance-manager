@@ -11,13 +11,28 @@ import type { D1Param } from '../lib/d1';
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ── GET /api/data — snapshot completo para o frontend ────────────────────────
+// Manutenção pesada (gerar recorrências vencidas + alertas proativos) roda no
+// máximo 1×/hora por família. Ambas são idempotentes e deduplicam por dia/mês,
+// então rodá-las a cada refresh só gera round-trips redundantes ao D1. O gate
+// usa um marcador em KV com TTL. `recalculateBudgets` NÃO é gateado: é um único
+// UPDATE barato e reflete gastos imediatos.
+const MAINT_TTL_SECONDS = 3600;
+
 router.get('/data', async (c) => {
   const db   = c.get('db');
   const user = c.get('user');
 
-  await processRecurrences(db);
+  const maintKey = `maint:${c.get('familyId')}`;
+  const ranRecently = await c.env.MKS_CACHE.get(maintKey);
+  if (!ranRecently) {
+    await processRecurrences(db);
+    await generateProactiveAlerts(db);
+    // best-effort: se o KV falhar, na pior hipótese a manutenção roda de novo
+    c.executionCtx.waitUntil(
+      c.env.MKS_CACHE.put(maintKey, new Date().toISOString(), { expirationTtl: MAINT_TTL_SECONDS }),
+    );
+  }
   await recalculateBudgets(db);
-  await generateProactiveAlerts(db);
 
   // Membros individuais veem apenas suas próprias transações
   const isMember = user.role !== 'owner';

@@ -7,10 +7,9 @@ import {
   mapAccount, mapBudget, mapGoal, mapInvestment, mapCreditCard,
   mapInvoice, mapRecurrence, mapTransaction,
 } from '../lib/mappers';
+import { brl, sumBalance, sumByType } from '../lib/finance-math';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
-
-const brl = (c: number) => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
 // ── Per-user AI rate limit: 30 req/min using MKS_CACHE KV ────────────────────
 const AI_RL_MAX    = 30;
@@ -82,7 +81,7 @@ router.post('/groq/advisor', async (c) => {
     db.first<{ cnt: number }>('SELECT COUNT(*) as cnt FROM transactions'),
   ]);
 
-  const totalBalance   = (accounts as any[]).reduce((s, a) => s + a.balanceInCents, 0);
+  const totalBalance   = sumBalance(accounts as any[]);
   const budgetSummary  = (budgets as any[]).map(b => `${b.category}: R$ ${(b.spentInCents / 100).toFixed(2)} de R$ ${(b.limitInCents / 100).toFixed(2)}`).join(', ');
   const goalsSummary   = (goals as any[]).map(g => `${g.name}: R$ ${(g.currentInCents / 100).toFixed(2)} de R$ ${(g.targetInCents / 100).toFixed(2)}`).join(', ');
 
@@ -197,11 +196,11 @@ router.post('/ai/predictive', async (c) => {
 
   if (!hasData) return c.json(noDataResp);
 
-  const netWorth      = (accounts as any[]).reduce((s, a) => s + a.balanceInCents, 0);
-  const monthIncome   = (monthTxs as any[]).filter((t: any) => t.type === 'REC').reduce((s, t) => s + t.amountInCents, 0);
-  const monthExpense  = (monthTxs as any[]).filter((t: any) => t.type === 'DES').reduce((s, t) => s + t.amountInCents, 0);
-  const prevIncome    = (prevMonthTxs as any[]).filter((t: any) => t.type === 'REC').reduce((s, t) => s + t.amountInCents, 0);
-  const prevExpense   = (prevMonthTxs as any[]).filter((t: any) => t.type === 'DES').reduce((s, t) => s + t.amountInCents, 0);
+  const netWorth      = sumBalance(accounts as any[]);
+  const monthIncome   = sumByType(monthTxs as any[], 'REC');
+  const monthExpense  = sumByType(monthTxs as any[], 'DES');
+  const prevIncome    = sumByType(prevMonthTxs as any[], 'REC');
+  const prevExpense   = sumByType(prevMonthTxs as any[], 'DES');
   const savingsRate   = monthIncome > 0 ? ((monthIncome - monthExpense) / monthIncome) * 100 : 0;
   const totalInvested = (investments as any[]).reduce((s, i) => s + i.investedInCents, 0);
   const totalInvVal   = (investments as any[]).reduce((s, i) => s + i.currentValueInCents, 0);
@@ -271,9 +270,9 @@ router.post('/ai/financial-chat', async (c) => {
     db.query('SELECT * FROM budgets').then(r => r.map(mapBudget)),
   ]);
 
-  const netWorth     = (accounts as any[]).reduce((s, a) => s + a.balanceInCents, 0);
-  const monthIncome  = (monthTxs as any[]).filter((t: any) => t.type === 'REC').reduce((s, t) => s + t.amountInCents, 0);
-  const monthExpense = (monthTxs as any[]).filter((t: any) => t.type === 'DES').reduce((s, t) => s + t.amountInCents, 0);
+  const netWorth     = sumBalance(accounts as any[]);
+  const monthIncome  = sumByType(monthTxs as any[], 'REC');
+  const monthExpense = sumByType(monthTxs as any[], 'DES');
   const totalInvest  = (investments as any[]).reduce((s, i) => s + (i as any).investedInCents, 0);
   const totalInvVal  = (investments as any[]).reduce((s, i) => s + (i as any).currentValueInCents, 0);
   const fixedCosts   = (recurrences as any[]).reduce((s, r) => s + (r as any).amountInCents, 0);
@@ -408,9 +407,9 @@ router.post('/ai/agent-chat', async (c) => {
     db.query('SELECT * FROM transactions WHERE date LIKE ? LIMIT 500', [`${mp}%`]).then(r => r.map(mapTransaction as any)),
   ]);
 
-  const netWorth     = (accounts as any[]).reduce((s, a) => s + a.balanceInCents, 0);
-  const monthIncome  = (monthTxs as any[]).filter((t: any) => t.type === 'REC').reduce((s, t) => s + t.amountInCents, 0);
-  const monthExpense = (monthTxs as any[]).filter((t: any) => t.type === 'DES').reduce((s, t) => s + t.amountInCents, 0);
+  const netWorth     = sumBalance(accounts as any[]);
+  const monthIncome  = sumByType(monthTxs as any[], 'REC');
+  const monthExpense = sumByType(monthTxs as any[], 'DES');
   const defaultAccountId = (accounts as any[])[0]?.id ?? '';
 
   const contextSummary = `=== POSIÇÃO (${now.toLocaleDateString('pt-BR')}) ===
