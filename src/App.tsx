@@ -167,6 +167,31 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Prefetch em idle dos chunks das abas mais prováveis (o Dashboard já carrega
+  // Core/Analytics/Market). Warma os módulos após o primeiro paint sem inflar o
+  // bundle inicial — a troca de aba fica instantânea. Vite deduplica por specifier.
+  useEffect(() => {
+    const warm = () => {
+      import('./components/CreditCardModule');
+      import('./components/BudgetsModule');
+      import('./components/InvestmentsModule');
+      import('./components/PredictiveAIModule');
+      import('./components/RecurrencesModule');
+      import('./components/DebtModule');
+    };
+    const w = window as typeof window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    };
+    const id = w.requestIdleCallback
+      ? w.requestIdleCallback(warm, { timeout: 3000 })
+      : window.setTimeout(warm, 1500);
+    return () => {
+      const wc = window as typeof window & { cancelIdleCallback?: (id: number) => void };
+      if (wc.cancelIdleCallback) wc.cancelIdleCallback(id);
+      else clearTimeout(id);
+    };
+  }, []);
+
   const fetchAllData = useCallback(async () => {
     try {
       const response = await fetch('/api/data');
