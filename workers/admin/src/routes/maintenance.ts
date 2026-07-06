@@ -17,6 +17,7 @@ import {
 } from '../lib/cf-api';
 
 const PENDING_MAX_AGE_HOURS = 48;
+const CLEANUP_LOCK_TTL_SECONDS = 15 * 60;
 
 export interface SweepResult {
   dryRun:   boolean;
@@ -29,6 +30,36 @@ export interface SweepResult {
 /** Sanitiza string p/ logging — strip CR/LF/CTRL para evitar log injection. */
 function safeLog(s: string): string {
   return String(s).replace(/[\r\n\t\x00-\x1F\x7F]+/g, '_').slice(0, 80);
+}
+
+function eligiblePendingAgeHours(t: Tenant, now: number): number | null {
+  if (t.status !== 'pending') return null;
+  const ageHours = (now - new Date(t.createdAt).getTime()) / 3_600_000;
+  if (!Number.isFinite(ageHours) || ageHours < PENDING_MAX_AGE_HOURS) return null;
+  return ageHours;
+}
+
+async function findCpf2KeysForTenant(env: Env, tenant: Tenant): Promise<string[]> {
+  const keys = new Set<string>();
+  if (tenant.cpfHash) {
+    keys.add(`cpf2:${tenant.cpfHash}`);
+    return [...keys];
+  }
+
+  let cursor: string | undefined;
+  do {
+    const page = await env.MKS_TENANTS.list({ prefix: 'cpf2:', cursor });
+    const matches = await Promise.all(page.keys.map(async ({ name }) => {
+      const familyId = await env.MKS_TENANTS.get(name);
+      return familyId === tenant.familyId ? name : null;
+    }));
+    for (const name of matches) {
+      if (name) keys.add(name);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+
+  return [...keys];
 }
 
 export async function sweepPendingTenants(env: Env, apply: boolean): Promise<SweepResult> {
@@ -44,9 +75,8 @@ export async function sweepPendingTenants(env: Env, apply: boolean): Promise<Swe
   for (const t of tenants) {
     if (!t) continue;
     result.scanned++;
-    if (t.status !== 'pending') continue;
-    const ageHours = (now - new Date(t.createdAt).getTime()) / 3_600_000;
-    if (!Number.isFinite(ageHours) || ageHours < PENDING_MAX_AGE_HOURS) continue;
+    const ageHours = eligiblePendingAgeHours(t, now);
+    if (ageHours === null) continue;
     result.eligible.push({ subdomain: t.subdomain, ageHours: Math.round(ageHours) });
     toDelete.push(t);
   }
@@ -57,35 +87,49 @@ export async function sweepPendingTenants(env: Env, apply: boolean): Promise<Swe
   let newIndex = index.slice();
 
   for (const t of toDelete) {
+    const cleanupLockKey = `cleanup:${t.subdomain}`;
     try {
-      if (t.r2Bucket && t.r2Prefix)
-        await deleteR2ObjectsWithPrefix(CF_ACCOUNT_ID, CF_API_TOKEN, t.r2Bucket, t.r2Prefix);
-      if (t.d1DatabaseId)
-        await deleteD1Database(CF_ACCOUNT_ID, CF_API_TOKEN, t.d1DatabaseId);
-      if (t.accessAppId)
-        await deleteAccessApp(CF_ACCOUNT_ID, CF_API_TOKEN, t.accessAppId);
-      try { await removeCfAccessDnsPlaceholder(CF_ZONE_ID, CF_API_TOKEN, `${t.subdomain}.${BASE_DOMAIN}`); }
+      await env.MKS_TENANTS.put(cleanupLockKey, '1', { expirationTtl: CLEANUP_LOCK_TTL_SECONDS });
+
+      const current = await env.MKS_TENANTS.get<Tenant>(`tenant:${t.subdomain}`, 'json');
+      if (!current) continue;
+      const ageHours = eligiblePendingAgeHours(current, now);
+      if (ageHours === null) continue;
+      if (await env.MKS_TENANTS.get(`verify:${current.subdomain}`)) continue;
+
+      const cpf2Keys = await findCpf2KeysForTenant(env, current);
+      const tenantKey = `tenant:${current.subdomain}`;
+      const nextIndex = newIndex.filter(s => s !== current.subdomain);
+
+      await env.MKS_TENANTS.put(tenantKey, JSON.stringify({ ...current, status: 'deleted' }));
+      await Promise.all([
+        env.MKS_TENANTS.put('tenants:index', JSON.stringify(nextIndex)),
+        env.MKS_TENANTS.put('tenants:count', String(nextIndex.length)),
+        current.ownerEmailHash ? env.MKS_TENANTS.delete(`email:${current.ownerEmailHash}`) : Promise.resolve(),
+        ...cpf2Keys.map(key => env.MKS_TENANTS.delete(key)),
+      ]);
+      newIndex = nextIndex;
+
+      if (current.r2Bucket && current.r2Prefix)
+        await deleteR2ObjectsWithPrefix(CF_ACCOUNT_ID, CF_API_TOKEN, current.r2Bucket, current.r2Prefix);
+      if (current.d1DatabaseId)
+        await deleteD1Database(CF_ACCOUNT_ID, CF_API_TOKEN, current.d1DatabaseId);
+      if (current.accessAppId)
+        await deleteAccessApp(CF_ACCOUNT_ID, CF_API_TOKEN, current.accessAppId);
+      try { await removeCfAccessDnsPlaceholder(CF_ZONE_ID, CF_API_TOKEN, `${current.subdomain}.${BASE_DOMAIN}`); }
       catch { /* best-effort */ }
 
-      const kvDeletes: Promise<void>[] = [
-        env.MKS_TENANTS.delete(`tenant:${t.subdomain}`),
-      ];
-      if (t.ownerEmailHash) kvDeletes.push(env.MKS_TENANTS.delete(`email:${t.ownerEmailHash}`));
-      if (t.cpfHash)        kvDeletes.push(env.MKS_TENANTS.delete(`cpf2:${t.cpfHash}`));
-      await Promise.all(kvDeletes);
+      await env.MKS_TENANTS.delete(tenantKey);
 
-      newIndex = newIndex.filter(s => s !== t.subdomain);
-      result.deleted.push(t.subdomain);
-      console.log(`[pending-cleanup] removido ${safeLog(t.subdomain)}`);
+      result.deleted.push(current.subdomain);
+      console.log(`[pending-cleanup] removido ${safeLog(current.subdomain)}`);
     } catch (e) {
       result.errors.push({ subdomain: t.subdomain, error: (e as Error).message });
+    } finally {
+      try { await env.MKS_TENANTS.delete(cleanupLockKey); }
+      catch { /* best-effort */ }
     }
   }
-
-  await Promise.all([
-    env.MKS_TENANTS.put('tenants:index', JSON.stringify(newIndex)),
-    env.MKS_TENANTS.put('tenants:count', String(newIndex.length)),
-  ]);
 
   return result;
 }

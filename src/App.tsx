@@ -70,6 +70,15 @@ import {
 
 type TabType = 'DASHBOARD' | 'CORE' | 'CREDIT_CARDS' | 'RECURRENCES' | 'OPEN_FINANCE' | 'BUDGETS' | 'ANALYTICS' | 'NOTIFICATIONS' | 'FAMILY' | 'CATEGORIES' | 'INSTALLMENTS' | 'INVESTMENTS' | 'PREDICTIVE_AI' | 'USERS' | 'DOCUMENTS' | 'DEBTS';
 
+function ModuleLoading() {
+  return (
+    <div className="flex items-center justify-center py-24 text-slate-400">
+      <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+      <span className="text-sm font-medium">Carregando módulo…</span>
+    </div>
+  );
+}
+
 export default function App() {
   const { showError } = useErrorNotify();
 
@@ -940,12 +949,6 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-24 lg:pb-8">
-          <Suspense fallback={
-            <div className="flex items-center justify-center py-24 text-slate-400">
-              <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-              <span className="text-sm font-medium">Carregando módulo…</span>
-            </div>
-          }>
 
           {/* Dashboard Tab Default Landing */}
           {activeTab === 'DASHBOARD' && (
@@ -995,7 +998,9 @@ export default function App() {
               </div>
 
               {/* Market widget — full width */}
-              <MarketWidget />
+              <Suspense fallback={<ModuleLoading />}>
+                <MarketWidget />
+              </Suspense>
 
               {/* Main stats layout */}
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -1004,39 +1009,45 @@ export default function App() {
                 <div className="xl:col-span-2 space-y-6">
                   
                   {/* Health Score Report */}
-                  <HealthReport
-                    transactions={transactions}
-                    budgets={budgets}
-                    goals={goals}
-                    accounts={accounts}
-                  />
+                  <Suspense fallback={<ModuleLoading />}>
+                    <HealthReport
+                      transactions={transactions}
+                      budgets={budgets}
+                      goals={goals}
+                      accounts={accounts}
+                    />
+                  </Suspense>
 
                   {/* Miniature Analytics preview */}
-                  <AnalyticsModule
-                    accounts={accounts}
-                    transactions={transactions}
-                    budgets={budgets}
-                    recurrences={recurrences}
-                  />
+                  <Suspense fallback={<ModuleLoading />}>
+                    <AnalyticsModule
+                      accounts={accounts}
+                      transactions={transactions}
+                      budgets={budgets}
+                      recurrences={recurrences}
+                    />
+                  </Suspense>
 
                   {/* Manual / Open Finance Ledger tables preview */}
-                  <CoreFinanceModule
-                    accounts={accounts}
-                    transactions={transactions}
-                    categories={categories}
-                    creditCards={creditCards}
-                    members={familyMembers}
-                    userRole={user.role}
-                    userMemberId={user.memberId}
-                    onAddTransaction={handleAddTransaction}
-                    onEditTransaction={handleEditTransaction}
-                    onAddAccount={handleAddAccount}
-                    onEditAccount={handleEditAccount}
-                    onDeleteAccount={handleDeleteAccount}
-                    onDeleteTransaction={handleDeleteTransaction}
-                    onImportCSV={handleImportCSV}
-                    onAnalyzeDocument={handleAnalyzeDocument}
-                  />
+                  <Suspense fallback={<ModuleLoading />}>
+                    <CoreFinanceModule
+                      accounts={accounts}
+                      transactions={transactions}
+                      categories={categories}
+                      creditCards={creditCards}
+                      members={familyMembers}
+                      userRole={user.role}
+                      userMemberId={user.memberId}
+                      onAddTransaction={handleAddTransaction}
+                      onEditTransaction={handleEditTransaction}
+                      onAddAccount={handleAddAccount}
+                      onEditAccount={handleEditAccount}
+                      onDeleteAccount={handleDeleteAccount}
+                      onDeleteTransaction={handleDeleteTransaction}
+                      onImportCSV={handleImportCSV}
+                      onAnalyzeDocument={handleAnalyzeDocument}
+                    />
+                  </Suspense>
 
                 </div>
 
@@ -1179,25 +1190,27 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'CORE' && (
-            <CoreFinanceModule
-              accounts={accounts}
-              transactions={transactions}
-              categories={categories}
-              creditCards={creditCards}
-              members={familyMembers}
-              userRole={user.role}
-              userMemberId={user.memberId}
-              onAddTransaction={handleAddTransaction}
-              onEditTransaction={handleEditTransaction}
-              onAddAccount={handleAddAccount}
-              onEditAccount={handleEditAccount}
-              onDeleteAccount={handleDeleteAccount}
-              onDeleteTransaction={handleDeleteTransaction}
-              onImportCSV={handleImportCSV}
-              onAnalyzeDocument={handleAnalyzeDocument}
-            />
-          )}
+          {activeTab !== 'DASHBOARD' && (
+            <Suspense fallback={<ModuleLoading />}>
+              {activeTab === 'CORE' && (
+                <CoreFinanceModule
+                  accounts={accounts}
+                  transactions={transactions}
+                  categories={categories}
+                  creditCards={creditCards}
+                  members={familyMembers}
+                  userRole={user.role}
+                  userMemberId={user.memberId}
+                  onAddTransaction={handleAddTransaction}
+                  onEditTransaction={handleEditTransaction}
+                  onAddAccount={handleAddAccount}
+                  onEditAccount={handleEditAccount}
+                  onDeleteAccount={handleDeleteAccount}
+                  onDeleteTransaction={handleDeleteTransaction}
+                  onImportCSV={handleImportCSV}
+                  onAnalyzeDocument={handleAnalyzeDocument}
+                />
+              )}
 
           {activeTab === 'CREDIT_CARDS' && (
             <CreditCardModule
@@ -1325,7 +1338,8 @@ export default function App() {
             <DebtModule />
           )}
 
-          </Suspense>
+            </Suspense>
+          )}
         </main>
 
         {/* Mobile bottom navigation — app-like UX em telas pequenas */}

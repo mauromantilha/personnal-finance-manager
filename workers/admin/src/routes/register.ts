@@ -23,6 +23,7 @@ const router = new Hono<{ Bindings: Env }>();
 const RATE_LIMIT_MAX    = 5;
 const RATE_LIMIT_WINDOW = 10 * 60; // 10 min
 const VERIFY_TTL_SECONDS = 24 * 3600; // 24 horas
+const VERIFY_LOCK_TTL_SECONDS = 15 * 60;
 
 // Subdomínios reservados — impede que um usuário registre hosts de infraestrutura
 // (admin, api, www…) que colidiriam com rotas do sistema ou seriam usados para
@@ -329,40 +330,60 @@ router.get('/public/verify', async (c) => {
   const claims = await verifyVerifyToken(token, c.env.APP_SECRET);
   if (!claims) return c.json({ error: 'Token inválido ou expirado.' }, 400);
 
-  const tenantRaw = await c.env.MKS_TENANTS.get(`tenant:${claims.sub}`);
-  if (!tenantRaw) return c.json({ error: 'Conta não encontrada.' }, 404);
-  const tenant = JSON.parse(tenantRaw) as any;
-
-  // Idempotência: se já ativo, redireciona sem erro
-  if (tenant.status === 'active') {
-    return c.redirect(`https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`, 302);
-  }
-  if (tenant.status !== 'pending') {
-    return c.json({ error: 'Conta não pode ser ativada (status: ' + tenant.status + ').' }, 409);
-  }
-  if (tenant.ownerEmail !== claims.email) {
-    return c.json({ error: 'Token não corresponde ao email da conta.' }, 400);
-  }
-
-  // Cria CF Access policy agora que o email foi confirmado
-  let accessPolicyId: string;
+  const verifyLockKey = `verify:${claims.sub}`;
+  await c.env.MKS_TENANTS.put(verifyLockKey, '1', { expirationTtl: VERIFY_LOCK_TTL_SECONDS });
   try {
-    accessPolicyId = await createAccessPolicy(
-      c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.accessAppId,
-      { name: `Owner — ${claims.email}`, email: claims.email },
-    );
-  } catch (e) {
-    return c.json({ error: `Falha ao ativar acesso: ${(e as Error).message}` }, 500);
+    if (await c.env.MKS_TENANTS.get(`cleanup:${claims.sub}`))
+      return c.json({ error: 'Conta em manutenção. Tente novamente em instantes.' }, 409);
+
+    const tenantRaw = await c.env.MKS_TENANTS.get(`tenant:${claims.sub}`);
+    if (!tenantRaw) return c.json({ error: 'Conta não encontrada.' }, 404);
+    const tenant = JSON.parse(tenantRaw) as any;
+
+    // Idempotência: se já ativo, redireciona sem erro
+    if (tenant.status === 'active') {
+      return c.redirect(`https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`, 302);
+    }
+    if (tenant.status !== 'pending') {
+      return c.json({ error: 'Conta não pode ser ativada (status: ' + tenant.status + ').' }, 409);
+    }
+    if (tenant.ownerEmail !== claims.email) {
+      return c.json({ error: 'Token não corresponde ao email da conta.' }, 400);
+    }
+
+    // Cria CF Access policy agora que o email foi confirmado
+    let accessPolicyId: string;
+    try {
+      accessPolicyId = await createAccessPolicy(
+        c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.accessAppId,
+        { name: `Owner — ${claims.email}`, email: claims.email },
+      );
+    } catch (e) {
+      return c.json({ error: `Falha ao ativar acesso: ${(e as Error).message}` }, 500);
+    }
+
+    const latestRaw = await c.env.MKS_TENANTS.get(`tenant:${claims.sub}`);
+    if (!latestRaw) return c.json({ error: 'Conta não encontrada.' }, 404);
+    const latest = JSON.parse(latestRaw) as any;
+    if (latest.status !== 'pending') {
+      return c.json({ error: 'Conta não pode ser ativada (status: ' + latest.status + ').' }, 409);
+    }
+    if (latest.ownerEmail !== claims.email) {
+      return c.json({ error: 'Token não corresponde ao email da conta.' }, 400);
+    }
+
+    latest.accessPolicyId = accessPolicyId;
+    latest.status         = 'active';
+    latest.activatedAt    = new Date().toISOString();
+    delete latest.ownerEmail; // não precisamos mais armazenar em claro
+    delete latest.cpfHash;    // hash de CPF vive no índice cpf2:; não precisa no registro do tenant
+    await c.env.MKS_TENANTS.put(`tenant:${latest.subdomain}`, JSON.stringify(latest));
+
+    return c.redirect(`https://${latest.subdomain}.${c.env.BASE_DOMAIN}`, 302);
+  } finally {
+    try { await c.env.MKS_TENANTS.delete(verifyLockKey); }
+    catch { /* best-effort */ }
   }
-
-  tenant.accessPolicyId = accessPolicyId;
-  tenant.status         = 'active';
-  tenant.activatedAt    = new Date().toISOString();
-  delete tenant.ownerEmail; // não precisamos mais armazenar em claro
-  delete tenant.cpfHash;    // hash de CPF vive no índice cpf2:; não precisa no registro do tenant
-  await c.env.MKS_TENANTS.put(`tenant:${tenant.subdomain}`, JSON.stringify(tenant));
-
-  return c.redirect(`https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`, 302);
 });
 
 export default router;
