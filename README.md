@@ -12,14 +12,14 @@ Plataforma **open source** de finanças pessoais com IA preditiva, mercado em te
 
 | Camada | Tecnologia |
 |---|---|
-| Frontend | React 19 + TypeScript + Vite + Tailwind CSS 4 + Lucide React + Recharts |
-| Backend | Express.js (BFF) compilado via esbuild, rodando na porta 3000 |
-| Banco de dados | Cloudflare D1 (SQLite via REST API) |
-| Storage | Cloudflare R2 (documentos e extratos) |
+| Frontend | React 19 + TypeScript + Vite + Tailwind CSS 4 + Lucide React + Recharts (Cloudflare Pages) |
+| Backend | Cloudflare Workers (Hono) — `workers/finance` (API) e `workers/admin` (ops). Express BFF (`server.ts`) só em dev |
+| Banco de dados | Cloudflare D1 (SQLite via REST API), um banco por família |
+| Storage | Cloudflare R2 (documentos e extratos), isolamento por prefixo |
+| Multi-tenant | Subdomínio → KV `MKS_TENANTS` → D1/R2 da família |
+| Auth | Cloudflare Access (JWT RS256) |
 | IA | Groq: `llama-3.3-70b-versatile` (análise/chat), `llama-3.1-8b-instant` (categorização), `meta-llama/llama-4-scout-17b-16e-instruct` (visão/OCR) |
-| E-mail | Resend — `financas@mksbrasil.com` |
-| Processo | PM2 (`mks-finance`) |
-| Acesso externo | Cloudflare Tunnel → `https://financas.mksbrasil.com` |
+| E-mail | Resend — domínio `financaslivre.com` |
 
 ---
 
@@ -155,9 +155,11 @@ npm run dev        # Frontend Vite + backend Express em hot-reload
 ### Build e produção
 
 ```bash
-npm run build      # Compila frontend (dist/) + server (dist/server.cjs)
-pm2 restart mks-finance --update-env
+npm run build      # Compila o frontend (dist/) para deploy no Cloudflare Pages
 ```
+
+Produção é servida por Cloudflare Workers + Pages (deploy via `.github/workflows/deploy.yml`
+ou `npx wrangler deploy` em cada `workers/*`). Não há mais processo PM2 nem Cloudflare Tunnel.
 
 ### Aplicar migrations D1
 

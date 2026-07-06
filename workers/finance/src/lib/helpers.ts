@@ -1,5 +1,5 @@
 import { D1Client, D1Stmt } from './d1';
-import { mapBudget, mapRecurrence, DbRecurrence, Recurrence } from './mappers';
+import { mapRecurrence, DbRecurrence, Recurrence } from './mappers';
 
 export function getCurrentMonth(): string {
   const d = new Date();
@@ -134,7 +134,6 @@ export async function processRecurrences(db: D1Client): Promise<void> {
 export async function generateProactiveAlerts(db: D1Client): Promise<void> {
   const now    = new Date();
   const YYYYMM = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const month  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   // Invoices due in the next 5 days
   const dueDate5 = new Date(now);

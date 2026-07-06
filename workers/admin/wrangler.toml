@@ -24,7 +24,6 @@ id      = "593f7fe311e843df848bcb8c755e86c4"
 [vars]
 CF_ACCOUNT_ID    = "9b61f609fee4408fd1c4344feaf9b16a"
 CF_ZONE_ID       = "350977938b4449f053202db04e455be1"   # financaslivre.com
-CF_TUNNEL_ID     = "50e41496-a62b-452a-bd9f-d0f08c2a620d"
 CF_TEAM_DOMAIN   = "mks-personnal-finance-manager"
 BASE_DOMAIN      = "financaslivre.com"
 ZT_OTP_IDP_ID    = "9737c8ad-db9e-458e-a5ea-bf0cb9c145dd"
@@ -34,6 +33,9 @@ RESEND_FROM_DOMAIN = "financaslivre.com"
 D1_FREE_LIMIT    = "10"
 D1_PAID_LIMIT    = "50000"
 ZT_FREE_LIMIT    = "50"
+# Limpeza automática de tenants pending órfãos (>48h). Destrutivo: mantenha "false"
+# e valide antes via POST /api/maintenance/pending-cleanup?apply=1 (dry-run sem apply).
+AUTO_CLEANUP     = "false"
 
 # Secrets — registrar com: wrangler secret put <NOME>
 # CF_API_TOKEN          — token D1/R2/KV (D1:Edit, R2:Edit, KV:Edit, Analytics:Read)
@@ -46,3 +48,8 @@ ZT_FREE_LIMIT    = "50"
 
 [observability]
 enabled = true
+
+# Cron diário (04:00 UTC) — varredura de tenants pending órfãos.
+# Só deleta se AUTO_CLEANUP="true"; caso contrário roda em dry-run e apenas loga.
+[triggers]
+crons = ["0 4 * * *"]

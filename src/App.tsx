@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useErrorNotify } from './components/ErrorNotifier';
 import {
   Building2,
@@ -27,24 +27,28 @@ import {
   ShieldAlert
 } from 'lucide-react';
 
-// Subcomponents imports
-import CoreFinanceModule from './components/CoreFinanceModule';
-import CreditCardModule from './components/CreditCardModule';
-import RecurrencesModule from './components/RecurrencesModule';
-import OFXImportModule from './components/OFXImportModule';
-import BudgetsModule from './components/BudgetsModule';
-import AnalyticsModule from './components/AnalyticsModule';
-import NotificationsModule from './components/NotificationsModule';
-import FamilyModule from './components/FamilyModule';
-import CategoriesModule from './components/CategoriesModule';
-import InstallmentsModule from './components/InstallmentsModule';
-import InvestmentsModule from './components/InvestmentsModule';
-import UsersModule from './components/UsersModule';
-import HealthReport from './components/HealthReport';
-import PredictiveAIModule from './components/PredictiveAIModule';
-import MarketWidget from './components/MarketWidget';
-import DocumentsModule from './components/DocumentsModule';
-import DebtModule from './components/DebtModule';
+// ── Subcomponents (code-split por aba via React.lazy) ────────────────────────
+// Cada módulo vira um chunk JS separado, carregado só quando a aba é aberta.
+// Reduz drasticamente o bundle inicial (antes: todos os módulos + recharts +
+// motion baixados no primeiro load, mesmo para ver só o Dashboard).
+const CoreFinanceModule   = lazy(() => import('./components/CoreFinanceModule'));
+const CreditCardModule    = lazy(() => import('./components/CreditCardModule'));
+const RecurrencesModule   = lazy(() => import('./components/RecurrencesModule'));
+const OFXImportModule     = lazy(() => import('./components/OFXImportModule'));
+const BudgetsModule       = lazy(() => import('./components/BudgetsModule'));
+const AnalyticsModule     = lazy(() => import('./components/AnalyticsModule'));
+const NotificationsModule = lazy(() => import('./components/NotificationsModule'));
+const FamilyModule        = lazy(() => import('./components/FamilyModule'));
+const CategoriesModule    = lazy(() => import('./components/CategoriesModule'));
+const InstallmentsModule  = lazy(() => import('./components/InstallmentsModule'));
+const InvestmentsModule   = lazy(() => import('./components/InvestmentsModule'));
+const UsersModule         = lazy(() => import('./components/UsersModule'));
+const HealthReport        = lazy(() => import('./components/HealthReport'));
+const PredictiveAIModule  = lazy(() => import('./components/PredictiveAIModule'));
+const MarketWidget        = lazy(() => import('./components/MarketWidget'));
+const DocumentsModule     = lazy(() => import('./components/DocumentsModule'));
+const DebtModule          = lazy(() => import('./components/DebtModule'));
+// Modais leves e sempre potencialmente visíveis — mantidos eager.
 import { LGPDModal } from './components/LGPDModal';
 import { StorageQuotaModal } from './components/StorageQuotaModal';
 
@@ -911,7 +915,13 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-24 lg:pb-8">
-          
+          <Suspense fallback={
+            <div className="flex items-center justify-center py-24 text-slate-400">
+              <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+              <span className="text-sm font-medium">Carregando módulo…</span>
+            </div>
+          }>
+
           {/* Dashboard Tab Default Landing */}
           {activeTab === 'DASHBOARD' && (
             <div className="space-y-6">
@@ -1290,6 +1300,7 @@ export default function App() {
             <DebtModule />
           )}
 
+          </Suspense>
         </main>
 
         {/* Mobile bottom navigation — app-like UX em telas pequenas */}

@@ -24,6 +24,18 @@ const RATE_LIMIT_MAX    = 5;
 const RATE_LIMIT_WINDOW = 10 * 60; // 10 min
 const VERIFY_TTL_SECONDS = 24 * 3600; // 24 horas
 
+// Subdomínios reservados — impede que um usuário registre hosts de infraestrutura
+// (admin, api, www…) que colidiriam com rotas do sistema ou seriam usados para
+// phishing sob o domínio principal.
+const RESERVED_SUBDOMAINS = new Set([
+  'admin', 'api', 'www', 'app', 'mail', 'email', 'smtp', 'imap', 'pop',
+  'ftp', 'ns', 'ns1', 'ns2', 'dns', 'mx', 'root', 'support', 'help',
+  'status', 'blog', 'dev', 'staging', 'test', 'demo', 'static', 'cdn',
+  'assets', 'img', 'images', 'files', 'docs', 'pay', 'payment', 'billing',
+  'account', 'accounts', 'auth', 'login', 'signup', 'register', 'dashboard',
+  'financaslivre', 'security', 'no-reply', 'noreply', 'system', 'internal',
+]);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function sha256hex(text: string): Promise<string> {
@@ -175,6 +187,9 @@ router.post('/public/register', async (c) => {
 
   if (!/^[a-z0-9-]{2,30}$/.test(subdomain))
     return c.json({ error: 'Subdomínio: 2-30 caracteres, letras minúsculas, números e hífens.' }, 400);
+  // Rejeita hífen nas pontas (hosts inválidos) e nomes reservados de infraestrutura.
+  if (subdomain.startsWith('-') || subdomain.endsWith('-') || RESERVED_SUBDOMAINS.has(subdomain))
+    return c.json({ error: `O subdomínio "${subdomain}" não está disponível. Escolha outro.` }, 400);
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
     return c.json({ error: 'E-mail inválido.' }, 400);
@@ -259,6 +274,7 @@ router.post('/public/register', async (c) => {
     accessPolicyId: '',                 // criado em /public/verify
     ownerEmailHash,
     ownerEmail:     email,              // necessário p/ criar policy ao verificar
+    cpfHash:        cpfHashV2,          // permite à limpeza de pendentes liberar o índice de CPF
     status:         'pending' as const, // ativa só após verificação
     createdAt:      new Date().toISOString(),
   };
@@ -343,6 +359,7 @@ router.get('/public/verify', async (c) => {
   tenant.status         = 'active';
   tenant.activatedAt    = new Date().toISOString();
   delete tenant.ownerEmail; // não precisamos mais armazenar em claro
+  delete tenant.cpfHash;    // hash de CPF vive no índice cpf2:; não precisa no registro do tenant
   await c.env.MKS_TENANTS.put(`tenant:${tenant.subdomain}`, JSON.stringify(tenant));
 
   return c.redirect(`https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`, 302);

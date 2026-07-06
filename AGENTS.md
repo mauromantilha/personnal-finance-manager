@@ -22,12 +22,16 @@ npm run build         # Vite + esbuild → dist/
 cd workers/finance && npx wrangler deploy
 cd workers/admin  && npx wrangler deploy
 
-# Provision a new tenant family
-node scripts/provision.mjs --name "Sobrenome" --subdomain sub --email admin@example.com
-node scripts/provision.mjs ... --dry-run   # no real changes
+# Provision a new tenant family — via the admin Worker (no CLI/PM2/tunnel anymore)
+#   Painel:  https://admin.financaslivre.com → "Nova Família"  (POST /api/provision)
+#   Público: POST /public/register (Turnstile + verificação de e-mail)
+
+# Run D1 migrations across tenants
+node scripts/migrate-all.mjs                # all active families (reads KV)
+node scripts/migrate-all.mjs --dry-run
 ```
 
-See [scripts/README.md](scripts/README.md) for full provisioning/deprovisioning docs.
+See [scripts/README.md](scripts/README.md) for migration/maintenance script docs.
 
 ---
 
