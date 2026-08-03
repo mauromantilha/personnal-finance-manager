@@ -155,21 +155,41 @@ export default function AnalyticsModule({ accounts, transactions, budgets, recur
     [recurrences]
   );
 
-  // Health score (0–100)
-  const healthScore = useMemo(() => {
-    let score = 50;
-    if (totals.savingsRate >= 20) score += 20;
-    else if (totals.savingsRate >= 10) score += 10;
-    else if (totals.savingsRate < 0) score -= 20;
-    const budgetOverruns = budgets.filter(b => b.spentInCents > b.limitInCents).length;
-    score -= budgetOverruns * 10;
-    const netWorthMonths = totals.netWorth > 0 && fixedMonthlyCost > 0 ? totals.netWorth / fixedMonthlyCost : 0;
-    if (netWorthMonths >= 6) score += 20;
-    else if (netWorthMonths >= 3) score += 10;
-    return Math.max(0, Math.min(100, score));
-  }, [totals, budgets, fixedMonthlyCost]);
+  // Sem contas/lançamentos = sem score inventado (antes partia de 50 = "Bom")
+  const hasHealthData = accounts.length > 0 || transactions.length > 0;
 
-  const healthLabel = healthScore >= 75 ? { text: 'Excelente', color: 'text-emerald-600', bg: 'bg-emerald-50', icon: CheckCircle2, bar: 'bg-emerald-500' }
+  // Health score (0–100) — só a partir de dados reais
+  const healthScore = useMemo(() => {
+    if (!hasHealthData) return null;
+    let score = 0;
+    // Poupança: até 40 pts
+    if (totals.income > 0) {
+      if (totals.savingsRate >= 20) score += 40;
+      else if (totals.savingsRate >= 10) score += 25;
+      else if (totals.savingsRate >= 0) score += 10;
+      // taxa negativa: 0 neste bloco
+    }
+    // Orçamentos: até 30 pts (sem orçamento = 0)
+    if (budgets.length > 0) {
+      const overruns = budgets.filter(b => b.limitInCents > 0 && b.spentInCents > b.limitInCents).length;
+      const okRatio = (budgets.length - overruns) / budgets.length;
+      score += Math.round(okRatio * 30);
+    }
+    // Reserva em meses de custo fixo: até 30 pts
+    if (totals.netWorth > 0 && fixedMonthlyCost > 0) {
+      const months = totals.netWorth / fixedMonthlyCost;
+      if (months >= 6) score += 30;
+      else if (months >= 3) score += 20;
+      else if (months >= 1) score += 10;
+    } else if (totals.netWorth > 0 && fixedMonthlyCost === 0) {
+      score += 15; // patrimônio positivo sem fixos cadastrados
+    }
+    return Math.max(0, Math.min(100, score));
+  }, [hasHealthData, totals, budgets, fixedMonthlyCost]);
+
+  const healthLabel = healthScore === null
+    ? { text: 'Sem dados', color: 'text-slate-500', bg: 'bg-slate-50', icon: AlertTriangle, bar: 'bg-slate-300' }
+    : healthScore >= 75 ? { text: 'Excelente', color: 'text-emerald-600', bg: 'bg-emerald-50', icon: CheckCircle2, bar: 'bg-emerald-500' }
     : healthScore >= 50 ? { text: 'Bom', color: 'text-indigo-600', bg: 'bg-indigo-50', icon: TrendingUp, bar: 'bg-indigo-500' }
     : healthScore >= 25 ? { text: 'Atenção', color: 'text-amber-600', bg: 'bg-amber-50', icon: AlertTriangle, bar: 'bg-amber-400' }
     : { text: 'Crítico', color: 'text-rose-600', bg: 'bg-rose-50', icon: AlertTriangle, bar: 'bg-rose-500' };
@@ -253,16 +273,29 @@ export default function AnalyticsModule({ accounts, transactions, budgets, recur
               <Heart className={`w-4 h-4 ${healthLabel.color}`} />
               <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Saúde Financeira</span>
             </div>
-            <p className={`text-4xl font-black ${healthLabel.color}`}>{healthScore}</p>
-            <p className={`text-sm font-bold mt-1 ${healthLabel.color}`}>{healthLabel.text}</p>
-            <div className="w-full bg-white/60 h-2 rounded-full mt-3 overflow-hidden">
-              <div style={{ width: `${healthScore}%` }} className={`h-full rounded-full transition-all ${healthLabel.bar}`} />
-            </div>
+            {healthScore === null ? (
+              <>
+                <p className={`text-2xl font-black ${healthLabel.color}`}>—</p>
+                <p className={`text-sm font-bold mt-1 ${healthLabel.color}`}>{healthLabel.text}</p>
+                <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                  Cadastre contas e lançamentos para calcular o score. Nenhum valor fictício é usado.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className={`text-4xl font-black ${healthLabel.color}`}>{healthScore}</p>
+                <p className={`text-sm font-bold mt-1 ${healthLabel.color}`}>{healthLabel.text}</p>
+                <div className="w-full bg-white/60 h-2 rounded-full mt-3 overflow-hidden">
+                  <div style={{ width: `${healthScore}%` }} className={`h-full rounded-full transition-all ${healthLabel.bar}`} />
+                </div>
+              </>
+            )}
           </div>
+          {healthScore !== null && (
           <div className="mt-4 space-y-2 text-[11px]">
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Taxa de poupança</span>
-              <span className={`font-bold ${totals.savingsRate >= 20 ? 'text-emerald-600' : totals.savingsRate >= 10 ? 'text-amber-600' : 'text-rose-600'}`}>{totals.savingsRate.toFixed(1)}%</span>
+              <span className={`font-bold ${totals.savingsRate >= 20 ? 'text-emerald-600' : totals.savingsRate >= 10 ? 'text-amber-600' : 'text-rose-600'}`}>{totals.income > 0 ? `${totals.savingsRate.toFixed(1)}%` : '—'}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Reserva (meses)</span>
@@ -271,7 +304,7 @@ export default function AnalyticsModule({ accounts, transactions, budgets, recur
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Orçamentos estourados</span>
               <span className={`font-bold ${budgets.filter(b => b.spentInCents > b.limitInCents).length > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                {budgets.filter(b => b.spentInCents > b.limitInCents).length}/{budgets.length}
+                {budgets.length > 0 ? `${budgets.filter(b => b.spentInCents > b.limitInCents).length}/${budgets.length}` : '—'}
               </span>
             </div>
             {recurrences.length > 0 && (
@@ -281,6 +314,7 @@ export default function AnalyticsModule({ accounts, transactions, budgets, recur
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Monthly comparison 6 months */}
