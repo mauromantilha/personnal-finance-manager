@@ -16,15 +16,20 @@ router.post('/accounts', async (c) => {
     return c.json({ error: 'Tipo inválido.' }, 400);
 
   const balance = parseInt(String(balanceInCents), 10);
-  if (isNaN(balance) || balance < 0)
-    return c.json({ error: 'Saldo inicial deve ser não-negativo em centavos.' }, 400);
+  // Saldo inicial pode ser negativo (conta no vermelho / cheque especial)
+  if (isNaN(balance))
+    return c.json({ error: 'Saldo inicial inválido (centavos inteiros).' }, 400);
 
   const id = `acc-usr-${crypto.randomUUID()}`;
-  await db.exec(
-    'INSERT INTO accounts (id,name,type,bank_name,balance_in_cents,color,is_linked,branch,account_number,account_digit,manager_name,manager_phone) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)',
-    [id, name, type, bankName, balance, color ?? '#6B7280', branch ?? null, accountNumber ?? null, accountDigit ?? null, managerName ?? null, managerPhone ?? null],
-  );
-  return c.json({ id }, 201);
+  try {
+    await db.exec(
+      'INSERT INTO accounts (id,name,type,bank_name,balance_in_cents,color,is_linked,branch,account_number,account_digit,manager_name,manager_phone) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)',
+      [id, name, type, bankName, balance, color ?? '#6B7280', branch ?? null, accountNumber ?? null, accountDigit ?? null, managerName ?? null, managerPhone ?? null],
+    );
+    return c.json({ id }, 201);
+  } catch (e) {
+    return c.json({ error: 'Falha ao criar conta.', details: (e as Error).message }, 500);
+  }
 });
 
 router.put('/accounts/:id', async (c) => {

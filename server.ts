@@ -1011,8 +1011,9 @@ async function startServer() {
     if (!VALID_ACC_TYPES.includes(type))
       return res.status(400).json({ error: 'Tipo inválido.' });
     const balance = parseInt(balanceInCents, 10);
-    if (isNaN(balance) || balance < 0)
-      return res.status(400).json({ error: 'Saldo inicial deve ser não-negativo em centavos.' });
+    // Saldo inicial pode ser negativo (conta no vermelho / cheque especial)
+    if (isNaN(balance))
+      return res.status(400).json({ error: 'Saldo inicial inválido (centavos inteiros).' });
     const id = `acc-usr-${Date.now()}`;
     try {
       await d1q(
@@ -1336,12 +1337,19 @@ async function startServer() {
 
   app.post('/api/credit-cards', async (req, res) => {
     const { name, bankName, lastFour, limitInCents, billingDay, dueDay, color } = req.body;
-    if (!name || !bankName || !limitInCents)
+    if (!name || !bankName || limitInCents === undefined || limitInCents === null)
       return res.status(400).json({ error: 'name, bankName e limitInCents são obrigatórios.' });
+    const limit = parseInt(limitInCents, 10);
+    if (isNaN(limit) || limit <= 0)
+      return res.status(400).json({ error: 'Limite deve ser um valor positivo em centavos.' });
+    const bill = parseInt(billingDay, 10) || 1;
+    const due = parseInt(dueDay, 10) || 10;
     const id = `cc-usr-${Date.now()}`;
     try {
-      await d1q('INSERT INTO credit_cards VALUES (?,?,?,?,?,?,?,?,1)',
-        [id, name, bankName, lastFour || null, parseInt(limitInCents, 10), billingDay || 1, dueDay || 10, color || '#6366F1']);
+      await d1q(
+        'INSERT INTO credit_cards (id,name,bank_name,last_four,limit_in_cents,billing_day,due_day,color,is_active) VALUES (?,?,?,?,?,?,?,?,1)',
+        [id, name, bankName, lastFour || null, limit, bill, due, color || '#6366F1'],
+      );
       res.status(201).json({ id });
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
