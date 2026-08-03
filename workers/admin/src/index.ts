@@ -76,6 +76,40 @@ function genNonce(): string {
   return btoa(s);
 }
 
+/** CSP do painel admin (HTML inline com nonce). */
+function adminCsp(nonce: string): string {
+  return [
+    `default-src 'self'`,
+    `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com`,
+    `script-src-elem 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com`,
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' https://api.dicebear.com data:`,
+    `connect-src 'self' https://api.resend.com https://cloudflareinsights.com https://static.cloudflareinsights.com`,
+    `frame-ancestors 'none'`,
+  ].join('; ');
+}
+
+/**
+ * CSP do SPA do tenant (proxied Pages).
+ * Precisa permitir Cloudflare Access: quando a sessão OTP expira, fetch('/api/…')
+ * recebe 302 para *.cloudflareaccess.com — sem isso o browser bloqueia e
+ * criar conta / market / data falham com "Failed to fetch".
+ */
+function tenantCsp(teamDomain: string): string {
+  const access = `https://${teamDomain}.cloudflareaccess.com`;
+  return [
+    `default-src 'self'`,
+    `script-src 'self' https://static.cloudflareinsights.com`,
+    `style-src 'self' 'unsafe-inline' ${access}`,
+    `img-src 'self' https://api.dicebear.com data: ${access}`,
+    `font-src 'self' data:`,
+    `connect-src 'self' ${access} https://cloudflareinsights.com https://static.cloudflareinsights.com`,
+    `frame-src ${access}`,
+    `form-action 'self' ${access}`,
+    `frame-ancestors 'none'`,
+  ].join('; ');
+}
+
 app.use('*', async (c, next) => {
   const nonce = genNonce();
   c.set('cspNonce', nonce);
@@ -87,14 +121,13 @@ app.use('*', async (c, next) => {
   c.header('Permissions-Policy',
     'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), ' +
     'accelerometer=(), gyroscope=(), interest-cohort=()');
-  c.header('Content-Security-Policy',
-    `default-src 'self'; ` +
-    `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +
-    `script-src-elem 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +
-    `style-src 'self' 'unsafe-inline'; ` +
-    `img-src 'self' https://api.dicebear.com data:; ` +
-    `connect-src 'self' https://api.resend.com https://cloudflareinsights.com https://static.cloudflareinsights.com; ` +
-    `frame-ancestors 'none'`);
+
+  const host = new URL(c.req.url).hostname;
+  const isAdmin = host === `admin.${c.env.BASE_DOMAIN}`;
+  c.header(
+    'Content-Security-Policy',
+    isAdmin ? adminCsp(nonce) : tenantCsp(c.env.CF_TEAM_DOMAIN),
+  );
 });
 
 // ── Tenant frontend proxy ─────────────────────────────────────────────────────
@@ -187,6 +220,8 @@ app.all('*', async (c, next) => {
   // ao tenant — qualquer cookie deve vir do nosso próprio Worker).
   const respHeaders = new Headers(res.headers);
   respHeaders.delete('set-cookie');
+  // CSP do tenant (middleware também aplica; reforça no Response cru do proxy)
+  respHeaders.set('Content-Security-Policy', tenantCsp(c.env.CF_TEAM_DOMAIN));
   const ct = respHeaders.get('content-type') ?? '';
   if (ct.includes('text/html') || url.pathname === '/' || url.pathname.endsWith('.html')) {
     respHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
