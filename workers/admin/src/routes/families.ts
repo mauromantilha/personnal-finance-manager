@@ -114,6 +114,10 @@ router.post('/families/:subdomain/wipe-data', async (c) => {
       c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1DatabaseId,
       `INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed')`,
     );
+    await execD1(
+      c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1DatabaseId,
+      `INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo')`,
+    );
   } catch { /* ignore */ }
 
   await writeAudit(c.env.MKS_ADMIN, {
