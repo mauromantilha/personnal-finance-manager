@@ -37,6 +37,7 @@ export interface Env {
   CPF_SALT:            string;
   APP_SECRET:          string;  // HMAC para tokens de verificação de email
   AUTO_CLEANUP?:       string;  // "true" habilita o cron de limpeza de pendentes (destrutivo)
+  FINANCE?:            Fetcher; // service binding → mks-finance (API dos tenants)
 }
 
 export interface Tenant {
@@ -103,8 +104,24 @@ app.all('*', async (c, next) => {
   const url = new URL(c.req.url);
   const hostname = url.hostname;
   if (hostname === `admin.${c.env.BASE_DOMAIN}`) return next();
-  // Public API paths (registration, etc.) — bypass proxy so Worker handles them
-  if (url.pathname.startsWith('/public/') || url.pathname.startsWith('/api/public/')) return next();
+  // /api/* do tenant NÃO pode ir ao Pages (HTML). Encaminha ao Finance Worker
+  // via service binding — cobre conflito de rota *.financaslivre.com/* vs /api/*.
+  if (
+    url.pathname.startsWith('/api/') &&
+    !url.pathname.startsWith('/api/public/') &&
+    hostname !== `admin.${c.env.BASE_DOMAIN}`
+  ) {
+    if (c.env.FINANCE) {
+      return c.env.FINANCE.fetch(c.req.raw);
+    }
+    return c.json({
+      error: 'API do tenant deveria ir ao Finance Worker. Binding FINANCE ausente.',
+      code: 'API_ROUTE_MISMATCH',
+    }, 502);
+  }
+  if (url.pathname.startsWith('/public/') || url.pathname.startsWith('/api/public/')) {
+    return next();
+  }
 
   // Only serve SPA for provisioned, active tenants — reject unknown/pending subdomains
   const subdomain = hostname.split('.')[0];

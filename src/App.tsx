@@ -192,31 +192,36 @@ export default function App() {
     };
   }, []);
 
-  const fetchAllData = useCallback(async () => {
+  const fetchAllData = useCallback(async (): Promise<boolean> => {
     try {
       const response = await fetch('/api/data');
-      if (response.ok) {
-        const data = await response.json();
-        setAccounts(data.accounts || []);
-        setTransactions(data.transactions || []);
-        setBudgets(data.budgets || []);
-        setGoals(data.goals || []);
-        setAlerts(data.alerts || []);
-        setCategories(data.categories || []);
-        setCreditCards(data.creditCards || []);
-        setInvoices(data.invoices || []);
-        setRecurrences(data.recurrences || []);
-        setFamilyMembers(data.familyMembers || []);
-        setInstallmentGroups(data.installmentGroups || []);
-        setInvestments(data.investments || []);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({} as any));
+        showError(body.error || `Falha ao carregar dados (${response.status}).`);
+        return false;
       }
+      const data = await response.json();
+      setAccounts(data.accounts || []);
+      setTransactions(data.transactions || []);
+      setBudgets(data.budgets || []);
+      setGoals(data.goals || []);
+      setAlerts(data.alerts || []);
+      setCategories(data.categories || []);
+      setCreditCards(data.creditCards || []);
+      setInvoices(data.invoices || []);
+      setRecurrences(data.recurrences || []);
+      setFamilyMembers(data.familyMembers || []);
+      setInstallmentGroups(data.installmentGroups || []);
+      setInvestments(data.investments || []);
+      return true;
     } catch (e) {
       console.error('Erro ao buscar dados:', e);
       showError('Falha ao carregar os dados. Verifique sua conexão.');
+      return false;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [showError]);
 
   useEffect(() => {
     async function initialize() {
@@ -279,12 +284,20 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(accData)
       });
-      if (response.ok) {
-        await fetchAllData();
-        return true;
-      }
       const body = await response.json().catch(() => ({} as any));
-      showError(body.error || body.details || 'Erro ao cadastrar conta.');
+      if (!response.ok) {
+        showError(body.error || body.details || 'Erro ao cadastrar conta.');
+        return false;
+      }
+      // Atualiza UI imediatamente com o retorno da API (não depende só do refresh)
+      if (body.account) {
+        setAccounts(prev => [...prev, body.account]);
+      }
+      const refreshed = await fetchAllData();
+      if (!refreshed && !body.account) {
+        showError('Conta criada, mas falhou ao atualizar a lista. Recarregue a página.');
+      }
+      return true;
     } catch (err) {
       console.error(err); showError();
     }
@@ -456,9 +469,19 @@ export default function App() {
   const handleAddCreditCard = async (data: any): Promise<boolean> => {
     try {
       const res = await fetch('/api/credit-cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-      if (res.ok) { await fetchAllData(); return true; }
       const body = await res.json().catch(() => ({} as any));
-      showError(body.error || body.details || 'Erro ao cadastrar cartão.');
+      if (!res.ok) {
+        showError(body.error || body.details || 'Erro ao cadastrar cartão.');
+        return false;
+      }
+      if (body.card) {
+        setCreditCards(prev => [...prev, body.card]);
+      }
+      const refreshed = await fetchAllData();
+      if (!refreshed && !body.card) {
+        showError('Cartão criado, mas falhou ao atualizar a lista. Recarregue a página.');
+      }
+      return true;
     } catch (err) { console.error(err); showError(); }
     return false;
   };

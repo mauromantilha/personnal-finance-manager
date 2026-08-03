@@ -6,6 +6,7 @@ import {
   mapInstallmentGroup, mapInvestment, mapChat,
 } from '../lib/mappers';
 import { processRecurrences, recalculateBudgets, generateProactiveAlerts } from '../lib/helpers';
+import { ensureTenantSchema } from '../lib/ensure-schema';
 import type { D1Param } from '../lib/d1';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -21,6 +22,13 @@ const MAINT_TTL_SECONDS = 3600;
 router.get('/data', async (c) => {
   const db   = c.get('db');
   const user = c.get('user');
+
+  // Auto-heal schema em tenants legados (colunas 0015+, tabelas debts/cards)
+  try {
+    await ensureTenantSchema(db);
+  } catch (e) {
+    console.error('[ensureTenantSchema]', (e as Error).message);
+  }
 
   const maintKey = `maint:${c.get('familyId')}`;
   const ranRecently = await c.env.MKS_CACHE.get(maintKey);
@@ -52,7 +60,7 @@ router.get('/data', async (c) => {
     db.query('SELECT * FROM goals').then(r => r.map(mapGoal)),
     db.query('SELECT * FROM alerts ORDER BY date DESC').then(r => r.map(mapAlert)),
     db.query('SELECT * FROM (SELECT * FROM chat_history ORDER BY rowid DESC LIMIT 200) ORDER BY rowid ASC').then(r => r.map(mapChat)),
-    db.query('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC').then(r => r.map(mapCategory as any)),
+    db.query('SELECT * FROM categories ORDER BY (parent_id IS NOT NULL), parent_id, name').then(r => r.map(mapCategory as any)),
     db.query("SELECT * FROM credit_cards WHERE is_active = 1").then(r => r.map(mapCreditCard as any)),
     db.query('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice as any)),
     db.query('SELECT * FROM recurrences WHERE is_active = 1 ORDER BY day_of_month ASC').then(r => r.map(mapRecurrence as any)),
