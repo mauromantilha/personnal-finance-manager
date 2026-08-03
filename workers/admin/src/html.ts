@@ -1038,6 +1038,7 @@ function renderFamilies(fams) {
     var actions = '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="detail" data-sub="' + sub + '">Detalhes</button>';
     if (f.status === 'active')    actions += ' <button class="btn btn-warn" style="font-size:11px;padding:4px 9px;" data-action="suspend" data-sub="' + sub + '">Suspender</button>';
     if (f.status === 'suspended') actions += ' <button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" data-action="activate" data-sub="' + sub + '">Reativar</button>';
+    if (f.status === 'active')    actions += ' <button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="wipe" data-sub="' + sub + '" title="Apaga contas, lançamentos, cartões e seed demo">Limpar dados</button>';
     if (f.status !== 'deleted')   actions += ' <button class="btn btn-err" style="font-size:11px;padding:4px 9px;" data-action="delete" data-sub="' + sub + '">Excluir</button>';
     actions += ' <button class="btn" style="font-size:11px;padding:4px 9px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + sub + '">◎ Stats</button>';
     return '<tr>'
@@ -1069,6 +1070,14 @@ async function deleteFamily(sub) {
   var data = await api('DELETE', '/families/' + sub, null, 30000, { 'X-Confirm-Subdomain': sub });
   if (data.success) { showToast('Família excluída.'); loadFamilies(); }
   else showToast(data.error || 'Erro ao excluir.', false);
+}
+
+async function wipeFamilyData(sub) {
+  if (!confirm('Limpar TODOS os dados financeiros de "' + sub + '"?\n\nRemove contas, lançamentos, cartões, orçamentos, metas e seed demo.\nMantém usuários, categorias e aceite LGPD.')) return;
+  if (!confirm('Confirma limpeza de "' + sub + '"? Esta ação não tem desfazer.')) return;
+  var data = await api('POST', '/families/' + sub + '/wipe-data', {}, 60000, { 'X-Confirm-Subdomain': sub });
+  if (data.success) showToast('Dados de "' + sub + '" limpos. Família pronta para uso.');
+  else showToast(data.error || ('Limpeza parcial: ' + ((data.errors || []).join('; ') || 'erro')), false);
 }
 
 // ── Telemetria Global ─────────────────────────────────────────────
@@ -1535,6 +1544,7 @@ document.addEventListener('click', function(e) {
     if (action === 'suspend')   { e.stopPropagation(); updateStatus(sub, 'suspended'); return; }
     if (action === 'activate')  { e.stopPropagation(); updateStatus(sub, 'active'); return; }
     if (action === 'delete')    { e.stopPropagation(); deleteFamily(sub); return; }
+    if (action === 'wipe')      { e.stopPropagation(); wipeFamilyData(sub); return; }
     if (action === 'send-comm') { sendCommunication(); return; }
     if (action === 'refresh-comms') { loadCommunications(); return; }
     if (action === 'refresh-storage') { loadStorageUpgrades(); return; }

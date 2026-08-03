@@ -50,6 +50,7 @@ router.post('/reset', async (c) => {
     { sql: 'DELETE FROM recurrences' },
     { sql: 'DELETE FROM installment_groups' },
     { sql: 'DELETE FROM investments' },
+    { sql: 'DELETE FROM debts' },
   ];
 
   await db.batch(stmts);
