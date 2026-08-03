@@ -283,6 +283,8 @@ export default function App() {
         await fetchAllData();
         return true;
       }
+      const body = await response.json().catch(() => ({} as any));
+      showError(body.error || body.details || 'Erro ao cadastrar conta.');
     } catch (err) {
       console.error(err); showError();
     }

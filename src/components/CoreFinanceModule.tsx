@@ -214,9 +214,10 @@ export default function CoreFinanceModule({
   // ── Account handlers ────────────────────────────────────────────────────────
   const handleCreateAccount = async (e: { preventDefault(): void }) => {
     e.preventDefault();
-    if (!accName || !accBalance) { fb('Preencha todos os dados da carteira.', 'error'); return; }
-    const parsedReal = parseFloat(accBalance.replace(',', '.'));
-    if (isNaN(parsedReal)) { fb('Saldo inválido.', 'error'); return; }
+    if (!accName) { fb('Preencha o nome da carteira.', 'error'); return; }
+    const normalized = (accBalance || '0').replace(/\./g, '').replace(',', '.');
+    const parsedReal = parseFloat(normalized);
+    if (isNaN(parsedReal) || parsedReal < 0) { fb('Saldo inválido.', 'error'); return; }
     const result = await onAddAccount({
       name: accName, type: accType, bankName: accBank,
       balanceInCents: Math.round(parsedReal * 100), color: accColor,
@@ -239,7 +240,19 @@ export default function CoreFinanceModule({
   };
 
   const handleSaveAcc = async (id: string) => {
-    const result = await onEditAccount(id, { name: editAccName, bankName: editAccBank, type: editAccType, color: editAccColor });
+    const existing = accounts.find(a => a.id === id);
+    const result = await onEditAccount(id, {
+      name: editAccName,
+      bankName: editAccBank,
+      type: editAccType,
+      color: editAccColor,
+      // Preserva metadados bancários no edit parcial (evita wipe no backend)
+      branch: existing?.branch ?? null,
+      accountNumber: existing?.accountNumber ?? null,
+      accountDigit: existing?.accountDigit ?? null,
+      managerName: existing?.managerName ?? null,
+      managerPhone: existing?.managerPhone ?? null,
+    });
     if (result) { fb('Conta atualizada!', 'success'); setEditingAccId(null); }
     else fb('Erro ao atualizar conta.', 'error');
   };

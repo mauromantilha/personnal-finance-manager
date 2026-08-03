@@ -179,8 +179,10 @@ async function syncPluggyItem(itemId: string, connId: string): Promise<void> {
     const bankName = item.connector?.name || 'Pluggy';
 
     if (!existing.length) {
-      await d1q('INSERT INTO accounts VALUES (?,?,?,?,?,?,?)',
-        [localAccId, accName, 'CHECKING', bankName, balanceCents, '#3B82F6', 1]);
+      await d1q(
+        'INSERT INTO accounts (id,name,type,bank_name,balance_in_cents,color,is_linked,branch,account_number,account_digit,manager_name,manager_phone) VALUES (?,?,?,?,?,?,1,NULL,NULL,NULL,NULL,NULL)',
+        [localAccId, accName, 'CHECKING', bankName, balanceCents, '#3B82F6'],
+      );
     } else {
       await d1q('UPDATE accounts SET balance_in_cents = ?, is_linked = 1 WHERE id = ?', [balanceCents, localAccId]);
     }
@@ -235,7 +237,13 @@ function classifyMerchant(desc: string): string {
 // ─── Row mappers ──────────────────────────────────────────────────────────────
 
 function mapAccount(r: any): FinancialAccount {
-  return { id: r.id, name: r.name, type: r.type, bankName: r.bank_name, balanceInCents: r.balance_in_cents, color: r.color, isLinked: !!r.is_linked };
+  return {
+    id: r.id, name: r.name, type: r.type, bankName: r.bank_name,
+    balanceInCents: r.balance_in_cents, color: r.color, isLinked: !!r.is_linked,
+    branch: r.branch ?? null, accountNumber: r.account_number ?? null,
+    accountDigit: r.account_digit ?? null, managerName: r.manager_name ?? null,
+    managerPhone: r.manager_phone ?? null,
+  };
 }
 function mapTransaction(r: any): Transaction {
   return {
@@ -815,6 +823,15 @@ async function startServer() {
     if (!isCreditCard && !accountId)
       return res.status(400).json({ error: 'accountId obrigatório para transações sem cartão.' });
 
+    if (type === 'TRANS') {
+      if (!destinationAccountId)
+        return res.status(400).json({ error: 'destinationAccountId obrigatório para transferências.' });
+      if (accountId && accountId === destinationAccountId)
+        return res.status(400).json({ error: 'Conta de origem e destino devem ser diferentes.' });
+      const destRows = await d1q('SELECT id FROM accounts WHERE id = ?', [destinationAccountId]);
+      if (!destRows.length) return res.status(404).json({ error: 'Conta de destino não encontrada.' });
+    }
+
     const numInstallments = installments && installments > 1 ? Math.min(parseInt(installments, 10), 48) : 1;
     const installmentGroupId = numInstallments > 1 ? `grp-${Date.now()}` : null;
     const baseId = `tx-usr-${Date.now()}`;
@@ -944,13 +961,33 @@ async function startServer() {
 
   app.put('/api/accounts/:id', async (req, res) => {
     const { id } = req.params;
-    const { name, bankName, type, color } = req.body;
+    const body = req.body || {};
+    const { name, bankName, type, color, branch, accountNumber, accountDigit, managerName, managerPhone } = body;
     if (!name || !bankName) return res.status(400).json({ error: 'name e bankName são obrigatórios.' });
     if (type && !VALID_ACC_TYPES.includes(type)) return res.status(400).json({ error: 'Tipo inválido.' });
     try {
       const rows = await d1q('SELECT id FROM accounts WHERE id = ?', [id]);
       if (!rows.length) return res.status(404).json({ error: 'Conta não encontrada.' });
-      await d1q('UPDATE accounts SET name=?,bank_name=?,type=?,color=? WHERE id=?', [name, bankName, type || 'CHECKING', color || '#6B7280', id]);
+      const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+      await d1q(
+        `UPDATE accounts SET
+          name=?, bank_name=?, type=?, color=?,
+          branch=CASE WHEN ? THEN ? ELSE branch END,
+          account_number=CASE WHEN ? THEN ? ELSE account_number END,
+          account_digit=CASE WHEN ? THEN ? ELSE account_digit END,
+          manager_name=CASE WHEN ? THEN ? ELSE manager_name END,
+          manager_phone=CASE WHEN ? THEN ? ELSE manager_phone END
+        WHERE id=?`,
+        [
+          name, bankName, type || 'CHECKING', color || '#6B7280',
+          has('branch') ? 1 : 0, has('branch') ? (branch ?? null) : null,
+          has('accountNumber') ? 1 : 0, has('accountNumber') ? (accountNumber ?? null) : null,
+          has('accountDigit') ? 1 : 0, has('accountDigit') ? (accountDigit ?? null) : null,
+          has('managerName') ? 1 : 0, has('managerName') ? (managerName ?? null) : null,
+          has('managerPhone') ? 1 : 0, has('managerPhone') ? (managerPhone ?? null) : null,
+          id,
+        ],
+      );
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
   });
@@ -958,7 +995,7 @@ async function startServer() {
   app.delete('/api/accounts/:id', async (req, res) => {
     const { id } = req.params;
     try {
-      const txCount = await d1q<any>('SELECT COUNT(*) as cnt FROM transactions WHERE account_id = ?', [id]);
+      const txCount = await d1q<any>('SELECT COUNT(*) as cnt FROM transactions WHERE account_id = ? OR destination_account_id = ?', [id, id]);
       if ((txCount[0]?.cnt || 0) > 0) return res.status(400).json({ error: 'Não é possível excluir conta com transações associadas.' });
       await d1q('DELETE FROM accounts WHERE id = ?', [id]);
       res.json({ success: true });
@@ -968,7 +1005,7 @@ async function startServer() {
   // ── CREATE ACCOUNT ─────────────────────────────────────────────────────────
 
   app.post('/api/accounts', async (req, res) => {
-    const { name, type, bankName, balanceInCents, color } = req.body;
+    const { name, type, bankName, balanceInCents, color, branch, accountNumber, accountDigit, managerName, managerPhone } = req.body;
     if (!name || !type || !bankName || balanceInCents === undefined)
       return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
     if (!VALID_ACC_TYPES.includes(type))
@@ -978,7 +1015,10 @@ async function startServer() {
       return res.status(400).json({ error: 'Saldo inicial deve ser não-negativo em centavos.' });
     const id = `acc-usr-${Date.now()}`;
     try {
-      await d1q('INSERT INTO accounts VALUES (?,?,?,?,?,?,0)', [id, name, type, bankName, balance, color || '#6B7280']);
+      await d1q(
+        'INSERT INTO accounts (id,name,type,bank_name,balance_in_cents,color,is_linked,branch,account_number,account_digit,manager_name,manager_phone) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)',
+        [id, name, type, bankName, balance, color || '#6B7280', branch ?? null, accountNumber ?? null, accountDigit ?? null, managerName ?? null, managerPhone ?? null],
+      );
       res.status(201).json({ id });
     } catch (e: any) {
       res.status(500).json({ error: 'D1 error', details: e.message });
@@ -1351,6 +1391,10 @@ async function startServer() {
       if (!invRows.length) return res.status(404).json({ error: 'Fatura não encontrada.' });
       const inv = mapInvoice(invRows[0]);
       if (inv.status === 'paid') return res.status(400).json({ error: 'Fatura já está paga.' });
+      if (inv.totalInCents <= 0) return res.status(400).json({ error: 'Fatura sem valor a pagar.' });
+
+      const accRows = await d1q('SELECT id FROM accounts WHERE id = ?', [accountId]);
+      if (!accRows.length) return res.status(404).json({ error: 'Conta de pagamento não encontrada.' });
 
       const paidAt = new Date().toISOString();
       await d1exec([
@@ -1869,6 +1913,114 @@ Inclua TODOS os lançamentos visíveis. Retorne APENAS o JSON.`;
       await recalculateBudgets();
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  // ── DEBTS ──────────────────────────────────────────────────────────────────
+
+  function mapDebt(r: any) {
+    return {
+      id: r.id,
+      creditor: r.creditor,
+      type: r.type,
+      originalAmountInCents: r.original_amount_in_cents,
+      currentAmountInCents: r.current_amount_in_cents,
+      dueDate: r.due_date,
+      monthsOverdue: r.months_overdue,
+      status: r.status,
+      notes: r.notes,
+      createdAt: r.created_at,
+    };
+  }
+
+  app.get('/api/debts', async (_req, res) => {
+    try {
+      const rows = await d1q<any>('SELECT * FROM debts ORDER BY current_amount_in_cents DESC');
+      res.json({ debts: rows.map(mapDebt) });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/debts', async (req, res) => {
+    const { creditor, type, originalAmountInCents, currentAmountInCents,
+            dueDate, monthsOverdue, status, notes } = req.body;
+    if (!creditor || !type || !originalAmountInCents || !currentAmountInCents)
+      return res.status(400).json({ error: 'creditor, type, originalAmountInCents e currentAmountInCents são obrigatórios.' });
+    const id = `debt-${Date.now()}`;
+    try {
+      await d1q(
+        'INSERT INTO debts (id,creditor,type,original_amount_in_cents,current_amount_in_cents,due_date,months_overdue,status,notes) VALUES (?,?,?,?,?,?,?,?,?)',
+        [id, creditor, type, originalAmountInCents, currentAmountInCents,
+         dueDate ?? null, monthsOverdue ?? 0, status ?? 'ativo', notes ?? null],
+      );
+      res.status(201).json({ id });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.put('/api/debts/:id', async (req, res) => {
+    const { id } = req.params;
+    const { creditor, type, originalAmountInCents, currentAmountInCents,
+            dueDate, monthsOverdue, status, notes } = req.body;
+    try {
+      const rows = await d1q('SELECT id FROM debts WHERE id = ?', [id]);
+      if (!rows.length) return res.status(404).json({ error: 'Dívida não encontrada.' });
+      await d1q(
+        'UPDATE debts SET creditor=?,type=?,original_amount_in_cents=?,current_amount_in_cents=?,due_date=?,months_overdue=?,status=?,notes=? WHERE id=?',
+        [creditor, type, originalAmountInCents, currentAmountInCents,
+         dueDate ?? null, monthsOverdue ?? 0, status ?? 'ativo', notes ?? null, id],
+      );
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.delete('/api/debts/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      await d1q('DELETE FROM debts WHERE id = ?', [id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: 'D1 error', details: e.message }); }
+  });
+
+  app.post('/api/debts/analyze', async (_req, res) => {
+    try {
+      const [debtRows, accounts, txRows] = await Promise.all([
+        d1q<any>("SELECT * FROM debts WHERE status != 'quitado'"),
+        d1q<any>('SELECT * FROM accounts').then(r => r.map(mapAccount)),
+        d1q<any>("SELECT * FROM transactions WHERE date LIKE ?", [`${new Date().toISOString().slice(0, 7)}%`]),
+      ]);
+      const debts = debtRows.map(mapDebt);
+      if (!debts.length) return res.json({ analysis: 'Nenhuma dívida ativa cadastrada.' });
+
+      const brlFmt = (n: number) => `R$ ${(n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+      const totalDebt = debts.reduce((s: number, d: any) => s + d.currentAmountInCents, 0);
+      const netWorth = accounts.reduce((s: number, a: FinancialAccount) => s + a.balanceInCents, 0);
+      const monthIncome = txRows.filter((t: any) => t.type === 'REC').reduce((s: number, t: any) => s + t.amount_in_cents, 0);
+      const monthExpense = txRows.filter((t: any) => t.type === 'DES').reduce((s: number, t: any) => s + t.amount_in_cents, 0);
+
+      const client = getGroqClient();
+      if (!client) {
+        return res.json({
+          analysis: `### Análise rápida\n\nTotal de dívidas: **${brlFmt(totalDebt)}** · Patrimônio: **${brlFmt(netWorth)}**.\n\nConfigure GROQ_API_KEY no .env para estratégia completa com IA.`,
+        });
+      }
+
+      const completion = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.4,
+        max_tokens: 2500,
+        messages: [
+          {
+            role: 'system',
+            content: `Você é especialista em negociação de dívidas no Brasil. Patrimônio: ${brlFmt(netWorth)}. Receita mês: ${brlFmt(monthIncome)}. Despesas mês: ${brlFmt(monthExpense)}. Total dívidas: ${brlFmt(totalDebt)}. Dívidas: ${JSON.stringify(debts.map((d: any) => ({ credor: d.creditor, tipo: d.type, atual: brlFmt(d.currentAmountInCents), atraso: d.monthsOverdue, status: d.status })))}. Responda em Markdown, máx 700 palavras.`,
+          },
+          { role: 'user', content: 'Analise minhas dívidas e proponha estratégias de resolução.' },
+        ],
+      });
+      const analysis = (completion.choices[0]?.message?.content || '') +
+        '\n\n---\n*⚠️ Orientações gerais — não substituem aconselhamento financeiro ou jurídico profissional.*';
+      res.json({ analysis });
+    } catch (e: any) {
+      if (String(e?.message || '').includes('429')) return res.status(429).json({ error: 'RATE_LIMIT' });
+      res.status(500).json({ error: 'Erro na análise.', details: e.message });
+    }
   });
 
   // ── INVESTMENTS ────────────────────────────────────────────────────────────

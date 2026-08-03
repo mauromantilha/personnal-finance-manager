@@ -39,8 +39,14 @@ router.post('/transactions', async (c) => {
   if (!isCreditCard && !accountId)
     return c.json({ error: 'accountId obrigatório para transações sem cartão.' }, 400);
 
-  if (type === 'TRANS' && accountId && accountId === destinationAccountId)
-    return c.json({ error: 'Conta de origem e destino devem ser diferentes.' }, 400);
+  if (type === 'TRANS') {
+    if (!destinationAccountId)
+      return c.json({ error: 'destinationAccountId obrigatório para transferências.' }, 400);
+    if (accountId && accountId === destinationAccountId)
+      return c.json({ error: 'Conta de origem e destino devem ser diferentes.' }, 400);
+    const dest = await db.first('SELECT id FROM accounts WHERE id = ?', [destinationAccountId]);
+    if (!dest) return c.json({ error: 'Conta de destino não encontrada.' }, 404);
+  }
 
   const numInstallments = installments && parseInt(String(installments), 10) > 1
     ? Math.min(parseInt(String(installments), 10), 48) : 1;
@@ -145,6 +151,9 @@ router.put('/transactions/:id', async (c) => {
       if (old.destinationAccountId) stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [diff, old.destinationAccountId] });
     }
   }
+  if (diff !== 0 && old.invoiceId) {
+    stmts.push({ sql: 'UPDATE invoices SET total_in_cents = MAX(0, total_in_cents + ?) WHERE id = ?', params: [diff, old.invoiceId] });
+  }
 
   await db.batch(stmts);
   await recalculateBudgets(db);
@@ -172,6 +181,9 @@ router.delete('/transactions/:id', async (c) => {
   else if (tx.type === 'TRANS') {
     if (tx.accountId) stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [tx.amountInCents, tx.accountId] });
     if (tx.destinationAccountId) stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [tx.amountInCents, tx.destinationAccountId] });
+  }
+  if (tx.invoiceId) {
+    stmts.push({ sql: 'UPDATE invoices SET total_in_cents = MAX(0, total_in_cents - ?) WHERE id = ?', params: [tx.amountInCents, tx.invoiceId] });
   }
 
   await db.batch(stmts);

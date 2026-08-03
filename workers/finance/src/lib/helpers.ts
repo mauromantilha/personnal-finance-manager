@@ -1,5 +1,5 @@
 import { D1Client, D1Stmt } from './d1';
-import { mapRecurrence, DbRecurrence, Recurrence } from './mappers';
+import { mapRecurrence, mapCreditCard, DbRecurrence, DbCreditCard, Recurrence } from './mappers';
 
 export function getCurrentMonth(): string {
   const d = new Date();
@@ -109,13 +109,35 @@ export async function processRecurrences(db: D1Client): Promise<void> {
 
       const exists = await db.first('SELECT id FROM transactions WHERE id = ?', [txId]);
       if (!exists) {
-        stmts.push({
-          sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,NULL,0)',
-          params: [txId, rec.amountInCents, txDate, rec.type, rec.category, rec.description, rec.accountId],
-        });
-        if (rec.accountId) {
-          if (rec.type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [rec.amountInCents, rec.accountId] });
-          else if (rec.type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [rec.amountInCents, rec.accountId] });
+        if (rec.creditCardId) {
+          const card = await db.first<DbCreditCard>('SELECT * FROM credit_cards WHERE id = ?', [rec.creditCardId]);
+          if (card) {
+            const mapped = mapCreditCard(card);
+            const d = new Date(txDate + 'T12:00:00');
+            const instMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const invId = `inv-${rec.creditCardId}-${instMonth.replace('-', '')}`;
+            const dueYear = d.getMonth() + 1 === 12 ? d.getFullYear() + 1 : d.getFullYear();
+            const dueMonth = ((d.getMonth() + 1) % 12) + 1;
+            const dueDate = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(mapped.dueDay).padStart(2, '0')}`;
+            stmts.push({
+              sql: "INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))",
+              params: [invId, rec.creditCardId, instMonth, dueDate],
+            });
+            stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [rec.amountInCents, invId] });
+            stmts.push({
+              sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id) VALUES (?,?,?,?,?,?,NULL,0,?,?)',
+              params: [txId, rec.amountInCents, txDate, rec.type, rec.category, rec.description, rec.creditCardId, invId],
+            });
+          }
+        } else {
+          stmts.push({
+            sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,destination_account_id,is_synced) VALUES (?,?,?,?,?,?,?,NULL,0)',
+            params: [txId, rec.amountInCents, txDate, rec.type, rec.category, rec.description, rec.accountId],
+          });
+          if (rec.accountId) {
+            if (rec.type === 'DES') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [rec.amountInCents, rec.accountId] });
+            else if (rec.type === 'REC') stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [rec.amountInCents, rec.accountId] });
+          }
         }
       }
       stmts.push({ sql: 'UPDATE recurrences SET last_generated_date = ? WHERE id = ?', params: [txDate, rec.id] });
