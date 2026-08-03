@@ -772,16 +772,16 @@ export default function App() {
       )}
 
       {/* Sidebar — full height from top */}
-      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-emerald-50 text-emerald-950 border-r border-emerald-200 flex flex-col fixed lg:static h-screen z-40 transition-all duration-200 lg:translate-x-0 ${
+      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-emerald-100 text-emerald-950 border-r border-emerald-200 flex flex-col fixed lg:static h-screen z-40 transition-all duration-200 lg:translate-x-0 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
 
         {/* Branding */}
-        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-5'} py-4 border-b border-emerald-200 shrink-0`}>
+        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-5'} py-4 border-b border-emerald-200/80 shrink-0`}>
           {sidebarCollapsed ? (
             <button
               onClick={() => setSidebarCollapsed(v => !v)}
-              className="hidden lg:flex p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100 rounded-lg transition-all"
+              className="hidden lg:flex p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-200/70 rounded-lg transition-all"
               title="Expandir sidebar"
             >
               <Menu className="w-5 h-5" />
@@ -793,12 +793,12 @@ export default function App() {
                 <p className="font-black text-sm text-emerald-950 leading-tight">Finanças Livre</p>
                 <p className="text-[10px] text-emerald-700/70 leading-tight">Gestão financeira inteligente</p>
               </div>
-              <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-emerald-600 hover:text-emerald-900 rounded-md hover:bg-emerald-100 shrink-0">
+              <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-emerald-600 hover:text-emerald-900 rounded-md hover:bg-emerald-200/70 shrink-0">
                 <X className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setSidebarCollapsed(v => !v)}
-                className="hidden lg:flex p-1 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-100 rounded-lg transition-all shrink-0"
+                className="hidden lg:flex p-1 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-200/70 rounded-lg transition-all shrink-0"
                 title="Recolher sidebar"
               >
                 <Menu className="w-5 h-5" />
@@ -824,7 +824,7 @@ export default function App() {
                     } py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all ${
                       isSelected 
                         ? 'bg-emerald-600 text-white shadow-sm' 
-                        : 'text-emerald-800/80 hover:text-emerald-950 hover:bg-emerald-100'
+                        : 'text-emerald-800/80 hover:text-emerald-950 hover:bg-emerald-200/60'
                     }`}
                   >
                     <div className={`flex items-center ${sidebarCollapsed ? '' : 'gap-3'}`}>
@@ -842,7 +842,7 @@ export default function App() {
         </nav>
 
         {/* Sidebar footer */}
-        <div className={`pt-3 border-t border-emerald-200 shrink-0 ${sidebarCollapsed ? 'px-2 pb-3 space-y-1' : 'px-5 pb-5 space-y-3'}`}>
+        <div className={`pt-3 border-t border-emerald-200/80 shrink-0 ${sidebarCollapsed ? 'px-2 pb-3 space-y-1' : 'px-5 pb-5 space-y-3'}`}>
             {!sidebarCollapsed && (
               <>
                 <div className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest flex items-center gap-1.5">
