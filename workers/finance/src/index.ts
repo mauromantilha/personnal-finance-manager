@@ -225,14 +225,16 @@ app.use('/api/data', async (c, next) => {
   if (!c.get('lgpdOk')) return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
   return next();
 });
-app.use('/api/transactions/*', async (c, next) => {
+const requireLgpd = async (c: any, next: () => Promise<void>) => {
   if (!c.get('lgpdOk')) return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
   return next();
-});
-app.use('/api/accounts/*', async (c, next) => {
-  if (!c.get('lgpdOk')) return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
-  return next();
-});
+};
+// Exact + wildcard: Hono '*' exige subpath, então POST /api/accounts e /api/transactions
+// ficavam sem gate LGPD.
+app.use('/api/transactions', requireLgpd);
+app.use('/api/transactions/*', requireLgpd);
+app.use('/api/accounts', requireLgpd);
+app.use('/api/accounts/*', requireLgpd);
 
 // ── Montar routers ────────────────────────────────────────────────────────────
 app.route('/api', dataRoutes);

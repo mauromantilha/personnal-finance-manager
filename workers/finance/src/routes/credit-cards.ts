@@ -76,6 +76,10 @@ router.post('/invoices/:id/pay', async (c) => {
 
   const mapped = mapInvoice(inv);
   if (mapped.status === 'paid') return c.json({ error: 'Fatura já está paga.' }, 400);
+  if (mapped.totalInCents <= 0) return c.json({ error: 'Fatura sem valor a pagar.' }, 400);
+
+  const account = await db.first('SELECT id FROM accounts WHERE id = ?', [accountId]);
+  if (!account) return c.json({ error: 'Conta de pagamento não encontrada.' }, 404);
 
   const paidAt = new Date().toISOString();
   await db.batch([

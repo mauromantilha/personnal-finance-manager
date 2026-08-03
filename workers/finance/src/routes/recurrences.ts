@@ -21,6 +21,8 @@ router.post('/recurrences', async (c) => {
 
   if (!description || !amountInCents || !type || !category || !frequency || !startDate)
     return c.json({ error: 'Campos obrigatórios: description, amountInCents, type, category, frequency, startDate.' }, 400);
+  if (!accountId && !creditCardId)
+    return c.json({ error: 'Informe accountId ou creditCardId.' }, 400);
   if (!VALID_TYPES.includes(type))
     return c.json({ error: 'Tipo inválido. Use REC ou DES.' }, 400);
   if (!VALID_FREQ.includes(frequency))
