@@ -16,32 +16,5 @@ CREATE TABLE IF NOT EXISTS recurrences (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Seed: common recurring expenses/income
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-1','Salário Mensal MKS Brasil',650000,'REC','Receita','acc-2',NULL,
-  'monthly',1,'2026-01-01',NULL,'2026-05-01',1,datetime('now')
-);
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-2','Aluguel Loft Paulista',180000,'DES','Moradia','acc-2',NULL,
-  'monthly',2,'2026-01-01',NULL,'2026-05-02',1,datetime('now')
-);
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-3','Netflix',5290,'DES','Lazer','acc-2',NULL,
-  'monthly',17,'2026-01-01',NULL,'2026-05-17',1,datetime('now')
-);
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-4','Spotify',2190,'DES','Lazer','acc-2',NULL,
-  'monthly',20,'2026-01-01',NULL,NULL,1,datetime('now')
-);
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-5','Plano de Saúde Bradesco',48000,'DES','Saúde','acc-2',NULL,
-  'monthly',10,'2026-01-01',NULL,'2026-05-10',1,datetime('now')
-);
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-6','Condomínio',32000,'DES','Moradia','acc-2',NULL,
-  'monthly',15,'2026-01-01',NULL,'2026-05-15',1,datetime('now')
-);
-INSERT OR IGNORE INTO recurrences VALUES (
-  'rec-7','Aporte Mensal Poupança',120000,'DES','Investimentos','acc-2',NULL,
-  'monthly',10,'2026-01-01',NULL,'2026-05-10',1,datetime('now')
-);
+-- Seed de recorrências REMOVIDO (era demo: salário MKS, aluguel Loft, Netflix…).
+-- Limpeza: migration 0018_remove_demo_seed.sql

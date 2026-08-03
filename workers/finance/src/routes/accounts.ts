@@ -1,14 +1,21 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
+import { ensureTenantSchema } from '../lib/ensure-schema';
 
 const VALID_TYPES = ['CASH', 'CHECKING', 'SAVINGS', 'INVESTMENT'];
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 router.post('/accounts', async (c) => {
   const db = c.get('db');
-  const { name, type, bankName, balanceInCents, color, branch, accountNumber, accountDigit, managerName, managerPhone } = await c.req.json<any>();
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'JSON inválido.' }, 400);
+  }
+  const { name, type, bankName, balanceInCents, color, branch, accountNumber, accountDigit, managerName, managerPhone } = body;
 
-  if (!name || !type || !bankName || balanceInCents === undefined)
+  if (!name || !type || !bankName || balanceInCents === undefined || balanceInCents === null)
     return c.json({ error: 'Preencha todos os campos obrigatórios.' }, 400);
   if (String(name).length > 100 || String(bankName).length > 100)
     return c.json({ error: 'name e bankName não podem ultrapassar 100 caracteres.' }, 400);
@@ -20,13 +27,26 @@ router.post('/accounts', async (c) => {
   if (isNaN(balance))
     return c.json({ error: 'Saldo inicial inválido (centavos inteiros).' }, 400);
 
+  try {
+    await ensureTenantSchema(db);
+  } catch (e) {
+    console.error('[ensureTenantSchema]', (e as Error).message);
+  }
+
   const id = `acc-usr-${crypto.randomUUID()}`;
   try {
     await db.exec(
       'INSERT INTO accounts (id,name,type,bank_name,balance_in_cents,color,is_linked,branch,account_number,account_digit,manager_name,manager_phone) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)',
       [id, name, type, bankName, balance, color ?? '#6B7280', branch ?? null, accountNumber ?? null, accountDigit ?? null, managerName ?? null, managerPhone ?? null],
     );
-    return c.json({ id }, 201);
+    return c.json({
+      id,
+      account: {
+        id, name, type, bankName, balanceInCents: balance, color: color ?? '#6B7280', isLinked: false,
+        branch: branch ?? null, accountNumber: accountNumber ?? null, accountDigit: accountDigit ?? null,
+        managerName: managerName ?? null, managerPhone: managerPhone ?? null,
+      },
+    }, 201);
   } catch (e) {
     return c.json({ error: 'Falha ao criar conta.', details: (e as Error).message }, 500);
   }
@@ -40,6 +60,8 @@ router.put('/accounts/:id', async (c) => {
 
   if (!name || !bankName) return c.json({ error: 'name e bankName são obrigatórios.' }, 400);
   if (type && !VALID_TYPES.includes(type)) return c.json({ error: 'Tipo inválido.' }, 400);
+
+  try { await ensureTenantSchema(db); } catch { /* best-effort */ }
 
   const existing = await db.first('SELECT id FROM accounts WHERE id = ?', [id]);
   if (!existing) return c.json({ error: 'Conta não encontrada.' }, 404);

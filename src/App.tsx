@@ -192,31 +192,36 @@ export default function App() {
     };
   }, []);
 
-  const fetchAllData = useCallback(async () => {
+  const fetchAllData = useCallback(async (): Promise<boolean> => {
     try {
       const response = await fetch('/api/data');
-      if (response.ok) {
-        const data = await response.json();
-        setAccounts(data.accounts || []);
-        setTransactions(data.transactions || []);
-        setBudgets(data.budgets || []);
-        setGoals(data.goals || []);
-        setAlerts(data.alerts || []);
-        setCategories(data.categories || []);
-        setCreditCards(data.creditCards || []);
-        setInvoices(data.invoices || []);
-        setRecurrences(data.recurrences || []);
-        setFamilyMembers(data.familyMembers || []);
-        setInstallmentGroups(data.installmentGroups || []);
-        setInvestments(data.investments || []);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({} as any));
+        showError(body.error || `Falha ao carregar dados (${response.status}).`);
+        return false;
       }
+      const data = await response.json();
+      setAccounts(data.accounts || []);
+      setTransactions(data.transactions || []);
+      setBudgets(data.budgets || []);
+      setGoals(data.goals || []);
+      setAlerts(data.alerts || []);
+      setCategories(data.categories || []);
+      setCreditCards(data.creditCards || []);
+      setInvoices(data.invoices || []);
+      setRecurrences(data.recurrences || []);
+      setFamilyMembers(data.familyMembers || []);
+      setInstallmentGroups(data.installmentGroups || []);
+      setInvestments(data.investments || []);
+      return true;
     } catch (e) {
       console.error('Erro ao buscar dados:', e);
       showError('Falha ao carregar os dados. Verifique sua conexão.');
+      return false;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [showError]);
 
   useEffect(() => {
     async function initialize() {
@@ -279,12 +284,20 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(accData)
       });
-      if (response.ok) {
-        await fetchAllData();
-        return true;
-      }
       const body = await response.json().catch(() => ({} as any));
-      showError(body.error || body.details || 'Erro ao cadastrar conta.');
+      if (!response.ok) {
+        showError(body.error || body.details || 'Erro ao cadastrar conta.');
+        return false;
+      }
+      // Atualiza UI imediatamente com o retorno da API (não depende só do refresh)
+      if (body.account) {
+        setAccounts(prev => [...prev, body.account]);
+      }
+      const refreshed = await fetchAllData();
+      if (!refreshed && !body.account) {
+        showError('Conta criada, mas falhou ao atualizar a lista. Recarregue a página.');
+      }
+      return true;
     } catch (err) {
       console.error(err); showError();
     }
@@ -456,9 +469,19 @@ export default function App() {
   const handleAddCreditCard = async (data: any): Promise<boolean> => {
     try {
       const res = await fetch('/api/credit-cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-      if (res.ok) { await fetchAllData(); return true; }
       const body = await res.json().catch(() => ({} as any));
-      showError(body.error || body.details || 'Erro ao cadastrar cartão.');
+      if (!res.ok) {
+        showError(body.error || body.details || 'Erro ao cadastrar cartão.');
+        return false;
+      }
+      if (body.card) {
+        setCreditCards(prev => [...prev, body.card]);
+      }
+      const refreshed = await fetchAllData();
+      if (!refreshed && !body.card) {
+        showError('Cartão criado, mas falhou ao atualizar a lista. Recarregue a página.');
+      }
+      return true;
     } catch (err) { console.error(err); showError(); }
     return false;
   };
@@ -956,6 +979,23 @@ export default function App() {
           {/* Dashboard Tab Default Landing */}
           {activeTab === 'DASHBOARD' && (
             <div className="space-y-6">
+
+              {accounts.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/60 px-6 py-8 text-center">
+                  <p className="text-sm font-bold text-indigo-900">Família pronta — sem dados ainda</p>
+                  <p className="text-xs text-indigo-700/80 mt-1 max-w-md mx-auto">
+                    Cadastre a primeira conta bancária ou cartão para começar. O painel não usa mais dados de demonstração.
+                  </p>
+                  <div className="flex flex-wrap gap-2 justify-center mt-4">
+                    <button onClick={() => setActiveTab('CORE')} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                      + Criar conta
+                    </button>
+                    <button onClick={() => setActiveTab('CREDIT_CARDS')} className="px-4 py-2 border border-indigo-200 text-indigo-800 bg-white hover:bg-indigo-50 rounded-xl text-xs font-bold transition-all">
+                      + Adicionar cartão
+                    </button>
+                  </div>
+                </div>
+              )}
               
               {/* Dashboard KPI bar */}
               {(() => {

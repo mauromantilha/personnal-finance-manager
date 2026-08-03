@@ -30,11 +30,5 @@ ALTER TABLE transactions ADD COLUMN installment_number INTEGER;
 ALTER TABLE transactions ADD COLUMN installment_total INTEGER;
 ALTER TABLE transactions ADD COLUMN installment_group_id TEXT;
 
--- Seed credit cards
-INSERT OR IGNORE INTO credit_cards VALUES ('cc-1', 'Nubank Ultravioleta', 'Nubank',   '4531', 1500000, 12, 19, '#8B5CF6', 1);
-INSERT OR IGNORE INTO credit_cards VALUES ('cc-2', 'Itaú Personnalité',   'Banco Itaú', '8872', 2000000, 20, 27, '#0284C7', 1);
-
--- Seed invoices (current month: 2026-05)
-INSERT OR IGNORE INTO invoices VALUES ('inv-cc1-2605', 'cc-1', '2026-05', 89740,  'open',   '2026-06-19', NULL, '2026-05-01T00:00:00Z');
-INSERT OR IGNORE INTO invoices VALUES ('inv-cc2-2605', 'cc-2', '2026-05', 245300, 'open',   '2026-06-27', NULL, '2026-05-01T00:00:00Z');
-INSERT OR IGNORE INTO invoices VALUES ('inv-cc1-2604', 'cc-1', '2026-04', 112500, 'paid',   '2026-05-19', '2026-05-19T10:30:00Z', '2026-04-01T00:00:00Z');
+-- Seed de cartões/faturas REMOVIDO (era demo Nubank/Itaú).
+-- Limpeza: migration 0018_remove_demo_seed.sql
