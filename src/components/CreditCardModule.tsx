@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { CreditCard as CreditCardIcon, Plus, Trash2, CheckCircle, AlertCircle, Receipt, TrendingUp, ScanLine, X, Upload } from 'lucide-react';
 import { CreditCard, Invoice, FinancialAccount, Transaction } from '../types';
+import { parseMoneyToCents } from './CoreFinanceModule.utils';
 
 interface InvoiceLineItem {
   date: string;
@@ -113,11 +114,24 @@ export default function CreditCardModule({
 
   const handleSubmit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
-    const parsed = parseFloat(limitBRL.replace(',', '.'));
-    if (!name || !bankName || isNaN(parsed) || parsed <= 0) {
+    const limitInCents = parseMoneyToCents(limitBRL);
+    if (!name.trim() || !bankName.trim() || isNaN(limitInCents) || limitInCents <= 0) {
       return notify('Preencha nome, banco e limite corretamente.', 'error');
     }
-    const data = { name, bankName, lastFour: lastFour || null, limitInCents: Math.round(parsed * 100), billingDay: parseInt(billingDay), dueDay: parseInt(dueDay), color };
+    const bill = parseInt(billingDay, 10);
+    const due = parseInt(dueDay, 10);
+    if (isNaN(bill) || bill < 1 || bill > 31 || isNaN(due) || due < 1 || due > 31) {
+      return notify('Dias de fechamento/vencimento devem ser entre 1 e 31.', 'error');
+    }
+    const data = {
+      name: name.trim(),
+      bankName: bankName.trim(),
+      lastFour: lastFour || null,
+      limitInCents,
+      billingDay: bill,
+      dueDay: due,
+      color,
+    };
     const ok = editCard ? await onUpdateCard(editCard.id, data) : await onAddCard(data);
     if (ok) { setShowForm(false); notify(editCard ? 'Cartão atualizado!' : 'Cartão adicionado!', 'success'); }
     else notify('Erro ao salvar cartão.', 'error');

@@ -12,6 +12,40 @@ export const FALLBACK_CATS = [
 export const formatBRL = (cents: number): string =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+/**
+ * Parseia valor monetário BR/US para reais (não centavos).
+ * Aceita negativo: "-1.234,56", "-500", "(500,00)".
+ * Retorna NaN se inválido.
+ */
+export function parseMoneyToReais(raw: string): number {
+  let s = String(raw ?? '').trim();
+  if (!s) return NaN;
+  let neg = false;
+  if (/^\(.*\)$/.test(s)) {
+    neg = true;
+    s = s.slice(1, -1).trim();
+  }
+  if (s.startsWith('-')) {
+    neg = true;
+    s = s.slice(1).trim();
+  }
+  s = s.replace(/[R$\s]/gi, '');
+  // BR: 1.234,56 → remove milhares, vírgula → ponto
+  if (s.includes(',')) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  }
+  const n = parseFloat(s);
+  if (isNaN(n)) return NaN;
+  return neg ? -Math.abs(n) : n;
+}
+
+/** Converte string monetária para centavos (inteiro). NaN se inválido. */
+export function parseMoneyToCents(raw: string): number {
+  const reais = parseMoneyToReais(raw);
+  if (isNaN(reais)) return NaN;
+  return Math.round(reais * 100);
+}
+
 export interface CsvPreviewRow { date: string; desc: string; amount: string; }
 
 /** Parseia as primeiras 5 linhas não-cabeçalho de um CSV colado (preview). */

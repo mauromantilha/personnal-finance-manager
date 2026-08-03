@@ -457,7 +457,9 @@ export default function App() {
     try {
       const res = await fetch('/api/credit-cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       if (res.ok) { await fetchAllData(); return true; }
-    } catch (err) { console.error(err); }
+      const body = await res.json().catch(() => ({} as any));
+      showError(body.error || body.details || 'Erro ao cadastrar cartão.');
+    } catch (err) { console.error(err); showError(); }
     return false;
   };
 
@@ -465,7 +467,9 @@ export default function App() {
     try {
       const res = await fetch(`/api/credit-cards/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       if (res.ok) { await fetchAllData(); return true; }
-    } catch (err) { console.error(err); }
+      const body = await res.json().catch(() => ({} as any));
+      showError(body.error || body.details || 'Erro ao atualizar cartão.');
+    } catch (err) { console.error(err); showError(); }
     return false;
   };
 
