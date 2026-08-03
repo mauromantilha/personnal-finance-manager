@@ -180,11 +180,18 @@ app.all('*', async (c, next) => {
     headers: filteredHeaders,
     body: c.req.raw.body,
     redirect: 'follow',
-  });
+    // Evita Worker cachear HTML/JS antigo do Pages após deploy
+    cf: { cacheTtl: 0, cacheEverything: false },
+  } as RequestInit);
   // Também filtrar headers sensíveis da resposta (set-cookie do Pages não deve vazar
   // ao tenant — qualquer cookie deve vir do nosso próprio Worker).
   const respHeaders = new Headers(res.headers);
   respHeaders.delete('set-cookie');
+  const ct = respHeaders.get('content-type') ?? '';
+  if (ct.includes('text/html') || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    respHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    respHeaders.set('Pragma', 'no-cache');
+  }
   return new Response(res.body, {
     status: res.status,
     headers: respHeaders,

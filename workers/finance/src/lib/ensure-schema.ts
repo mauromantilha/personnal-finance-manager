@@ -63,39 +63,90 @@ export async function ensureTenantSchema(db: D1Client): Promise<void> {
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
-  // One-shot: remove seed demo (acc-1, Nubank Ultravioleta, salário MKS…)
+  // Remove seed demo enquanto fingerprints existirem (Itaú Personalité, salário MKS…)
   await purgeDemoSeedIfNeeded(db);
 }
 
-/** Remove IDs fixos das migrations de seed — dashboard deixa de mostrar dados fictícios. */
-async function purgeDemoSeedIfNeeded(db: D1Client): Promise<void> {
-  const done = await db.first<{ version: string }>(
-    "SELECT version FROM schema_migrations WHERE version = ?",
-    ['0018_remove_demo_seed'],
-  );
-  if (done) return;
-
-  const stmts = [
-    `DELETE FROM transactions WHERE id IN ('tx-1','tx-2','tx-3','tx-4','tx-5','tx-6','tx-7','tx-8','tx-9','tx-10','tx-11','tx-12')`,
-    `DELETE FROM invoices WHERE id IN ('inv-cc1-2605','inv-cc2-2605','inv-cc1-2604')`,
-    `DELETE FROM credit_cards WHERE id IN ('cc-1','cc-2')`,
-    `DELETE FROM recurrences WHERE id IN ('rec-1','rec-2','rec-3','rec-4','rec-5','rec-6','rec-7')`,
-    `DELETE FROM budgets WHERE id IN ('b-1','b-2','b-3','b-4','b-5','b-6')`,
-    `DELETE FROM goals WHERE id IN ('g-1','g-2')`,
-    `DELETE FROM alerts WHERE id IN ('alt-1','alt-2','alt-3')`,
-    `DELETE FROM connections WHERE id IN ('conn-itau','conn-inter','conn-xp','conn-bradesco')`,
-    `DELETE FROM accounts WHERE id IN ('acc-1','acc-2','acc-3','acc-4')`,
-    `UPDATE budgets SET spent_in_cents = 0`,
-    `INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed')`,
+/** Fingerprints do seed antigo (0002/0004/0005) — IDs fixos + nomes conhecidos. */
+async function tenantHasDemoSeed(db: D1Client): Promise<boolean> {
+  const checks = [
+    `SELECT 1 AS x FROM accounts WHERE id IN ('acc-1','acc-2','acc-3','acc-4')
+       OR name IN ('Conta Itaú Personalité','Carteira Principal','Poupança Inter','XP Carteira Global')
+     LIMIT 1`,
+    `SELECT 1 AS x FROM transactions WHERE id IN ('tx-1','tx-2','tx-3','tx-4','tx-5','tx-6','tx-7','tx-8','tx-9','tx-10','tx-11','tx-12')
+       OR description = 'Salário Mensal MKS Brasil'
+       OR description = 'Aluguel Loft Paulista'
+     LIMIT 1`,
+    `SELECT 1 AS x FROM credit_cards WHERE id IN ('cc-1','cc-2')
+       OR name LIKE '%Ultravioleta%'
+     LIMIT 1`,
+    `SELECT 1 AS x FROM goals WHERE id IN ('g-1','g-2')
+       OR name IN ('Reserva de Emergência','Viagem de Férias Japão')
+     LIMIT 1`,
+    `SELECT 1 AS x FROM connections WHERE id IN ('conn-itau','conn-inter','conn-xp','conn-bradesco') LIMIT 1`,
+    `SELECT 1 AS x FROM recurrences WHERE id IN ('rec-1','rec-2','rec-3','rec-4','rec-5','rec-6','rec-7') LIMIT 1`,
   ];
 
-  for (const sql of stmts) {
+  for (const sql of checks) {
     try {
-      await db.exec(sql);
-    } catch (e) {
-      // Tabelas podem não existir ainda em tenants muito novos — segue
-      console.error('[purgeDemoSeed]', sql.slice(0, 60), (e as Error).message);
+      const row = await db.first<{ x: number }>(sql);
+      if (row) return true;
+    } catch {
+      // Tabela pode não existir — segue
     }
+  }
+  return false;
+}
+
+/**
+ * Se ainda houver seed demo, apaga TODO o conjunto financeiro do tenant
+ * (igual wipe-data do admin). Assim recorrências não regeneram txs fictícias.
+ * Roda em todo /api/data enquanto fingerprints existirem — não depende só do
+ * flag 0018 (que podia ser marcado sem limpar de fato).
+ */
+async function purgeDemoSeedIfNeeded(db: D1Client): Promise<void> {
+  const hasDemo = await tenantHasDemoSeed(db);
+  if (!hasDemo) {
+    // Garante tracking mesmo em tenants limpos
+    try {
+      await db.exec(`INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed')`);
+      await db.exec(`INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo')`);
+    } catch { /* ignore */ }
+    return;
+  }
+
+  console.warn('[purgeDemoSeed] fingerprints de seed detectados — limpando dados financeiros');
+
+  // Ordem: filhos antes de pais (evita FK em schemas com REFERENCES)
+  const tables = [
+    'transactions',
+    'invoices',
+    'credit_cards',
+    'recurrences',
+    'installment_groups',
+    'investments',
+    'debts',
+    'budgets',
+    'goals',
+    'alerts',
+    'chat_history',
+    'connections',
+    'accounts',
+  ];
+
+  for (const table of tables) {
+    try {
+      await db.exec(`DELETE FROM ${table}`);
+    } catch (e) {
+      console.error('[purgeDemoSeed]', table, (e as Error).message);
+    }
+  }
+
+  try {
+    await db.exec(`INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed')`);
+    await db.exec(`INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo')`);
+  } catch (e) {
+    console.error('[purgeDemoSeed] schema_migrations', (e as Error).message);
   }
 }
 
