@@ -6,12 +6,12 @@ import { Hono } from 'hono';
 import type { Env, Tenant } from '../index';
 import { execD1 } from '../lib/cf-api';
 // @ts-ignore — wrangler Text rule
-import SQL_0018 from '../../migrations/0018_indexes.sql';
+import SQL_0020 from '../../migrations/0020_indexes.sql';
 
 const router = new Hono<{ Bindings: Env }>();
 
 const MIGRATION_CATALOG: Record<string, string> = {
-  '0018_indexes': SQL_0018 as string,
+  '0020_indexes': SQL_0020 as string,
 };
 
 function splitSQL(sql: string): string[] {

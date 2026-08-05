@@ -7,7 +7,7 @@ const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 router.get('/categories', async (c) => {
   const db = c.get('db');
-  const rows = await db.query('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC');
+  const rows = await db.query('SELECT * FROM categories ORDER BY (parent_id IS NOT NULL), parent_id, name');
   return c.json(rows.map(mapCategory as any));
 });
 

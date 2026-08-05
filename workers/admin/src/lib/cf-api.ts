@@ -4,14 +4,24 @@ function h(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-async function cfFetch<T>(token: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${CF}${path}`, {
-    ...init,
-    headers: { ...h(token), ...(init?.headers as Record<string, string> ?? {}) },
-  });
-  const d = await res.json() as { success: boolean; result: T; errors?: { message: string }[] };
-  if (!d.success) throw new Error(d.errors?.[0]?.message ?? `CF API error on ${path}`);
-  return d.result;
+async function cfFetch<T>(token: string, path: string, init?: RequestInit, timeoutMs = 15000): Promise<T> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${CF}${path}`, {
+      ...init,
+      signal: init?.signal ?? ctrl.signal,
+      headers: { ...h(token), ...(init?.headers as Record<string, string> ?? {}) },
+    });
+    const d = await res.json() as { success: boolean; result: T; errors?: { message: string }[] };
+    if (!d.success) throw new Error(d.errors?.[0]?.message ?? `CF API error on ${path}`);
+    return d.result;
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') throw new Error(`CF API timeout on ${path}`);
+    throw e;
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 // ── D1 ────────────────────────────────────────────────────────────────────────
@@ -37,11 +47,18 @@ export async function createD1Database(accountId: string, token: string, name: s
 export async function execD1(
   accountId: string, token: string, dbId: string, sql: string, params: unknown[] = [],
 ): Promise<void> {
-  await fetch(`${CF}/accounts/${accountId}/d1/database/${dbId}/query`, {
-    method: 'POST',
-    headers: h(token),
-    body: JSON.stringify({ sql, params }),
-  });
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    await fetch(`${CF}/accounts/${accountId}/d1/database/${dbId}/query`, {
+      method: 'POST',
+      headers: h(token),
+      body: JSON.stringify({ sql, params }),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 /** Send multiple statements in a single subrequest using the D1 batch endpoint. */
@@ -49,11 +66,18 @@ export async function execD1Batch(
   accountId: string, token: string, dbId: string, statements: string[],
 ): Promise<void> {
   const queries = statements.map((sql) => ({ sql, params: [] }));
-  await fetch(`${CF}/accounts/${accountId}/d1/database/${dbId}/batch`, {
-    method: 'POST',
-    headers: h(token),
-    body: JSON.stringify(queries),
-  });
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    await fetch(`${CF}/accounts/${accountId}/d1/database/${dbId}/batch`, {
+      method: 'POST',
+      headers: h(token),
+      body: JSON.stringify(queries),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 export async function deleteD1Database(accountId: string, token: string, dbId: string): Promise<void> {

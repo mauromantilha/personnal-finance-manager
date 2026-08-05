@@ -13,8 +13,9 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "npm test --prefix workers/finance",
-    "test:finance": "npm test --prefix workers/finance"
+    "test": "vitest run",
+    "test:finance": "npm test --prefix workers/finance",
+    "test:admin": "npm test --prefix workers/admin"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -42,6 +43,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^2.1.9"
   }
 }

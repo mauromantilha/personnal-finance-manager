@@ -19,7 +19,8 @@ const router = new Hono<{ Bindings: Env }>();
 
 async function cfGet<T>(token: string, path: string, signal?: AbortSignal): Promise<T | null> {
   try {
-    const res = await fetch(`${CF}${path}`, { headers: hdr(token), signal });
+    const ctrl = signal ? undefined : AbortSignal.timeout(10000);
+    const res = await fetch(`${CF}${path}`, { headers: hdr(token), signal: signal ?? ctrl });
     const d   = await res.json() as any;
     return d.success ? d.result : null;
   } catch { return null; }

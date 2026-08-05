@@ -69,7 +69,10 @@ router.post('/installments', async (c) => {
         sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,installment_number,installment_total,installment_group_id,member_id) VALUES (?,?,?,\'DES\',?,?,?,0,?,?,?,?)',
         params: [txId, instAmt, txDate, category ?? 'Compras', desc, accountId, i + 1, count, groupId, memberId ?? null],
       });
-      stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [instAmt, accountId] });
+      // Debita só parcelas já vencidas / do dia — futuras entram no saldo quando due
+      if (accountId && new Date(txDate + 'T23:59:59') <= new Date()) {
+        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [instAmt, accountId] });
+      }
     }
   }
 
@@ -82,16 +85,20 @@ router.delete('/installments/:groupId', async (c) => {
   const db = c.get('db');
   const { groupId } = c.req.param();
 
-  const txRows = await db.query<{ id: string; type: string; amount_in_cents: number; account_id: string | null; invoice_id: string | null }>(
-    'SELECT id, type, amount_in_cents, account_id, invoice_id FROM transactions WHERE installment_group_id = ?',
+  const txRows = await db.query<{ id: string; type: string; amount_in_cents: number; account_id: string | null; invoice_id: string | null; date: string }>(
+    'SELECT id, type, amount_in_cents, account_id, invoice_id, date FROM transactions WHERE installment_group_id = ?',
     [groupId],
   );
 
   const stmts: D1Stmt[] = [];
+  const today = new Date().toISOString().split('T')[0];
   for (const tx of txRows) {
     stmts.push({ sql: 'DELETE FROM transactions WHERE id = ?', params: [tx.id] });
-    if (tx.account_id) stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [tx.amount_in_cents, tx.account_id] });
-    if (tx.invoice_id) stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents - ? WHERE id = ?', params: [tx.amount_in_cents, tx.invoice_id] });
+    // Só estorna saldo se a parcela já tinha sido debitada (vencida/hoje)
+    if (tx.account_id && tx.date && tx.date <= today) {
+      stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents + ? WHERE id = ?', params: [tx.amount_in_cents, tx.account_id] });
+    }
+    if (tx.invoice_id) stmts.push({ sql: 'UPDATE invoices SET total_in_cents = MAX(0, total_in_cents - ?) WHERE id = ?', params: [tx.amount_in_cents, tx.invoice_id] });
   }
   stmts.push({ sql: 'DELETE FROM installment_groups WHERE id = ?', params: [groupId] });
 

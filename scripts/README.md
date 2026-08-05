@@ -43,11 +43,11 @@ node scripts/migrate-all.mjs --fix-schema --dry-run
 `--fix-schema` é o backfill do PR A: para tenants provisionados sem `debts` ou com
 `categories` vazia (seed da 0003 nunca aplicado). Idempotente — seguro rodar em todos.
 
-Para índices (`0018_indexes`), rode o migrate completo (sem `--fix-schema`) ou via admin:
+Para índices (`0020_indexes`), rode o migrate completo (sem `--fix-schema`) ou via admin:
 
 ```bash
 node scripts/migrate-all.mjs
-# ou admin API: POST /api/migrations/apply-all { "version": "0018_indexes" }
+# ou admin API: POST /api/migrations/apply-all { "version": "0020_indexes" }
 ```
 ## Migração de domínio (`migrate-to-financaslivre.mjs`)
 

@@ -32,7 +32,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard, FamilyMember } from '../types';
-import { FALLBACK_CATS, formatBRL, parseCsvPreview, computePeriodBounds, type PeriodFilter } from './CoreFinanceModule.utils';
+import { FALLBACK_CATS, formatBRL, parseCsvPreview, computePeriodBounds, parseMoneyToCents, type PeriodFilter } from './CoreFinanceModule.utils';
 
 interface CoreFinanceModuleProps {
   accounts: FinancialAccount[];
@@ -214,12 +214,13 @@ export default function CoreFinanceModule({
   // ── Account handlers ────────────────────────────────────────────────────────
   const handleCreateAccount = async (e: { preventDefault(): void }) => {
     e.preventDefault();
-    if (!accName || !accBalance) { fb('Preencha todos os dados da carteira.', 'error'); return; }
-    const parsedReal = parseFloat(accBalance.replace(',', '.'));
-    if (isNaN(parsedReal)) { fb('Saldo inválido.', 'error'); return; }
+    if (!accName.trim()) { fb('Preencha o nome da carteira.', 'error'); return; }
+    if (!accBank.trim()) { fb('Preencha o banco/instituição.', 'error'); return; }
+    const balanceInCents = parseMoneyToCents(accBalance || '0');
+    if (isNaN(balanceInCents)) { fb('Saldo inválido.', 'error'); return; }
     const result = await onAddAccount({
-      name: accName, type: accType, bankName: accBank,
-      balanceInCents: Math.round(parsedReal * 100), color: accColor,
+      name: accName.trim(), type: accType, bankName: accBank.trim(),
+      balanceInCents, color: accColor,
       branch: accBranch || null, accountNumber: accNumber || null, accountDigit: accDigit || null,
       managerName: accManagerName || null, managerPhone: accManagerPhone || null,
     } as any);
@@ -239,7 +240,13 @@ export default function CoreFinanceModule({
   };
 
   const handleSaveAcc = async (id: string) => {
-    const result = await onEditAccount(id, { name: editAccName, bankName: editAccBank, type: editAccType, color: editAccColor });
+    // Só envia nome/banco/tipo/cor — backend preserva metadados bancários omitidos
+    const result = await onEditAccount(id, {
+      name: editAccName,
+      bankName: editAccBank,
+      type: editAccType,
+      color: editAccColor,
+    });
     if (result) { fb('Conta atualizada!', 'success'); setEditingAccId(null); }
     else fb('Erro ao atualizar conta.', 'error');
   };
@@ -487,8 +494,8 @@ export default function CoreFinanceModule({
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-500 uppercase">Saldo Inicial (R$)</label>
-                      <input type="text" placeholder="0,00" value={accBalance} onChange={e => setAccBalance(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-mono focus:outline-none font-bold" />
-                    </div>
+                      <input type="text" placeholder="0,00 ou -500,00" value={accBalance} onChange={e => setAccBalance(e.target.value)} className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white font-mono focus:outline-none font-bold" />
+                      <p className="text-[10px] text-slate-400 mt-0.5">Aceita saldo negativo (cheque especial / conta no vermelho)</p>                    </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Cor</label>
                       <div className="flex gap-1 items-center mt-1">

@@ -228,7 +228,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
   <div class="sb-foot">
     <div class="sb-live"><span class="sb-dot"></span>Worker Ativo</div>
     <div class="sb-ts" id="sb-ts">—</div>
-    <button class="sb-logout" onclick="doLogout()" title="Encerrar sessão">↪ Sair</button>
+    <button class="sb-logout" id="btn-logout" type="button" title="Encerrar sessão">↪ Sair</button>
   </div>
 </aside>
 
@@ -329,7 +329,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
           <div style="font-size:16px;font-weight:700;color:var(--t1);margin-bottom:4px;">Provisionar Nova Família</div>
           <div style="font-size:12px;color:var(--t3);">Cria banco D1, política de acesso e envia convite ao administrador da família.</div>
         </div>
-        <form id="prov-form" onsubmit="submitProvision(event)" autocomplete="off">
+        <form id="prov-form" autocomplete="off">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
             <div class="fg" style="grid-column:1/-1;">
               <label class="fc-lbl">Nome da Família <span style="color:var(--err)">*</span></label>
@@ -339,9 +339,9 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
             <div class="fg">
               <label class="fc-lbl">Subdomínio <span style="color:var(--err)">*</span></label>
               <div style="display:flex;">
-                <input name="subdomain" type="text" class="fc" placeholder="silva" required
+                <input name="subdomain" id="prov-subdomain" type="text" class="fc" placeholder="silva" required
                   style="border-radius:8px 0 0 8px;border-right:none;"
-                  oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'')">
+                  pattern="[a-z0-9-]+" title="Apenas letras minúsculas, números e hífens">
                 <span style="background:var(--hov);border:1px solid var(--bdr);border-left:none;border-radius:0 8px 8px 0;padding:9px 10px;font-size:11px;color:var(--t3);white-space:nowrap;">.${baseDomain}</span>
               </div>
               <div class="fc-hint">Letras minúsculas, números e hífens</div>
@@ -417,7 +417,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
           <label class="fc-lbl">Mensagem <span style="color:var(--err)">*</span></label>
           <textarea id="comm-message" class="fc" rows="8" style="resize:vertical;" placeholder="Escreva o comunicado aqui. Seja claro e objetivo.&#10;&#10;Ex: Realizaremos uma manutenção programada no sábado das 14h às 16h. Durante esse período o sistema ficará temporariamente indisponível."></textarea>
         </div>
-        <button onclick="sendCommunication()" id="comm-btn" class="btn btn-pri btn-lg" style="width:100%;">✉ Enviar Comunicado</button>
+        <button type="button" data-action="send-comm" id="comm-btn" class="btn btn-pri btn-lg" style="width:100%;">✉ Enviar Comunicado</button>
         <div id="comm-result" style="margin-top:14px;"></div>
       </div>
 
@@ -425,7 +425,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
         <div class="tbl-card">
           <div class="tbl-head">
             <span class="tbl-ttl">Histórico</span>
-            <button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadCommunications()">↺ Atualizar</button>
+            <button type="button" class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="refresh-comms">↺ Atualizar</button>
           </div>
           <div id="comm-history"><div class="empty">Carregando…</div></div>
         </div>
@@ -448,7 +448,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
       <div class="tbl-card">
         <div class="tbl-head">
           <span class="tbl-ttl">💾 Pedidos de Upgrade de Armazenamento</span>
-          <button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadStorageUpgrades()">↺ Atualizar</button>
+          <button type="button" class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="refresh-storage">↺ Atualizar</button>
         </div>
         <div style="padding:10px 16px;font-size:12px;color:var(--t2);border-bottom:1px solid var(--bdr);">
           Famílias que solicitaram upgrade do plano Free (300 MB) para o Paid (1 GB) por R$5,00/mês.
@@ -475,7 +475,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
         </div>
       </div>
       <div class="tbl-card">
-        <div class="tbl-head"><span class="tbl-ttl">Uso por Família</span><button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadTelemetry()">↺ Atualizar</button></div>
+        <div class="tbl-head"><span class="tbl-ttl">Uso por Família</span><button type="button" class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="refresh-telemetry">↺ Atualizar</button></div>
         <div id="tel-fam-table"><div class="empty">Carregando…</div></div>
       </div>
     </div>
@@ -485,7 +485,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
   <div class="page" id="page-fam-telemetry">
     <div style="margin-top:6px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-        <button class="btn btn-sec" onclick="nav('families')">← Voltar</button>
+        <button type="button" class="btn btn-sec" data-nav="families">← Voltar</button>
         <div style="font-size:15px;font-weight:700;" id="ftel-title">—</div>
         <button class="btn btn-sec" style="font-size:11px;" id="ftel-refresh">↺ Atualizar</button>
       </div>
@@ -542,7 +542,7 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
         </div>
       </div>
       <div class="tbl-card">
-        <div class="tbl-head"><span class="tbl-ttl">Países de Origem (Ataques)</span><button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="loadSecurity()">↺ Atualizar</button></div>
+        <div class="tbl-head"><span class="tbl-ttl">Países de Origem (Ataques)</span><button type="button" class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="refresh-security">↺ Atualizar</button></div>
         <div id="sec-countries-table"><div class="empty">Carregando…</div></div>
       </div>
     </div>
@@ -619,6 +619,10 @@ function tierBadge(t) {
 function spinner(msg) {
   return '<div style="display:flex;align-items:center;gap:8px;color:var(--t2);font-size:13px;padding:8px 0;">'
        + '<span class="spin">⟳</span>' + (msg || 'Carregando…') + '</div>';
+}
+
+function err(msg) {
+  return '<div class="alr alr-err"><span>⚠</span><span>' + msg + '</span></div>';
 }
 
 function showToast(msg, ok) {
@@ -707,7 +711,7 @@ function refreshCurrent() {
 // ── Charts ────────────────────────────────────────────────────────
 function initStatusChart(active, suspended, deleted) {
   var canvas = el('chart-status');
-  if (!canvas) return;
+  if (!canvas || typeof Chart === 'undefined') return;
   if (charts.status) { charts.status.destroy(); charts.status = null; }
   var total = active + suspended + deleted;
   charts.status = new Chart(canvas, {
@@ -935,7 +939,7 @@ function renderNOC(data) {
 
   var tableHtml = '<div class="tbl-card" style="margin-bottom:18px;">'
     + '<div class="tbl-head"><span class="tbl-ttl">Bancos D1</span>'
-    + '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" onclick="nocLoaded=false;loadNOC();">↺ Atualizar</button>'
+    + '<button type="button" class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="refresh-noc">↺ Atualizar</button>'
     + '</div>'
     + (dbs.length > 0
       ? '<table><thead><tr><th>Família</th><th>Subdomínio</th><th>D1 ID</th><th>Tamanho</th><th>Tabelas</th><th>Status</th></tr></thead>'
@@ -1004,6 +1008,10 @@ function nocCard(label, val, hint) {
 async function loadFamilies() {
   el('families-container').innerHTML = spinner('Carregando famílias…');
   var data = await api('GET', '/families');
+  if (data.error) {
+    el('families-container').innerHTML = err(esc(data.error));
+    return;
+  }
   allFams = data.families || [];
   renderFamilies(allFams);
 }
@@ -1030,6 +1038,7 @@ function renderFamilies(fams) {
     var actions = '<button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="detail" data-sub="' + sub + '">Detalhes</button>';
     if (f.status === 'active')    actions += ' <button class="btn btn-warn" style="font-size:11px;padding:4px 9px;" data-action="suspend" data-sub="' + sub + '">Suspender</button>';
     if (f.status === 'suspended') actions += ' <button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" data-action="activate" data-sub="' + sub + '">Reativar</button>';
+    if (f.status === 'active')    actions += ' <button class="btn btn-sec" style="font-size:11px;padding:4px 9px;" data-action="wipe" data-sub="' + sub + '" title="Apaga contas, lançamentos, cartões e seed demo">Limpar dados</button>';
     if (f.status !== 'deleted')   actions += ' <button class="btn btn-err" style="font-size:11px;padding:4px 9px;" data-action="delete" data-sub="' + sub + '">Excluir</button>';
     actions += ' <button class="btn" style="font-size:11px;padding:4px 9px;background:rgba(79,112,247,.1);color:var(--acc2);border:1px solid rgba(79,112,247,.25);" data-action="telemetry" data-sub="' + sub + '">◎ Stats</button>';
     return '<tr>'
@@ -1063,11 +1072,12 @@ async function deleteFamily(sub) {
   else showToast(data.error || 'Erro ao excluir.', false);
 }
 
-async function deleteFamily(sub) {
-  if (!confirm('Excluir família "' + sub + '"? A família será marcada como excluída.')) return;
-  var data = await api('DELETE', '/families/' + sub, null, 30000, { 'X-Confirm-Subdomain': sub });
-  if (data.success) { showToast('Família excluída.'); loadFamilies(); }
-  else showToast(data.error || 'Erro ao excluir.', false);
+async function wipeFamilyData(sub) {
+  if (!confirm('Limpar TODOS os dados financeiros de "' + sub + '"?\n\nRemove contas, lançamentos, cartões, orçamentos, metas e seed demo.\nMantém usuários, categorias e aceite LGPD.')) return;
+  if (!confirm('Confirma limpeza de "' + sub + '"? Esta ação não tem desfazer.')) return;
+  var data = await api('POST', '/families/' + sub + '/wipe-data', {}, 60000, { 'X-Confirm-Subdomain': sub });
+  if (data.success) showToast('Dados de "' + sub + '" limpos. Família pronta para uso.');
+  else showToast(data.error || ('Limpeza parcial: ' + ((data.errors || []).join('; ') || 'erro')), false);
 }
 
 // ── Telemetria Global ─────────────────────────────────────────────
@@ -1075,7 +1085,7 @@ async function loadTelemetry() {
   el('tel-fam').textContent = '—'; el('tel-users').textContent = '—';
   el('tel-req').textContent = '—'; el('tel-d1').textContent = '—';
   el('tel-fam-table').innerHTML = spinner('Carregando telemetria…');
-  var d = await api('GET', '/telemetry/global');
+  var d = await api('GET', '/telemetry/global', null, 45000);
   if (d.error) { el('tel-fam-table').innerHTML = err(esc(d.error)); return; }
   var s = d.summary || {};
   el('tel-fam').textContent  = s.activeFamilies ?? '—';
@@ -1176,7 +1186,7 @@ async function loadSecurity() {
   el('sec-ips-table').innerHTML = spinner('Carregando…');
   el('sec-rl-table').innerHTML = spinner('Carregando…');
   el('sec-countries-table').innerHTML = spinner('Carregando…');
-  var d = await api('GET', '/telemetry/security');
+  var d = await api('GET', '/telemetry/security', null, 30000);
   if (d.error) { el('sec-ips-table').innerHTML = err(esc(d.error)); return; }
   var fw = d.firewall || {}; var rl = d.rateLimits || {};
 
@@ -1534,7 +1544,18 @@ document.addEventListener('click', function(e) {
     if (action === 'suspend')   { e.stopPropagation(); updateStatus(sub, 'suspended'); return; }
     if (action === 'activate')  { e.stopPropagation(); updateStatus(sub, 'active'); return; }
     if (action === 'delete')    { e.stopPropagation(); deleteFamily(sub); return; }
+    if (action === 'wipe')      { e.stopPropagation(); wipeFamilyData(sub); return; }
+    if (action === 'send-comm') { sendCommunication(); return; }
+    if (action === 'refresh-comms') { loadCommunications(); return; }
+    if (action === 'refresh-storage') { loadStorageUpgrades(); return; }
+    if (action === 'refresh-telemetry') { loadTelemetry(); return; }
+    if (action === 'refresh-security') { loadSecurity(); return; }
+    if (action === 'refresh-noc') { nocLoaded = false; loadNOC(); return; }
+    if (action === 'approve-upgrade') { e.stopPropagation(); approveUpgrade(sub); return; }
   }
+
+  // Logout
+  if (e.target.id === 'btn-logout' || e.target.closest('#btn-logout')) { doLogout(); return; }
 
   // Refresh button
   if (e.target.id === 'refresh-btn' || e.target.closest('#refresh-btn')) { refreshCurrent(); return; }
@@ -1548,12 +1569,18 @@ document.addEventListener('click', function(e) {
   if (e.target.id === 'm-delete' || e.target.closest('#m-delete')) { modalDelete(); return; }
 });
 
-// Families filters
+// Families filters + provision subdomain sanitize
 document.addEventListener('input', function(e) {
   if (e.target.id === 'fam-search') filterFamilies();
+  if (e.target.id === 'prov-subdomain') {
+    e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  }
 });
 document.addEventListener('change', function(e) {
   if (e.target.id === 'fam-status' || e.target.id === 'fam-tier') filterFamilies();
+});
+document.addEventListener('submit', function(e) {
+  if (e.target.id === 'prov-form') { submitProvision(e); }
 });
 
 // Keyboard
@@ -1610,7 +1637,7 @@ async function loadStorageUpgrades() {
       + '<td style="font-size:11px;color:var(--t3);">' + (r.requestedAt ? fmtDate(r.requestedAt) : '—') + '</td>'
       + '<td style="text-align:right;">'
       + (isPending
-        ? '<button class="btn btn-ok" style="font-size:11px;padding:4px 9px;" onclick="approveUpgrade(\'' + esc(r.subdomain) + '\')">✓ Aprovar</button>'
+        ? '<button type="button" class="btn btn-ok" style="font-size:11px;padding:4px 9px;" data-action="approve-upgrade" data-sub="' + esc(r.subdomain) + '">✓ Aprovar</button>'
         : '<span style="font-size:11px;color:var(--t3);">Aprovado em ' + (r.approvedAt ? fmtDate(r.approvedAt) : '—') + '</span>')
       + '</td>'
       + '</tr>';

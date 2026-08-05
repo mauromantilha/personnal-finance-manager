@@ -5,30 +5,7 @@ on:
     branches: [main]
 
 jobs:
-  # ── Admin Worker ─────────────────────────────────────────────────────────────
-  deploy-admin:
-    name: Admin Worker
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: workers/admin
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: workers/admin/package-lock.json
-
-      - run: npm ci
-      - run: npx tsc --noEmit          # type-check gate — bloqueia deploy se houver erro de tipo
-      - run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-  # ── Finance Worker ───────────────────────────────────────────────────────────
+  # ── Finance Worker (primeiro — Admin faz service binding para mks-finance) ───
   deploy-finance:
     name: Finance Worker
     runs-on: ubuntu-latest
@@ -47,6 +24,30 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit          # type-check gate — bloqueia deploy se houver erro de tipo
       - run: npm test                  # testes de matemática de dinheiro (vitest)
+      - run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  # ── Admin Worker (depois do Finance — depende do service binding FINANCE) ───
+  deploy-admin:
+    name: Admin Worker
+    needs: deploy-finance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/admin
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/admin/package-lock.json
+
+      - run: npm ci
+      - run: npx tsc --noEmit          # type-check gate — bloqueia deploy se houver erro de tipo
       - run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

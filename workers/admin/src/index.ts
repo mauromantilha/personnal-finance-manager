@@ -37,6 +37,7 @@ export interface Env {
   CPF_SALT:            string;
   APP_SECRET:          string;  // HMAC para tokens de verificação de email
   AUTO_CLEANUP?:       string;  // "true" habilita o cron de limpeza de pendentes (destrutivo)
+  FINANCE?:            Fetcher; // service binding → mks-finance (API dos tenants)
 }
 
 export interface Tenant {
@@ -78,6 +79,40 @@ function genNonce(): string {
   return btoa(s);
 }
 
+/** CSP do painel admin (HTML inline com nonce). */
+function adminCsp(nonce: string): string {
+  return [
+    `default-src 'self'`,
+    `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com`,
+    `script-src-elem 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com`,
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' https://api.dicebear.com data:`,
+    `connect-src 'self' https://api.resend.com https://cloudflareinsights.com https://static.cloudflareinsights.com`,
+    `frame-ancestors 'none'`,
+  ].join('; ');
+}
+
+/**
+ * CSP do SPA do tenant (proxied Pages).
+ * Precisa permitir Cloudflare Access: quando a sessão OTP expira, fetch('/api/…')
+ * recebe 302 para *.cloudflareaccess.com — sem isso o browser bloqueia e
+ * criar conta / market / data falham com "Failed to fetch".
+ */
+function tenantCsp(teamDomain: string): string {
+  const access = `https://${teamDomain}.cloudflareaccess.com`;
+  return [
+    `default-src 'self'`,
+    `script-src 'self' https://static.cloudflareinsights.com`,
+    `style-src 'self' 'unsafe-inline' ${access}`,
+    `img-src 'self' https://api.dicebear.com data: ${access}`,
+    `font-src 'self' data:`,
+    `connect-src 'self' ${access} https://cloudflareinsights.com https://static.cloudflareinsights.com`,
+    `frame-src ${access}`,
+    `form-action 'self' ${access}`,
+    `frame-ancestors 'none'`,
+  ].join('; ');
+}
+
 app.use('*', async (c, next) => {
   const nonce = genNonce();
   c.set('cspNonce', nonce);
@@ -89,14 +124,13 @@ app.use('*', async (c, next) => {
   c.header('Permissions-Policy',
     'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), ' +
     'accelerometer=(), gyroscope=(), interest-cohort=()');
-  c.header('Content-Security-Policy',
-    `default-src 'self'; ` +
-    `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +
-    `script-src-elem 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ` +
-    `style-src 'self' 'unsafe-inline'; ` +
-    `img-src 'self' https://api.dicebear.com data:; ` +
-    `connect-src 'self' https://api.resend.com https://cloudflareinsights.com https://static.cloudflareinsights.com; ` +
-    `frame-ancestors 'none'`);
+
+  const host = new URL(c.req.url).hostname;
+  const isAdmin = host === `admin.${c.env.BASE_DOMAIN}`;
+  c.header(
+    'Content-Security-Policy',
+    isAdmin ? adminCsp(nonce) : tenantCsp(c.env.CF_TEAM_DOMAIN),
+  );
 });
 
 // ── Tenant frontend proxy ─────────────────────────────────────────────────────
@@ -106,8 +140,24 @@ app.all('*', async (c, next) => {
   const url = new URL(c.req.url);
   const hostname = url.hostname;
   if (hostname === `admin.${c.env.BASE_DOMAIN}`) return next();
-  // Public API paths (registration, etc.) — bypass proxy so Worker handles them
-  if (url.pathname.startsWith('/public/') || url.pathname.startsWith('/api/public/')) return next();
+  // /api/* do tenant NÃO pode ir ao Pages (HTML). Encaminha ao Finance Worker
+  // via service binding — cobre conflito de rota *.financaslivre.com/* vs /api/*.
+  if (
+    url.pathname.startsWith('/api/') &&
+    !url.pathname.startsWith('/api/public/') &&
+    hostname !== `admin.${c.env.BASE_DOMAIN}`
+  ) {
+    if (c.env.FINANCE) {
+      return c.env.FINANCE.fetch(c.req.raw);
+    }
+    return c.json({
+      error: 'API do tenant deveria ir ao Finance Worker. Binding FINANCE ausente.',
+      code: 'API_ROUTE_MISMATCH',
+    }, 502);
+  }
+  if (url.pathname.startsWith('/public/') || url.pathname.startsWith('/api/public/')) {
+    return next();
+  }
 
   // Only serve SPA for provisioned, active tenants — reject unknown/pending subdomains
   const subdomain = hostname.split('.')[0];
@@ -166,11 +216,20 @@ app.all('*', async (c, next) => {
     headers: filteredHeaders,
     body: c.req.raw.body,
     redirect: 'follow',
-  });
+    // Evita Worker cachear HTML/JS antigo do Pages após deploy
+    cf: { cacheTtl: 0, cacheEverything: false },
+  } as RequestInit);
   // Também filtrar headers sensíveis da resposta (set-cookie do Pages não deve vazar
   // ao tenant — qualquer cookie deve vir do nosso próprio Worker).
   const respHeaders = new Headers(res.headers);
   respHeaders.delete('set-cookie');
+  // CSP do tenant (middleware também aplica; reforça no Response cru do proxy)
+  respHeaders.set('Content-Security-Policy', tenantCsp(c.env.CF_TEAM_DOMAIN));
+  const ct = respHeaders.get('content-type') ?? '';
+  if (ct.includes('text/html') || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    respHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    respHeaders.set('Pragma', 'no-cache');
+  }
   return new Response(res.body, {
     status: res.status,
     headers: respHeaders,

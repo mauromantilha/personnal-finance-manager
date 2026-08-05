@@ -82,6 +82,62 @@ router.put('/families/:subdomain', async (c) => {
   return c.json({ success: true, tenant });
 });
 
+// POST /api/families/:subdomain/wipe-data — limpa dados financeiros (mantém users/categorias/LGPD)
+// Use para remover seed demo e deixar a família pronta para inserção real.
+router.post('/families/:subdomain/wipe-data', async (c) => {
+  const { subdomain } = c.req.param();
+  const confirm = c.req.header('X-Confirm-Subdomain');
+  if (confirm !== subdomain)
+    return c.json({ error: 'Confirme o subdomínio no header X-Confirm-Subdomain.' }, 400);
+
+  const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
+  if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
+  if (!tenant.d1DatabaseId) return c.json({ error: 'Família sem banco D1.' }, 503);
+
+  const { execD1 } = await import('../lib/cf-api');
+  const tables = [
+    'transactions', 'accounts', 'connections', 'budgets', 'goals', 'alerts',
+    'chat_history', 'credit_cards', 'invoices', 'recurrences',
+    'installment_groups', 'investments', 'debts',
+  ];
+  const errors: string[] = [];
+  let wiped = 0;
+  for (const table of tables) {
+    try {
+      await execD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1DatabaseId, `DELETE FROM ${table}`);
+      wiped++;
+    } catch (e) {
+      errors.push(`${table}: ${(e as Error).message}`);
+    }
+  }
+  // Marca seed demo como já limpo
+  try {
+    await execD1(
+      c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1DatabaseId,
+      `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT NOT NULL PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`,
+    );
+    await execD1(
+      c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1DatabaseId,
+      `INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed')`,
+    );
+    await execD1(
+      c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1DatabaseId,
+      `INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo')`,
+    );
+  } catch { /* ignore */ }
+
+  await writeAudit(c.env.MKS_ADMIN, {
+    action: 'family.wipe-data',
+    actor: c.get('adminEmail') ?? c.get('adminSub') ?? 'unknown',
+    target: subdomain,
+    ip: c.req.header('CF-Connecting-IP') ?? 'unknown',
+    result: errors.length ? 'partial' : 'success',
+    details: { wiped, errors },
+  });
+
+  return c.json({ success: errors.length === 0, wiped, errors });
+});
+
 // DELETE /api/families/:subdomain — HARD DELETE (LGPD compliance)
 // Deletes D1 database, R2 objects, CF Access app, and all KV records
 router.delete('/families/:subdomain', async (c) => {

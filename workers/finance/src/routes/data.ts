@@ -6,6 +6,7 @@ import {
   mapInstallmentGroup, mapInvestment, mapChat,
 } from '../lib/mappers';
 import { processRecurrences, recalculateBudgets, generateProactiveAlerts } from '../lib/helpers';
+import { ensureTenantSchema } from '../lib/ensure-schema';
 import type { D1Param } from '../lib/d1';
 import { isOwner } from '../lib/authz';
 
@@ -29,6 +30,13 @@ router.get('/data', async (c) => {
   const db   = c.get('db');
   const user = c.get('user');
   const owner = isOwner(user);
+
+  // Auto-heal schema em tenants legados (colunas 0015+, tabelas debts/cards)
+  try {
+    await ensureTenantSchema(db);
+  } catch (e) {
+    console.error('[ensureTenantSchema]', (e as Error).message);
+  }
 
   const all = c.req.query('all') === '1';
   let months = DEFAULT_TX_MONTHS;
@@ -91,7 +99,7 @@ router.get('/data', async (c) => {
     owner
       ? db.query('SELECT * FROM (SELECT * FROM chat_history ORDER BY rowid DESC LIMIT 200) ORDER BY rowid ASC').then(r => r.map(mapChat))
       : Promise.resolve([]),
-    db.query('SELECT * FROM categories ORDER BY parent_id ASC NULLS FIRST, name ASC').then(r => r.map(mapCategory as any)),
+    db.query('SELECT * FROM categories ORDER BY (parent_id IS NOT NULL), parent_id, name').then(r => r.map(mapCategory as any)),
     db.query("SELECT * FROM credit_cards WHERE is_active = 1").then(r => r.map(mapCreditCard as any)),
     db.query('SELECT * FROM invoices ORDER BY month DESC').then(r => r.map(mapInvoice as any)),
     db.query('SELECT * FROM recurrences WHERE is_active = 1 ORDER BY day_of_month ASC').then(r => r.map(mapRecurrence as any)),

@@ -1,6 +1,6 @@
 -- MKS Finanças — Schema consolidado v1.2
 -- Aplicado automaticamente na provisão de novas famílias.
--- Espelha migrations/0001–0018 (exceto dados demo de 0002_seed).
+-- Espelha migrations/0001–0020 (exceto dados demo de 0002_seed).
 -- Após DDL/seed, marca versões em schema_migrations para o migrate-all não reaplicar.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -279,7 +279,9 @@ INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0014_avatar');
 INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0015_extras');
 INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0016_debts');
 INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0017_income_meta');
-INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_indexes');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0020_indexes');
 
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_tx_member_date ON transactions(member_id, date);

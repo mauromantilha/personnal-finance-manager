@@ -63,6 +63,9 @@ export default function HealthReport({ transactions, budgets, goals, accounts }:
   const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
+  // Sem contas e sem lançamentos = nada a pontuar (evita score inventado)
+  const hasData = accounts.length > 0 || transactions.length > 0;
+
   const { thisIncome, thisExpense, lastIncome, lastExpense, savingsRate, lastSavingsRate } = useMemo(() => {
     const thisM = transactions.filter(t => t.date.startsWith(thisMonth));
     const lastM = transactions.filter(t => t.date.startsWith(lastMonth));
@@ -75,40 +78,81 @@ export default function HealthReport({ transactions, budgets, goals, accounts }:
     return { thisIncome, thisExpense, lastIncome, lastExpense, savingsRate, lastSavingsRate };
   }, [transactions, thisMonth, lastMonth]);
 
-  // Score components (max 100)
+  // Score só com dados reais — sem pontos “de consolação” por ausência de orçamento/meta
   const { score, breakdown } = useMemo(() => {
-    // 1. Savings rate (0–35): 0%=0, 10%=18, 20%+=35
-    const savingsScore = Math.min(35, Math.max(0, savingsRate * 1.75));
+    if (!hasData) {
+      return {
+        score: 0,
+        breakdown: [
+          { label: 'Taxa de Poupança', got: 0, max: 35, detail: 'Sem dados' },
+          { label: 'Orçamentos no Verde', got: 0, max: 30, detail: 'Sem dados' },
+          { label: 'Progresso de Metas', got: 0, max: 20, detail: 'Sem dados' },
+          { label: 'Patrimônio Positivo', got: 0, max: 15, detail: 'Sem dados' },
+        ],
+      };
+    }
 
-    // 2. Budget compliance (0–30): fraction of budgets under 100%
+    // 1. Savings rate (0–35): exige receita no mês; sem receita = 0
+    const savingsScore = thisIncome > 0
+      ? Math.min(35, Math.max(0, savingsRate * 1.75))
+      : 0;
+
+    // 2. Budget compliance (0–30): sem orçamentos = 0 (não inventa 15)
     const totalBudgets = budgets.length;
     const compliantBudgets = budgets.filter(b => b.limitInCents > 0 && b.spentInCents <= b.limitInCents).length;
-    const budgetScore = totalBudgets > 0 ? (compliantBudgets / totalBudgets) * 30 : 15;
+    const budgetScore = totalBudgets > 0 ? (compliantBudgets / totalBudgets) * 30 : 0;
 
-    // 3. Goals progress (0–20): average % of goals
+    // 3. Goals progress (0–20): sem metas = 0 (não inventa 10)
     const goalScore = goals.length > 0
       ? (goals.reduce((s, g) => s + Math.min(1, g.targetInCents > 0 ? g.currentInCents / g.targetInCents : 0), 0) / goals.length) * 20
-      : 10;
+      : 0;
 
-    // 4. Positive net worth (0–15): any account with positive balance
+    // 4. Positive net worth (0–15): zero patrimônio = 0 (não inventa 7)
     const netWorth = accounts.reduce((s, a) => s + a.balanceInCents, 0);
-    const netWorthScore = netWorth > 0 ? 15 : netWorth === 0 ? 7 : 0;
+    const netWorthScore = netWorth > 0 ? 15 : 0;
 
     const total = Math.round(savingsScore + budgetScore + goalScore + netWorthScore);
     return {
       score: Math.min(100, Math.max(0, total)),
       breakdown: [
-        { label: 'Taxa de Poupança', got: Math.round(savingsScore), max: 35, detail: `${savingsRate.toFixed(1)}%` },
-        { label: 'Orçamentos no Verde', got: Math.round(budgetScore), max: 30, detail: totalBudgets > 0 ? `${compliantBudgets}/${totalBudgets}` : 'Sem orçamentos' },
-        { label: 'Progresso de Metas', got: Math.round(goalScore), max: 20, detail: goals.length > 0 ? `${goals.length} meta${goals.length > 1 ? 's' : ''}` : 'Sem metas' },
-        { label: 'Patrimônio Positivo', got: Math.round(netWorthScore), max: 15, detail: fmt(accounts.reduce((s, a) => s + a.balanceInCents, 0)) },
+        {
+          label: 'Taxa de Poupança',
+          got: Math.round(savingsScore),
+          max: 35,
+          detail: thisIncome > 0 ? `${savingsRate.toFixed(1)}%` : 'Sem receita no mês',
+        },
+        {
+          label: 'Orçamentos no Verde',
+          got: Math.round(budgetScore),
+          max: 30,
+          detail: totalBudgets > 0 ? `${compliantBudgets}/${totalBudgets}` : 'Sem orçamentos',
+        },
+        {
+          label: 'Progresso de Metas',
+          got: Math.round(goalScore),
+          max: 20,
+          detail: goals.length > 0 ? `${goals.length} meta${goals.length > 1 ? 's' : ''}` : 'Sem metas',
+        },
+        {
+          label: 'Patrimônio Positivo',
+          got: Math.round(netWorthScore),
+          max: 15,
+          detail: fmt(netWorth),
+        },
       ],
     };
-  }, [savingsRate, budgets, goals, accounts]);
+  }, [hasData, savingsRate, thisIncome, budgets, goals, accounts]);
 
-  const expenseDelta = lastExpense > 0 ? ((thisExpense - lastExpense) / lastExpense) * 100 : 0;
-  const incomeDelta = lastIncome > 0 ? ((thisIncome - lastIncome) / lastIncome) * 100 : 0;
-  const savingsDelta = lastSavingsRate !== 0 ? savingsRate - lastSavingsRate : 0;
+  const hasLastMonthActivity = lastIncome > 0 || lastExpense > 0;
+  const expenseDelta = hasLastMonthActivity && lastExpense > 0
+    ? ((thisExpense - lastExpense) / lastExpense) * 100
+    : undefined;
+  const incomeDelta = hasLastMonthActivity && lastIncome > 0
+    ? ((thisIncome - lastIncome) / lastIncome) * 100
+    : undefined;
+  const savingsDelta = hasLastMonthActivity && lastIncome > 0
+    ? savingsRate - lastSavingsRate
+    : undefined;
   const netWorth = accounts.reduce((s, a) => s + a.balanceInCents, 0);
 
   const handleExportCSV = () => {
@@ -131,6 +175,23 @@ export default function HealthReport({ transactions, budgets, goals, accounts }:
     a.download = `relatorio-saude-${thisMonth}.csv`;
     a.click();
   };
+
+  if (!hasData) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+          <Activity className="w-4 h-4 text-indigo-600" />
+          <span className="font-bold text-slate-800 text-sm">Score de Saúde Financeira</span>
+        </div>
+        <div className="px-6 py-10 text-center">
+          <p className="text-sm font-bold text-slate-700">Sem dados para calcular o score</p>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            Cadastre contas e lançamentos reais. O score não usa valores fictícios nem pontos por ausência de orçamento/meta.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -173,9 +234,10 @@ export default function HealthReport({ transactions, budgets, goals, accounts }:
           <div className="lg:col-span-2 grid grid-cols-2 gap-3">
             <Metric label="Receita do Mês" value={fmt(thisIncome)} delta={incomeDelta}
               icon={TrendingUp} color="bg-emerald-50 text-emerald-600" />
-            <Metric label="Despesas do Mês" value={fmt(thisExpense)} delta={-expenseDelta}
+            <Metric label="Despesas do Mês" value={fmt(thisExpense)} delta={expenseDelta !== undefined ? -expenseDelta : undefined}
               icon={TrendingDown} color="bg-rose-50 text-rose-600" />
-            <Metric label="Taxa de Poupança" value={`${savingsRate.toFixed(1)}%`} delta={savingsDelta}
+            <Metric label="Taxa de Poupança" value={thisIncome > 0 ? `${savingsRate.toFixed(1)}%` : '—'}
+              delta={savingsDelta}
               icon={ShieldCheck} color="bg-indigo-50 text-indigo-600" />
             <Metric label="Patrimônio Líquido" value={fmt(netWorth)}
               icon={Target} color="bg-violet-50 text-violet-600" />
