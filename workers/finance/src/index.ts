@@ -220,17 +220,20 @@ app.post('/api/lgpd/accept', async (c) => {
   return c.json({ ok: true });
 });
 
-// ── Middleware: LGPD obrigatória para rotas de dados ──────────────────────────
-app.use('/api/data', async (c, next) => {
-  if (!c.get('lgpdOk')) return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
-  return next();
-});
-app.use('/api/transactions/*', async (c, next) => {
-  if (!c.get('lgpdOk')) return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
-  return next();
-});
-app.use('/api/accounts/*', async (c, next) => {
-  if (!c.get('lgpdOk')) return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
+// ── Middleware: LGPD obrigatória em /api/* (exceto status/aceite/health) ───────
+// Health já é público antes do JWT; auth/status e lgpd/accept precisam passar
+// sem aceite para o front exibir o banner e registrar o consentimento.
+const LGPD_EXEMPT = new Set([
+  '/api/auth/status',
+  '/api/lgpd/accept',
+  '/api/health',
+]);
+app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname.replace(/\/$/, '') || '/';
+  if (LGPD_EXEMPT.has(path)) return next();
+  if (!c.get('lgpdOk')) {
+    return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
+  }
   return next();
 });
 

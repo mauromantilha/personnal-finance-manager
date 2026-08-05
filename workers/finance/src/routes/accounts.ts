@@ -1,8 +1,11 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
+import { requireOwner } from '../lib/authz';
 
 const VALID_TYPES = ['CASH', 'CHECKING', 'SAVINGS', 'INVESTMENT'];
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+router.use('*', requireOwner);
 
 router.post('/accounts', async (c) => {
   const db = c.get('db');

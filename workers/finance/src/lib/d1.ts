@@ -96,5 +96,17 @@ export class D1Client {
     if (!data.success) {
       throw new Error(`D1 batch: ${JSON.stringify(data.errors)}`);
     }
+    const results = data.result ?? [];
+    for (let i = 0; i < results.length; i++) {
+      if (!results[i]?.success) {
+        throw new Error(
+          `D1 batch: statement ${i} falhou — ${JSON.stringify(results[i] ?? data.errors)}`,
+        );
+      }
+    }
+    // Se a API devolver menos itens que enviamos, algo está inconsistente
+    if (results.length > 0 && results.length < stmts.length) {
+      throw new Error(`D1 batch: esperava ${stmts.length} resultados, recebeu ${results.length}`);
+    }
   }
 }

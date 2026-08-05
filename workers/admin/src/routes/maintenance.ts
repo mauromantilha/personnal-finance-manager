@@ -1,10 +1,10 @@
 /**
  * Manutenção — limpeza de tenants `pending` órfãos.
  *
- * O fluxo de registro cria D1 + CF Access app ANTES da verificação de e-mail.
- * Se o dono nunca confirma, esses recursos ficam órfãos (contam contra o limite
- * de bancos D1 e poluem o Zero Trust). Esta varredura remove tenants que ficaram
- * em `pending` por mais de PENDING_MAX_AGE_HOURS.
+ * Cadastro público guarda stub KV até o verify; D1/Access só nascem no
+ * POST /public/verify. Pendentes antigos (fluxo legado) podem ter D1+Access
+ * sem confirmação. Esta varredura remove tenants `pending` com mais de
+ * PENDING_MAX_AGE_HOURS (KV + infra se existir).
  *
  * Segurança: destrutivo. Só age em status === 'pending' acima do limiar de idade.
  * A rota HTTP é dry-run por padrão (exige ?apply=1). O cron só executa em modo
@@ -72,6 +72,7 @@ export async function sweepPendingTenants(env: Env, apply: boolean): Promise<Swe
       ];
       if (t.ownerEmailHash) kvDeletes.push(env.MKS_TENANTS.delete(`email:${t.ownerEmailHash}`));
       if (t.cpfHash)        kvDeletes.push(env.MKS_TENANTS.delete(`cpf2:${t.cpfHash}`));
+      if (t.verifyTokenId)  kvDeletes.push(env.MKS_TENANTS.delete(`verify:${t.verifyTokenId}`));
       await Promise.all(kvDeletes);
 
       newIndex = newIndex.filter(s => s !== t.subdomain);

@@ -44,6 +44,7 @@ export interface Tenant {
   subdomain:      string;
   familyId:       string;
   tier:           1 | 2;
+  /** Vazio em pending pré-verify (D1 só nasce no POST /public/verify). */
   d1DatabaseId:   string;
   r2Bucket:       string;
   r2Prefix:       string;
@@ -53,8 +54,10 @@ export interface Tenant {
   ownerEmailHash: string;
   status:            'pending' | 'active' | 'suspended' | 'deleted';
   createdAt:         string;
-  storageTierBytes?: number;  // undefined = plano free (300 MB)
-  cpfHash?:          string;  // hash PBKDF2 do CPF (só em tenants pending — usado na limpeza)
+  storageTierBytes?: number;
+  cpfHash?:          string;
+  ownerEmail?:       string;  // só pending — removido após verify
+  verifyTokenId?:    string;
 }
 
 export interface Variables {

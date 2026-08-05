@@ -36,8 +36,19 @@ node scripts/migrate-all.mjs                   # todas as famílias ativas (lê 
 node scripts/migrate-all.mjs --subdomain silva # somente uma
 node scripts/migrate-all.mjs --main            # instância principal (D1_DATABASE_ID do .env)
 node scripts/migrate-all.mjs --dry-run         # simula
+node scripts/migrate-all.mjs --fix-schema      # só reparo: cria debts + seed categorias se vazio
+node scripts/migrate-all.mjs --fix-schema --dry-run
 ```
 
+`--fix-schema` é o backfill do PR A: para tenants provisionados sem `debts` ou com
+`categories` vazia (seed da 0003 nunca aplicado). Idempotente — seguro rodar em todos.
+
+Para índices (`0018_indexes`), rode o migrate completo (sem `--fix-schema`) ou via admin:
+
+```bash
+node scripts/migrate-all.mjs
+# ou admin API: POST /api/migrations/apply-all { "version": "0018_indexes" }
+```
 ## Migração de domínio (`migrate-to-financaslivre.mjs`)
 
 One-shot: migra tenants de `mksbrasil.com` → `financaslivre.com` (DNS wildcard,

@@ -1,6 +1,10 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * @deprecated Prefer `npm run dev` (Vite + wrangler finance) for parity with production.
+ * This Express BFF (`npm run dev:bff`) remains for local Pluggy/webhook experiments and
+ * single-process demos. API routes here diverge from workers/finance — do not treat as prod.
  */
 
 import 'dotenv/config';
@@ -134,7 +138,30 @@ async function r2GetBinary(key: string): Promise<{ body: ArrayBuffer; contentTyp
 
 const PLUGGY_CLIENT_ID = process.env.PLUGGY_CLIENT_ID || '';
 const PLUGGY_CLIENT_SECRET = process.env.PLUGGY_CLIENT_SECRET || '';
+/** Segredo compartilhado exigido no webhook (header X-Webhook-Secret ou ?token=). */
+const PLUGGY_WEBHOOK_SECRET = process.env.PLUGGY_WEBHOOK_SECRET?.trim() || '';
 const APP_URL = process.env.APP_URL || 'https://financaslivre.com';
+
+function pluggyWebhookAuthorized(req: express.Request): boolean {
+  if (!PLUGGY_WEBHOOK_SECRET) return false;
+  const fromHeader = req.get('x-webhook-secret') || '';
+  const fromQuery = typeof req.query.token === 'string' ? req.query.token : '';
+  const provided = fromHeader || fromQuery;
+  try {
+    const a = Buffer.from(provided);
+    const b = Buffer.from(PLUGGY_WEBHOOK_SECRET);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+function pluggyWebhookUrl(): string {
+  const base = `${APP_URL.replace(/\/$/, '')}/api/webhooks/pluggy`;
+  if (!PLUGGY_WEBHOOK_SECRET) return base;
+  return `${base}?token=${encodeURIComponent(PLUGGY_WEBHOOK_SECRET)}`;
+}
 
 let _pluggyApiKey: string | null = null;
 let _pluggyApiKeyExpiry = 0;
@@ -307,13 +334,30 @@ function mapInstallmentGroup(r: any, paidCount: number): InstallmentGroup {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-const APP_SECRET = process.env.APP_SECRET || 'mks-dev-secret-please-change-in-production';
-const APP_PASSWORD = process.env.APP_PASSWORD || 'mks2026';
+const APP_SECRET = process.env.APP_SECRET?.trim() ?? '';
+const APP_PASSWORD = process.env.APP_PASSWORD?.trim() ?? '';
 const COOKIE_NAME = 'mks_session';
 const SESSION_MS = 24 * 60 * 60 * 1000;
 
-if (!process.env.APP_SECRET) console.warn('[WARN] APP_SECRET não configurado — usando valor padrão inseguro.');
-if (!process.env.APP_PASSWORD) console.warn('[WARN] APP_PASSWORD não configurado — usando "mks2026".');
+const INSECURE_AUTH_DEFAULTS = new Set([
+  'mks2026',
+  'mks-dev-secret-please-change-in-production',
+  'CHANGE_ME_RANDOM_HEX_32_CHARS',
+  'CHANGE_ME_STRONG_PASSWORD',
+]);
+
+if (!APP_SECRET || APP_SECRET.length < 16) {
+  console.error('[FATAL] APP_SECRET ausente ou curto demais (mín. 16 chars). Defina no .env — sem default.');
+  process.exit(1);
+}
+if (!APP_PASSWORD || APP_PASSWORD.length < 8) {
+  console.error('[FATAL] APP_PASSWORD ausente ou curto demais (mín. 8 chars). Defina no .env — sem default.');
+  process.exit(1);
+}
+if (INSECURE_AUTH_DEFAULTS.has(APP_SECRET) || INSECURE_AUTH_DEFAULTS.has(APP_PASSWORD)) {
+  console.error('[FATAL] APP_SECRET/APP_PASSWORD ainda com valor placeholder inseguro. Gere novos valores.');
+  process.exit(1);
+}
 
 function createToken(): string {
   const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MS })).toString('base64url');
@@ -682,8 +726,14 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // ── Pluggy webhook (public — no auth) ────────────────────────────────────
+  // ── Pluggy webhook (exige PLUGGY_WEBHOOK_SECRET) ─────────────────────────
   app.post('/api/webhooks/pluggy', async (req, res) => {
+    if (!PLUGGY_WEBHOOK_SECRET) {
+      return res.status(503).json({ error: 'Webhook Pluggy desabilitado (PLUGGY_WEBHOOK_SECRET não configurado).' });
+    }
+    if (!pluggyWebhookAuthorized(req)) {
+      return res.status(401).json({ error: 'Não autorizado.' });
+    }
     const { event, itemId } = req.body || {};
     if (event === 'item/updated' && itemId) {
       const conn = await d1q<any>('SELECT id FROM connections WHERE item_id = ?', [itemId]);
@@ -1174,10 +1224,13 @@ async function startServer() {
     if (!PLUGGY_CLIENT_ID || !PLUGGY_CLIENT_SECRET) {
       return res.status(400).json({ error: 'Pluggy não configurado. Adicione PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET no .env e reinicie o servidor.' });
     }
+    if (!PLUGGY_WEBHOOK_SECRET) {
+      return res.status(400).json({ error: 'PLUGGY_WEBHOOK_SECRET não configurado. Gere com: openssl rand -hex 32' });
+    }
     try {
       const data = await pluggyReq<{ accessToken: string }>('/connect_token', {
         method: 'POST',
-        body: JSON.stringify({ clientUserId: 'mks-user', webhookUrl: `${APP_URL}/api/webhooks/pluggy` }),
+        body: JSON.stringify({ clientUserId: 'mks-user', webhookUrl: pluggyWebhookUrl() }),
       });
       res.json({ connectToken: data.accessToken });
     } catch (e: any) {
@@ -2414,7 +2467,8 @@ REGRAS:
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MKS Open Finance → http://0.0.0.0:${PORT}`);
+    console.warn('[deprecated] Express BFF — API divergente do Finance Worker. Preferir: npm run dev');
+    console.log(`MKS Open Finance (BFF) → http://0.0.0.0:${PORT}`);
     console.log(`[D1] mks-finance (${D1_DATABASE_ID})`);
     console.log(`[R2] ${R2_BUCKET}`);
     if (!process.env.GROQ_API_KEY) console.warn('[WARN] GROQ_API_KEY não configurada — IA em modo fallback.');

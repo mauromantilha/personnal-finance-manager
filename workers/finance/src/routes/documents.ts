@@ -6,50 +6,12 @@ import { mapCreditCard, DbCreditCard } from '../lib/mappers';
 import { recalculateBudgets } from '../lib/helpers';
 import { D1Stmt } from '../lib/d1';
 import { checkQuota, incrementStorage, decrementStorage, formatBytes, STORAGE_UPGRADE_PRICE, STORAGE_PAID_BYTES } from '../lib/storage';
+import { validateBase64Upload } from '../lib/upload';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Nota: tenant.r2Prefix é validado no middleware de tenant em index.ts.
 // Aqui podemos confiar que existe e tem comprimento mínimo.
-
-// ── Validação de upload (base64 + magic bytes) ──────────────────────────────
-const MAX_DOC_BYTES = 8 * 1024 * 1024; // 8 MB
-
-const ALLOWED_DOC_MIMES = new Set([
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf',
-]);
-
-/** Detecta magic bytes do início do buffer e retorna o mime real ou null. */
-function sniffMime(bytes: Uint8Array): string | null {
-  if (bytes.length < 4) return null;
-  // JPEG: FF D8 FF
-  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return 'image/jpeg';
-  // PNG: 89 50 4E 47 0D 0A 1A 0A
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'image/png';
-  // GIF: 47 49 46 38 ('GIF8')
-  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return 'image/gif';
-  // WebP: 52 49 46 46 .. .. .. .. 57 45 42 50
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
-    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'image/webp';
-  // PDF: 25 50 44 46 ('%PDF')
-  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return 'application/pdf';
-  return null;
-}
-
-function decodeBase64Strict(b64: string): Uint8Array | null {
-  // Aceita apenas alfabeto base64 padrão; rejeita whitespace/lixo.
-  if (typeof b64 !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64) || b64.length % 4 !== 0) {
-    return null;
-  }
-  try {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  } catch {
-    return null;
-  }
-}
 
 // ── GET /api/documents — lista documentos do tenant no R2 ────────────────────
 router.get('/documents', async (c) => {
@@ -90,27 +52,15 @@ router.delete('/documents/*', async (c) => {
 // ── POST /api/documents/analyze — Groq Vision ─────────────────────────────────
 router.post('/documents/analyze', async (c) => {
   const { base64, mimeType, documentType } = await c.req.json<any>();
-  if (!base64 || !mimeType || !documentType)
+  if (!documentType)
     return c.json({ error: 'base64, mimeType e documentType são obrigatórios.' }, 400);
   if (!['BILL', 'INVOICE'].includes(documentType))
     return c.json({ error: 'documentType deve ser BILL ou INVOICE.' }, 400);
-  if (!ALLOWED_DOC_MIMES.has(mimeType))
-    return c.json({ error: 'mimeType não suportado. Use JPEG, PNG, WebP, GIF ou PDF.' }, 415);
 
-  // Cap aproximado do tamanho antes de decodificar (base64 = ~1.33x do binário)
-  if (typeof base64 !== 'string' || base64.length > Math.ceil(MAX_DOC_BYTES * 4 / 3))
-    return c.json({ error: 'Documento maior que 8 MB.' }, 413);
+  const upload = validateBase64Upload(base64, mimeType);
+  if (!upload.ok) return c.json({ error: upload.error }, upload.status);
 
-  const buf = decodeBase64Strict(base64);
-  if (!buf) return c.json({ error: 'base64 inválido.' }, 400);
-  if (buf.byteLength > MAX_DOC_BYTES)
-    return c.json({ error: 'Documento maior que 8 MB.' }, 413);
-
-  // Sniff de magic bytes — rejeita MIME falsificado pelo cliente
-  const realMime = sniffMime(buf);
-  if (!realMime) return c.json({ error: 'Formato de arquivo não reconhecido.' }, 415);
-  if (realMime !== mimeType)
-    return c.json({ error: `MIME informado (${mimeType}) não corresponde ao conteúdo (${realMime}).` }, 415);
+  const { buf, mime: realMime } = upload;
 
   // ── Verificação de cota de storage ───────────────────────────────────────────
   const tenant = c.get('tenant');
@@ -155,12 +105,8 @@ router.post('/documents/analyze', async (c) => {
     }));
   }
 
-  // Reutiliza o buffer já validado e usa o mime real detectado.
-  // buf vem de `new Uint8Array(bin.length)` em decodeBase64Strict, então o
-  // backing buffer é sempre ArrayBuffer (nunca SharedArrayBuffer) — cast seguro.
   await r2Put(c.env.MKS_DOCUMENTS, r2key, buf.buffer as ArrayBuffer, realMime);
 
-  // Atualizar contador de storage de forma assíncrona (não bloqueia resposta)
   c.executionCtx.waitUntil(
     incrementStorage(c.env.MKS_TENANTS, tenant.familyId, buf.byteLength),
   );

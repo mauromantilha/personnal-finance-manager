@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { mapFamilyMember } from '../lib/mappers';
+import { requireOwner } from '../lib/authz';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -10,7 +11,7 @@ router.get('/family', async (c) => {
   return c.json(rows.map(mapFamilyMember));
 });
 
-router.post('/family', async (c) => {
+router.post('/family', requireOwner, async (c) => {
   const db = c.get('db');
   const { name, avatarColor } = await c.req.json<any>();
   if (!name) return c.json({ error: 'name obrigatório.' }, 400);
@@ -23,7 +24,7 @@ router.post('/family', async (c) => {
   return c.json({ id }, 201);
 });
 
-router.delete('/family/:id', async (c) => {
+router.delete('/family/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
 

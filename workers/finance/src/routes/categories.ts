@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { mapCategory } from '../lib/mappers';
+import { requireOwner } from '../lib/authz';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -10,7 +11,7 @@ router.get('/categories', async (c) => {
   return c.json(rows.map(mapCategory as any));
 });
 
-router.post('/categories', async (c) => {
+router.post('/categories', requireOwner, async (c) => {
   const db = c.get('db');
   const { name, parentId, icon, color, type } = await c.req.json<any>();
   if (!name) return c.json({ error: 'name obrigatório.' }, 400);
@@ -21,7 +22,7 @@ router.post('/categories', async (c) => {
   return c.json({ id }, 201);
 });
 
-router.put('/categories/:id', async (c) => {
+router.put('/categories/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   const { name, parentId, icon, color, type } = await c.req.json<any>();
@@ -34,7 +35,7 @@ router.put('/categories/:id', async (c) => {
   return c.json({ success: true });
 });
 
-router.delete('/categories/:id', async (c) => {
+router.delete('/categories/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
 

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
+import { requireOwner } from '../lib/authz';
 import { groqChat } from '../lib/groq';
 import { mapAccount, mapTransaction } from '../lib/mappers';
 
@@ -49,7 +50,7 @@ router.get('/debts', async (c) => {
 });
 
 // ── POST /api/debts ────────────────────────────────────────────────────────────
-router.post('/debts', async (c) => {
+router.post('/debts', requireOwner, async (c) => {
   const db = c.get('db');
   const { creditor, type, originalAmountInCents, currentAmountInCents,
           dueDate, monthsOverdue, status, notes } = await c.req.json<any>();
@@ -67,7 +68,7 @@ router.post('/debts', async (c) => {
 });
 
 // ── PUT /api/debts/:id ─────────────────────────────────────────────────────────
-router.put('/debts/:id', async (c) => {
+router.put('/debts/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   const { creditor, type, originalAmountInCents, currentAmountInCents,
@@ -82,7 +83,7 @@ router.put('/debts/:id', async (c) => {
 });
 
 // ── DELETE /api/debts/:id ──────────────────────────────────────────────────────
-router.delete('/debts/:id', async (c) => {
+router.delete('/debts/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   await db.exec('DELETE FROM debts WHERE id = ?', [id]);
@@ -90,7 +91,7 @@ router.delete('/debts/:id', async (c) => {
 });
 
 // ── POST /api/debts/analyze — IA analisa dívidas e propõe estratégias ──────────
-router.post('/debts/analyze', async (c) => {
+router.post('/debts/analyze', requireOwner, async (c) => {
   const db  = c.get('db');
   const key = resolveGroqKey(c);
   if (!key) return c.json({ error: 'GROQ_KEY_MISSING' }, 401);

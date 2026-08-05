@@ -9,11 +9,17 @@ See [README.md](README.md) for the full feature catalogue and module description
 ## Commands
 
 ```bash
-# Dev (frontend Vite + backend Express BFF, hot-reload)
+# Dev (paridade com prod: Vite :5173 + Finance Worker wrangler :8787)
 npm run dev
+
+# Legado: Express BFF monolítico (Pluggy local / demos). Preferir npm run dev.
+npm run dev:bff
 
 # Type check only (no emit)
 npm run lint          # tsc --noEmit
+
+# Testes do Finance Worker (vitest)
+npm test
 
 # Production build
 npm run build         # Vite + esbuild → dist/
@@ -38,9 +44,10 @@ See [scripts/README.md](scripts/README.md) for migration/maintenance script docs
 ## Architecture
 
 ```
-Frontend (React SPA)
-  └── served by Express BFF (server.ts) in dev; static in prod
-  └── calls /api/* endpoints → proxied to Finance Worker
+Frontend (React SPA, Vite)
+  └── DEV (npm run dev): proxy /api → wrangler finance :8787
+  └── LEGACY (npm run dev:bff): Express BFF (server.ts) — deprecated for API
+  └── PROD: CF Pages + Finance Worker routes (*.financaslivre.com/api/*)
 
 workers/finance/   ← main user-facing API (Hono, CF Workers)
 workers/admin/     ← ops/provisioning API (Hono, CF Workers, admin-only)
@@ -111,13 +118,17 @@ export default router;
 
 ## Database
 
-Migrations live in [migrations/](migrations/) (numbered `0001_` → `0013_`). Each new tenant runs all migrations at provision time.
+Migrations live in [migrations/](migrations/) (numbered `0001_` → `0018_`). Each new tenant
+gets the consolidated schema from [workers/admin/src/schema.sql](workers/admin/src/schema.sql)
+(includes `debts`, category seed, indexes, and `schema_migrations` rows for 0001–0018).
 
-**Core tables**: `accounts`, `transactions`, `budgets`, `goals`, `alerts`, `chat_history`  
-**Extension tables**: `credit_cards`, `invoices`, `recurrences`, `documents`, `family_members`, `installment_groups`, `investments`, `users`, `lgpd_aceites`, `schema_migrations`, `categories`
+**Core tables**: `accounts`, `transactions`, `budgets`, `goals`, `alerts`, `chat_history`
+**Extension tables**: `credit_cards`, `invoices`, `recurrences`, `family_members`,
+`installment_groups`, `investments`, `users`, `lgpd_aceites`, `schema_migrations`,
+`categories`, `debts`, `invites`, `connections`
 
-To add a schema change: create a new numbered migration file, then add it to the provisioning flow.
-
+To add a schema change: create a new numbered migration file, then update `schema.sql`
+(and its `schema_migrations` inserts) so new tenants stay in sync.
 ---
 
 ## Frontend Component Pattern
@@ -155,9 +166,11 @@ const res = await fetch('/api/transactions', {
 GROQ_API_KEY, APP_PASSWORD, APP_SECRET, CLOUDFLARE_API_TOKEN,
 RESEND_API_KEY, APP_URL, D1_DATABASE_ID, R2_BUCKET
 ```
+`APP_SECRET` (mín. 16 chars) e `APP_PASSWORD` (mín. 8) são **obrigatórios** — o BFF aborta sem eles (sem defaults).
+Para Open Finance no BFF: `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `PLUGGY_WEBHOOK_SECRET`.
 
 **Workers** — secrets set via `wrangler secret put`:
-Finance: `CF_API_TOKEN`, `GROQ_API_KEY`, `RESEND_API_KEY`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `APP_SECRET`  
+Finance: `CF_API_TOKEN`, `GROQ_API_KEY`, `RESEND_API_KEY`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `APP_SECRET` 
 Admin: `CF_API_TOKEN`, `ADMIN_PASSWORD`, `RESEND_API_KEY`
 
 Static vars (non-secret) are already in [workers/finance/wrangler.toml](workers/finance/wrangler.toml) and [workers/admin/wrangler.toml](workers/admin/wrangler.toml).
