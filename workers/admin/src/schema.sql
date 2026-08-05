@@ -1,5 +1,7 @@
--- MKS Finanças — Schema consolidado v1.0
--- Aplicado automaticamente na provisão de novas famílias
+-- MKS Finanças — Schema consolidado v1.2
+-- Aplicado automaticamente na provisão de novas famílias.
+-- Espelha migrations/0001–0020 (exceto dados demo de 0002_seed).
+-- Após DDL/seed, marca versões em schema_migrations para o migrate-all não reaplicar.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    TEXT NOT NULL PRIMARY KEY,
@@ -204,4 +206,88 @@ CREATE TABLE IF NOT EXISTS categories (
   color     TEXT NOT NULL DEFAULT '#6B7280',
   type      TEXT NOT NULL DEFAULT 'both'
 );
+
+CREATE TABLE IF NOT EXISTS debts (
+  id                       TEXT    PRIMARY KEY,
+  creditor                 TEXT    NOT NULL,
+  type                     TEXT    NOT NULL,
+  original_amount_in_cents INTEGER NOT NULL,
+  current_amount_in_cents  INTEGER NOT NULL,
+  due_date                 TEXT,
+  months_overdue           INTEGER NOT NULL DEFAULT 0,
+  status                   TEXT    NOT NULL DEFAULT 'ativo',
+  notes                    TEXT,
+  created_at               TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Seed de categorias (espelha migrations/0003_categories.sql)
+INSERT OR IGNORE INTO categories VALUES ('cat-alimentacao',    'Alimentação',    NULL,              '🍽️',  '#EA580C', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-transporte',     'Transporte',     NULL,              '🚗',  '#0284C7', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-moradia',        'Moradia',        NULL,              '🏠',  '#7C3AED', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-saude',          'Saúde',          NULL,              '❤️',  '#DC2626', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-educacao',       'Educação',       NULL,              '📚',  '#0891B2', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-lazer',          'Lazer',          NULL,              '🎮',  '#16A34A', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-vestuario',      'Vestuário',      NULL,              '👕',  '#DB2777', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-investimentos',  'Investimentos',  NULL,              '📈',  '#059669', 'both');
+INSERT OR IGNORE INTO categories VALUES ('cat-receita',        'Receita',        NULL,              '💰',  '#EAB308', 'income');
+INSERT OR IGNORE INTO categories VALUES ('cat-outros',         'Outros',         NULL,              '📦',  '#6B7280', 'both');
+INSERT OR IGNORE INTO categories VALUES ('cat-supermercado',   'Supermercado',   'cat-alimentacao', '🛒',  '#EA580C', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-restaurante',    'Restaurante',    'cat-alimentacao', '🍴',  '#F97316', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-delivery',       'Delivery',       'cat-alimentacao', '🛵',  '#FB923C', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-padaria',        'Padaria/Café',   'cat-alimentacao', '☕',  '#FDBA74', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-uber',           'Uber/99',        'cat-transporte',  '📱',  '#0284C7', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-combustivel',    'Combustível',    'cat-transporte',  '⛽',  '#0369A1', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-transporte-pub', 'Transporte Púb.','cat-transporte',  '🚌',  '#075985', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-estacionamento', 'Estacionamento', 'cat-transporte',  '🅿️',  '#0C4A6E', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-aluguel',        'Aluguel',        'cat-moradia',     '🔑',  '#7C3AED', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-condominio',     'Condomínio',     'cat-moradia',     '🏢',  '#6D28D9', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-agua-luz',       'Água/Luz/Gás',   'cat-moradia',     '💡',  '#5B21B6', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-internet',       'Internet/TV',    'cat-moradia',     '📡',  '#4C1D95', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-farmacia',       'Farmácia',       'cat-saude',       '💊',  '#DC2626', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-consulta',       'Consulta/Exame', 'cat-saude',       '🏥',  '#B91C1C', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-plano-saude',    'Plano de Saúde', 'cat-saude',       '🩺',  '#991B1B', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-academia',       'Academia',       'cat-saude',       '🏋️',  '#7F1D1D', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-cursos',         'Cursos Online',  'cat-educacao',    '💻',  '#0891B2', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-livros',         'Livros',         'cat-educacao',    '📖',  '#0E7490', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-faculdade',      'Faculdade',      'cat-educacao',    '🎓',  '#155E75', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-streaming',      'Streaming',      'cat-lazer',       '📺',  '#16A34A', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-viagem',         'Viagem',         'cat-lazer',       '✈️',  '#15803D', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-cinema',         'Cinema/Show',    'cat-lazer',       '🎬',  '#166534', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-jogos',          'Jogos',          'cat-lazer',       '🎮',  '#14532D', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-salario',        'Salário',        'cat-receita',     '💼',  '#EAB308', 'income');
+INSERT OR IGNORE INTO categories VALUES ('cat-freelance',      'Freelance',      'cat-receita',     '🖥️',  '#CA8A04', 'income');
+INSERT OR IGNORE INTO categories VALUES ('cat-dividendos',     'Dividendos',     'cat-receita',     '📊',  '#A16207', 'income');
+INSERT OR IGNORE INTO categories VALUES ('cat-bonus',          'Bônus/13º',      'cat-receita',     '🎁',  '#854D0E', 'income');
+INSERT OR IGNORE INTO categories VALUES ('cat-aporte',         'Aporte',         'cat-investimentos','💸', '#059669', 'expense');
+INSERT OR IGNORE INTO categories VALUES ('cat-resgate',        'Resgate',        'cat-investimentos','🏧', '#047857', 'income');
+
+-- Versões cobertas por este schema consolidado (inclui 0002 para bloquear demo seed)
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0001_schema');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0002_seed');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0003_categories');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0004_credit_cards');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0005_recurrences');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0006_documents');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0007_family');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0008_installments');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0009_investments');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0010_users');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0011_lgpd_aceites');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0012_schema_migrations');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0013_users_v2');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0014_avatar');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0015_extras');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0016_debts');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0017_income_meta');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0020_indexes');
+
+CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
+CREATE INDEX IF NOT EXISTS idx_tx_member_date ON transactions(member_id, date);
+CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_tx_credit_card ON transactions(credit_card_id);
+CREATE INDEX IF NOT EXISTS idx_tx_installment_group ON transactions(installment_group_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_card_month ON invoices(credit_card_id, month);
+CREATE INDEX IF NOT EXISTS idx_recurrences_active_dom ON recurrences(is_active, day_of_month);
 

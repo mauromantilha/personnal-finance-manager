@@ -8,7 +8,7 @@ import {
   BrainCircuit, RefreshCw, AlertTriangle, Info, CheckCircle2,
   TrendingUp, PieChart, Lightbulb, ClipboardList, Zap, Clock,
   ChevronRight, Shield, MessageSquare, Send, BarChart2, User, Bot,
-  Sparkles, Key, ExternalLink, Target, Wallet, FileText, FileSearch,
+  Sparkles, Key, ExternalLink, Target, Wallet, FileText, FileSearch, ShieldCheck,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -69,6 +69,8 @@ interface ChatMessage {
   content: string;
   ts: string;
   actions?: AgentAction[];
+  needsConfirm?: boolean;
+  pendingConfirmText?: string;
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -159,23 +161,27 @@ function ActionCard({ action }: { action: AgentAction }) {
   const fmtCents = (n: number) => `R$ ${(n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
   const res  = action.result as any;
   const args = action.args as any;
+  const dryRun = res?.dryRun === true;
   const success = !res?.error;
+  const proposed = (res?.proposed ?? args) as any;
 
   let label = action.tool;
   let detail = '';
   let Icon = CheckCircle2;
 
   if (action.tool === 'create_transaction') {
-    label = args.type === 'REC' ? 'Receita registrada' : 'Despesa registrada';
-    detail = `${args.description} — ${fmtCents(args.amountInCents)} · ${args.category}`;
-    Icon = args.type === 'REC' ? Wallet : TrendingUp;
+    label = dryRun
+      ? (proposed.type === 'REC' ? 'Proposta: receita' : 'Proposta: despesa')
+      : (args.type === 'REC' ? 'Receita registrada' : 'Despesa registrada');
+    detail = `${proposed.description ?? args.description} — ${fmtCents(proposed.amountInCents ?? args.amountInCents)} · ${proposed.category ?? args.category}`;
+    Icon = (proposed.type ?? args.type) === 'REC' ? Wallet : TrendingUp;
   } else if (action.tool === 'create_goal') {
-    label = 'Meta criada';
-    detail = `${args.name} — alvo ${fmtCents(args.targetInCents)} até ${args.targetDate}`;
+    label = dryRun ? 'Proposta: meta' : 'Meta criada';
+    detail = `${proposed.name ?? args.name} — alvo ${fmtCents(proposed.targetInCents ?? args.targetInCents)} até ${proposed.targetDate ?? args.targetDate}`;
     Icon = Target;
   } else if (action.tool === 'create_budget') {
-    label = res?.action === 'updated' ? 'Orçamento atualizado' : 'Orçamento criado';
-    detail = `${args.category} — limite ${fmtCents(args.limitInCents)}/mês`;
+    label = dryRun ? 'Proposta: orçamento' : (res?.action === 'updated' ? 'Orçamento atualizado' : 'Orçamento criado');
+    detail = `${proposed.category ?? args.category} — limite ${fmtCents(proposed.limitInCents ?? args.limitInCents)}/mês`;
     Icon = PieChart;
   } else if (action.tool === 'list_documents') {
     label = 'Documentos listados';
@@ -187,14 +193,19 @@ function ActionCard({ action }: { action: AgentAction }) {
     Icon = FileSearch;
   }
 
+  const tone = !success ? 'rose' : dryRun ? 'amber' : 'emerald';
+  const toneCls = {
+    rose:    { box: 'bg-rose-50 border-rose-200', icon: 'text-rose-500', title: 'text-rose-800', body: 'text-rose-700' },
+    amber:   { box: 'bg-amber-50 border-amber-200', icon: 'text-amber-600', title: 'text-amber-900', body: 'text-amber-800' },
+    emerald: { box: 'bg-emerald-50 border-emerald-200', icon: 'text-emerald-500', title: 'text-emerald-800', body: 'text-emerald-700' },
+  }[tone];
+
   return (
-    <div className={`flex items-start gap-2 px-3 py-2 rounded-xl border text-[11px] mt-1 ${
-      success ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
-    }`}>
-      <Icon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${success ? 'text-emerald-500' : 'text-rose-500'}`} />
+    <div className={`flex items-start gap-2 px-3 py-2 rounded-xl border text-[11px] mt-1 ${toneCls.box}`}>
+      <Icon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${toneCls.icon}`} />
       <div className="min-w-0">
-        <p className={`font-bold ${success ? 'text-emerald-800' : 'text-rose-800'}`}>{label}</p>
-        <p className={`break-words ${success ? 'text-emerald-700' : 'text-rose-700'}`}>{detail}</p>
+        <p className={`font-bold ${toneCls.title}`}>{label}</p>
+        <p className={`break-words ${toneCls.body}`}>{detail}</p>
       </div>
     </div>
   );
@@ -256,10 +267,18 @@ function ChatTab() {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
 
-  const send = async (text: string) => {
+  const send = async (text: string, opts?: { confirm?: boolean; skipUserBubble?: boolean }) => {
     if (!text.trim() || loading) return;
-    const userMsg: ChatMessage = { role: 'user', content: text.trim(), ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) };
-    setMessages(prev => [...prev, userMsg]);
+    const confirm = opts?.confirm === true;
+    const trimmed = text.trim();
+    if (!opts?.skipUserBubble) {
+      const userMsg: ChatMessage = {
+        role: 'user',
+        content: confirm ? `Confirmar: ${trimmed}` : trimmed,
+        ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages(prev => [...prev, userMsg]);
+    }
     setInput('');
     setLoading(true);
     setError('');
@@ -271,7 +290,7 @@ function ChatTab() {
       const res = await fetch('/api/ai/agent-chat', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ message: text.trim(), history }),
+        body: JSON.stringify({ message: trimmed, history, confirm }),
       });
       const data = await res.json();
       if (res.status === 429 || data.error === 'RATE_LIMIT') { setShowKeyPanel(true); setError(''); return; }
@@ -285,11 +304,13 @@ function ChatTab() {
         }]);
         return;
       }
-      setMessages(prev => [...prev, {
+      setMessages(prev => [...prev.map(m => ({ ...m, needsConfirm: false })), {
         role: 'assistant',
         content: data.reply,
         ts: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         actions: data.actions ?? [],
+        needsConfirm: data.needsConfirm === true,
+        pendingConfirmText: data.needsConfirm === true ? trimmed : undefined,
       }]);
     } catch {
       setMessages(prev => [...prev, {
@@ -350,6 +371,17 @@ function ChatTab() {
                   {m.actions.map((a, ai) => <ActionCard key={ai} action={a} />)}
                 </div>
               )}
+              {m.role === 'assistant' && m.needsConfirm && m.pendingConfirmText && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => send(m.pendingConfirmText!, { confirm: true })}
+                  className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition-colors"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Confirmar e gravar
+                </button>
+              )}
               <span className="text-[10px] text-slate-400 px-1">{m.ts}</span>
             </div>
           </div>
@@ -403,7 +435,7 @@ function ChatTab() {
         </button>
       </div>
       <p className="text-[10px] text-slate-400 text-center mt-2">
-        Agente com acesso aos seus dados reais. Pode criar metas, despesas e orçamentos diretamente. Para cotações ao vivo, use o widget.
+        Criação de metas, despesas e orçamentos exige confirmação antes de gravar. Para cotações ao vivo, use o widget.
       </p>
     </div>
   );

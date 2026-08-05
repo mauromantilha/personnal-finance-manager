@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Tenant, Variables } from '../index';
 import { deleteAccessApp, addPagesDomain, removeCfAccessDnsPlaceholder, listAccessApps, updateAccessAppName, deleteD1Database, deleteR2ObjectsWithPrefix } from '../lib/cf-api';
+import { isTenantStatus } from '../lib/tenant-constants';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -52,7 +53,12 @@ router.put('/families/:subdomain', async (c) => {
       return c.json({ error: 'name: 2-60 caracteres, apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
     tenant.name = n;
   }
-  if (updates.status !== undefined) tenant.status = updates.status;
+  if (updates.status !== undefined) {
+    if (!isTenantStatus(updates.status)) {
+      return c.json({ error: 'status inválido. Use: pending | active | suspended | deleted.' }, 400);
+    }
+    tenant.status = updates.status;
+  }
   if (updates.tier   !== undefined) tenant.tier   = updates.tier;
   // Admin pode aprovar upgrade de storage via storageTierBytes
   const rawTierBytes = (updates as any).storageTierBytes;

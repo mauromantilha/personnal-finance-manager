@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // tinypool threads estoura stack neste ambiente (CI/sandbox); forks é estável
+    pool: 'forks',
   },
 });

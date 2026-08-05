@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { mapInvestment } from '../lib/mappers';
 import { groqChat } from '../lib/groq';
+import { requireOwner } from '../lib/authz';
 
 const VALID_CLASSES = ['fixed_income', 'stocks', 'fii', 'crypto', 'international', 'other'];
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -12,7 +13,7 @@ router.get('/investments', async (c) => {
   return c.json(rows.map(mapInvestment));
 });
 
-router.post('/investments', async (c) => {
+router.post('/investments', requireOwner, async (c) => {
   const db = c.get('db');
   const { name, ticker, assetClass, institution, investedInCents,
           currentValueInCents, annualRate, startDate, maturityDate, accountId, notes } = await c.req.json<any>();
@@ -38,7 +39,7 @@ router.post('/investments', async (c) => {
   return c.json({ id }, 201);
 });
 
-router.put('/investments/:id', async (c) => {
+router.put('/investments/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   const { name, ticker, institution, currentValueInCents, annualRate, maturityDate, notes } = await c.req.json<any>();
@@ -63,7 +64,7 @@ router.put('/investments/:id', async (c) => {
   return c.json({ success: true });
 });
 
-router.delete('/investments/:id', async (c) => {
+router.delete('/investments/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   const row = await db.first('SELECT id FROM investments WHERE id = ?', [id]);
@@ -73,7 +74,7 @@ router.delete('/investments/:id', async (c) => {
 });
 
 // ── POST /api/investments/ai-import ──────────────────────────────────────────
-router.post('/investments/ai-import', async (c) => {
+router.post('/investments/ai-import', requireOwner, async (c) => {
   const { base64, mimeType } = await c.req.json<any>();
   if (!base64 || !mimeType)
     return c.json({ error: 'base64 e mimeType são obrigatórios.' }, 400);

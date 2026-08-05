@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { mapCreditCard, mapInvoice, DbInvoice } from '../lib/mappers';
+import { requireOwner } from '../lib/authz';
 import { ensureTenantSchema } from '../lib/ensure-schema';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -12,7 +13,7 @@ router.get('/credit-cards', async (c) => {
   return c.json(rows.map(mapCreditCard as any));
 });
 
-router.post('/credit-cards', async (c) => {
+router.post('/credit-cards', requireOwner, async (c) => {
   const db = c.get('db');
   let body: any;
   try {
@@ -57,7 +58,7 @@ router.post('/credit-cards', async (c) => {
   }
 });
 
-router.put('/credit-cards/:id', async (c) => {
+router.put('/credit-cards/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   const { name, bankName, lastFour, limitInCents, billingDay, dueDay, color } = await c.req.json<any>();
@@ -84,7 +85,7 @@ router.put('/credit-cards/:id', async (c) => {
   }
 });
 
-router.delete('/credit-cards/:id', async (c) => {
+router.delete('/credit-cards/:id', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   await db.exec('UPDATE credit_cards SET is_active = 0 WHERE id = ?', [id]);
@@ -107,7 +108,7 @@ router.get('/invoices', async (c) => {
   return c.json(rows.map(mapInvoice as any));
 });
 
-router.post('/invoices/:id/pay', async (c) => {
+router.post('/invoices/:id/pay', requireOwner, async (c) => {
   const db = c.get('db');
   const { id } = c.req.param();
   const { accountId } = await c.req.json<any>();

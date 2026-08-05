@@ -4,12 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "node scripts/dev-parity.mjs",
+    "dev:parity": "node scripts/dev-parity.mjs",
+    "dev:bff": "tsx server.ts",
+    "dev:web": "vite --host 0.0.0.0 --port 5173",
+    "dev:api": "npm run dev --prefix workers/finance -- --port 8787 --ip 127.0.0.1",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:finance": "npm test --prefix workers/finance",
+    "test:admin": "npm test --prefix workers/admin"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

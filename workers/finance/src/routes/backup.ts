@@ -1,11 +1,40 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
-import { r2Put } from '../lib/r2';
+import { r2Put, r2Delete } from '../lib/r2';
 import { mapAccount, mapTransaction, mapBudget, mapGoal, mapAlert } from '../lib/mappers';
 import { D1Stmt } from '../lib/d1';
 import { recalculateBudgets } from '../lib/helpers';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/** Seed mínimo de categorias após reset (espelha 0003 — pais principais). */
+const CATEGORY_SEED: D1Stmt[] = [
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-alimentacao','Alimentação',NULL,'🍽️','#EA580C','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-transporte','Transporte',NULL,'🚗','#0284C7','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-moradia','Moradia',NULL,'🏠','#7C3AED','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-saude','Saúde',NULL,'❤️','#DC2626','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-educacao','Educação',NULL,'📚','#0891B2','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-lazer','Lazer',NULL,'🎮','#16A34A','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-vestuario','Vestuário',NULL,'👕','#DB2777','expense')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-investimentos','Investimentos',NULL,'📈','#059669','both')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-receita','Receita',NULL,'💰','#EAB308','income')" },
+  { sql: "INSERT OR IGNORE INTO categories VALUES ('cat-outros','Outros',NULL,'📦','#6B7280','both')" },
+];
+
+async function wipeR2Prefix(bucket: R2Bucket, prefix: string): Promise<number> {
+  let deleted = 0;
+  let cursor: string | undefined;
+  do {
+    const listed = await bucket.list({ prefix: `${prefix}/`, cursor, limit: 500 });
+    const keys = listed.objects.map(o => o.key);
+    if (keys.length) {
+      await Promise.all(keys.map(k => r2Delete(bucket, k)));
+      deleted += keys.length;
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+  return deleted;
+}
 
 // ── POST /api/backup — snapshot para R2 ──────────────────────────────────────
 router.post('/backup', async (c) => {
@@ -31,31 +60,46 @@ router.post('/backup', async (c) => {
   return c.json({ success: true, key, records: { accounts: (accounts as any[]).length, transactions: (transactions as any[]).length } });
 });
 
-// ── POST /api/reset — apaga todos os dados (owner only) ───────────────────────
+// ── POST /api/reset — apaga dados financeiros (mantém users/lgpd) ─────────────
 router.post('/reset', async (c) => {
   const user = c.get('user');
   if (user.role !== 'owner') return c.json({ error: 'Apenas o owner pode resetar os dados.' }, 403);
 
-  const db = c.get('db');
+  const db     = c.get('db');
+  const tenant = c.get('tenant');
+
   const stmts: D1Stmt[] = [
     { sql: 'DELETE FROM transactions' },
+    { sql: 'DELETE FROM invoices' },
+    { sql: 'DELETE FROM credit_cards' },
     { sql: 'DELETE FROM accounts' },
     { sql: 'DELETE FROM connections' },
     { sql: 'DELETE FROM budgets' },
     { sql: 'DELETE FROM goals' },
     { sql: 'DELETE FROM alerts' },
     { sql: 'DELETE FROM chat_history' },
-    { sql: 'DELETE FROM credit_cards' },
-    { sql: 'DELETE FROM invoices' },
     { sql: 'DELETE FROM recurrences' },
     { sql: 'DELETE FROM installment_groups' },
     { sql: 'DELETE FROM investments' },
     { sql: 'DELETE FROM debts' },
+    { sql: 'DELETE FROM family_members' },
+    { sql: 'DELETE FROM categories' },
+    { sql: 'DELETE FROM invites' },
+    // users + lgpd_aceites preservados de propósito
   ];
 
   await db.batch(stmts);
+  await db.batch(CATEGORY_SEED);
   await recalculateBudgets(db);
-  return c.json({ success: true });
+
+  let r2Deleted = 0;
+  try {
+    r2Deleted = await wipeR2Prefix(c.env.MKS_DOCUMENTS, tenant.r2Prefix);
+  } catch (e) {
+    console.error('[reset] R2 wipe:', (e as Error).message);
+  }
+
+  return c.json({ success: true, r2Deleted });
 });
 
 export default router;
