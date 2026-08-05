@@ -341,8 +341,11 @@ app.route('/api', maintenanceRoutes);
 
 // ── SPA ───────────────────────────────────────────────────────────────────────
 app.get('*', (c) => {
+  const nonce = c.get('cspNonce');
   c.header('Cache-Control', 'no-store');
-  return c.html(adminHtml(c.env.BASE_DOMAIN, c.get('cspNonce')));
+  // Reforça CSP do painel (nonce) — evita regressão se Host/BASE_DOMAIN divergir
+  c.header('Content-Security-Policy', adminCsp(nonce));
+  return c.html(adminHtml(c.env.BASE_DOMAIN, nonce));
 });
 
 // ── Handler exportado: fetch (Hono) + scheduled (cron de manutenção) ─────────

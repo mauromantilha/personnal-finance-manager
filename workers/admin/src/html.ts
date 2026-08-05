@@ -747,7 +747,7 @@ function initStatusChart(active, suspended, deleted) {
 
 function initResourceChart(d1Cur, d1Lim, ztCur, ztLim) {
   var canvas = el('chart-res');
-  if (!canvas) return;
+  if (!canvas || typeof Chart === 'undefined') return;
   if (charts.res) { charts.res.destroy(); charts.res = null; }
   var d1Pct = d1Lim > 0 ? Math.min(d1Cur / d1Lim * 100, 100) : 0;
   var ztPct = ztLim > 0 ? Math.min(ztCur / ztLim * 100, 100) : 0;
@@ -970,7 +970,7 @@ function renderNOC(data) {
     var values = top.map(function(db) { return Math.round((db.fileSize || 0) / 1024); });
     setTimeout(function() {
       var canvas = el('chart-noc-d1');
-      if (!canvas) return;
+      if (!canvas || typeof Chart === 'undefined') return;
       if (charts.d1) { charts.d1.destroy(); charts.d1 = null; }
       charts.d1 = new Chart(canvas, {
         type: 'bar',
@@ -1073,7 +1073,7 @@ async function deleteFamily(sub) {
 }
 
 async function wipeFamilyData(sub) {
-  if (!confirm('Limpar TODOS os dados financeiros de "' + sub + '"?\n\nRemove contas, lançamentos, cartões, orçamentos, metas e seed demo.\nMantém usuários, categorias e aceite LGPD.')) return;
+  if (!confirm('Limpar TODOS os dados financeiros de "' + sub + '"?\\n\\nRemove contas, lançamentos, cartões, orçamentos, metas e seed demo.\\nMantém usuários, categorias e aceite LGPD.')) return;
   if (!confirm('Confirma limpeza de "' + sub + '"? Esta ação não tem desfazer.')) return;
   var data = await api('POST', '/families/' + sub + '/wipe-data', {}, 60000, { 'X-Confirm-Subdomain': sub });
   if (data.success) showToast('Dados de "' + sub + '" limpos. Família pronta para uso.');
@@ -1258,7 +1258,7 @@ async function loadSecurity() {
 // ── Chart helpers ────────────────────────────────────────────────
 function drawSparkline(canvasId, labels, data, color, label) {
   var canvas = el(canvasId);
-  if (!canvas) return;
+  if (!canvas || typeof Chart === 'undefined') return;
   if (charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
   if (!labels.length) return;
   charts[canvasId] = new Chart(canvas, {
@@ -1286,7 +1286,7 @@ function drawSparkline(canvasId, labels, data, color, label) {
 
 function drawBars(canvasId, labels, data) {
   var canvas = el(canvasId);
-  if (!canvas) return;
+  if (!canvas || typeof Chart === 'undefined') return;
   if (charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
   if (!labels.length) return;
   var colors = [
