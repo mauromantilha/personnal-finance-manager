@@ -487,7 +487,9 @@ router.post('/public/confirm-and-provision', async (c) => {
     return c.json({ ok: false, error: 'Conta não encontrada.' }, 404);
   }
 
-  const tenant = JSON.parse(tenantRaw) as PendingTenant & { status: string };
+  const tenant = JSON.parse(tenantRaw) as Omit<PendingTenant, 'status'> & {
+    status: 'pending' | 'active' | 'suspended' | 'deleted';
+  };
   const loginUrl = `https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`;
 
   if (tenant.status === 'active') {
@@ -506,7 +508,11 @@ router.post('/public/confirm-and-provision', async (c) => {
     return c.json({ ok: false, error: `Conta não pode ser ativada (status: ${tenant.status}).` }, 422);
   }
 
-  const result = await activatePending(c.env, { ...tenant, status: 'pending' }, rec.email);
+  const result = await activatePending(
+    c.env,
+    { ...tenant, status: 'pending' satisfies PendingTenant['status'] },
+    rec.email,
+  );
   if (!result.ok) {
     return c.json({ ok: false, error: result.error }, result.status as 400 | 500);
   }
