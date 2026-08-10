@@ -45,6 +45,7 @@ AUTO_CLEANUP     = "false"
 # TURNSTILE_SECRET_KEY
 # CPF_SALT              — PBKDF2 salt para hash de CPF (gere com openssl rand -hex 32)
 # APP_SECRET            — HMAC para tokens de verificação de email (gere com openssl rand -hex 32)
+# SIGNUP_PROXY_KEY      — X-Signup-Proxy-Key do mksbrasil.com (reserve/confirm site-owned)
 
 # Service binding: se a rota ampla *.financaslivre.com/* interceptar /api/*,
 # o Admin encaminha ao Finance Worker em vez de proxiar HTML do Pages.

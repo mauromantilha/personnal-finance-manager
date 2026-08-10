@@ -1,6 +1,8 @@
 /**
  * POST /public/register — auto-cadastro (sem CF Access JWT).
- * Pré-verify: só KV pending + e-mail. D1/Access nascem no POST /public/verify.
+ * Pré-verify: só KV pending. Com X-MKS-Site-Owns-Verification o site envia o e-mail
+ * (cadastro@mksbrasil.com); senão o Worker envia via Resend.
+ * D1/Access nascem no POST /public/verify ou /public/confirm-and-provision.
  */
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -36,7 +38,8 @@ async function hmacSha256hex(text: string, secret: string): Promise<string> {
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const PBKDF2_ITERATIONS = 250_000;
+/** Iterações suficientes para dedup de CPF sem estourar CPU do Worker (250k causava 1102). */
+const PBKDF2_ITERATIONS = 60_000;
 async function pbkdf2Cpf(cpf: string, salt: string): Promise<string> {
   const baseKey = await crypto.subtle.importKey(
     'raw', new TextEncoder().encode(cpf),
@@ -73,6 +76,21 @@ async function verifyTurnstile(secret: string, token: string, ip: string): Promi
   });
   const data = await res.json<{ success: boolean }>();
   return data.success === true;
+}
+
+function siteOwnsVerification(c: Context<{ Bindings: Env }>): boolean {
+  return (c.req.header('X-MKS-Site-Owns-Verification') ?? '').trim() === '1';
+}
+
+function proxyKeyIsValid(c: Context<{ Bindings: Env }>): boolean {
+  const expected = (c.env.SIGNUP_PROXY_KEY ?? '').trim();
+  if (!expected) return true;
+  const presented = (c.req.header('X-Signup-Proxy-Key') ?? '').trim();
+  if (!presented || presented.length !== expected.length) return false;
+  // compare constante-tempo simples
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ presented.charCodeAt(i);
+  return diff === 0;
 }
 
 function randomTokenId(): string {
@@ -270,119 +288,238 @@ async function activatePending(
 // ── POST /public/register ─────────────────────────────────────────────────────
 
 router.post('/public/register', async (c) => {
-  const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For') ?? 'unknown';
+  // Proxy do mksbrasil.com envia o IP real do visitante; sem isso o Turnstile
+  // valida contra o IP do Worker e pode falhar de forma intermitente.
+  const ip =
+    c.req.header('X-MKS-Client-IP')?.split(',')[0]?.trim() ||
+    c.req.header('CF-Connecting-IP') ||
+    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
+    'unknown';
 
-  const rlKey = `ratelimit:reg:${ip}`;
-  const rlRaw = await c.env.MKS_TENANTS.get(rlKey);
-  const attempts = rlRaw ? parseInt(rlRaw) : 0;
-  if (attempts >= RATE_LIMIT_MAX) {
-    return c.json({ error: 'Muitas tentativas. Aguarde 10 minutos e tente novamente.' }, 429);
+  try {
+    const rlKey = `ratelimit:reg:${ip}`;
+    const rlRaw = await c.env.MKS_TENANTS.get(rlKey);
+    const attempts = rlRaw ? parseInt(rlRaw) : 0;
+    if (attempts >= RATE_LIMIT_MAX) {
+      return c.json({ error: 'Muitas tentativas. Aguarde 10 minutos e tente novamente.' }, 429);
+    }
+    await c.env.MKS_TENANTS.put(rlKey, String(attempts + 1), { expirationTtl: RATE_LIMIT_WINDOW });
+
+    let body: any;
+    try { body = await c.req.json(); } catch {
+      return c.json({ error: 'Corpo da requisição inválido.' }, 400);
+    }
+    const { name, subdomain, email, cpf, turnstileToken } = body ?? {};
+    const siteOwns = siteOwnsVerification(c);
+
+    if (siteOwns && !proxyKeyIsValid(c)) {
+      return c.json({ error: 'Canal de cadastro não autorizado.' }, 403);
+    }
+
+    if (!name || !subdomain || !email || !cpf || !turnstileToken)
+      return c.json({ error: 'Campos obrigatórios: nome, subdomínio, email, CPF e captcha.' }, 400);
+
+    const nameStr = String(name).trim();
+    if (nameStr.length < 2 || nameStr.length > 60 || !/^[\p{L}\p{N} .'\-]+$/u.test(nameStr))
+      return c.json({ error: 'Nome: 2-60 caracteres. Use apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
+
+    if (!/^[a-z0-9-]{2,30}$/.test(subdomain))
+      return c.json({ error: 'Subdomínio: 2-30 caracteres, letras minúsculas, números e hífens.' }, 400);
+    if (subdomain.startsWith('-') || subdomain.endsWith('-') || isReservedSubdomain(subdomain))
+      return c.json({ error: `O subdomínio "${subdomain}" não está disponível. Escolha outro.` }, 400);
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
+      return c.json({ error: 'E-mail inválido.' }, 400);
+
+    const turnstileOk = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, turnstileToken, ip);
+    if (!turnstileOk)
+      return c.json({ error: 'Verificação de segurança falhou. Recarregue a página e tente novamente.' }, 400);
+
+    if (!isValidCPF(cpf))
+      return c.json({ error: 'CPF inválido.' }, 400);
+
+    const cpfDigits = cpf.replace(/\D/g, '');
+    const cpfSalt   = c.env.CPF_SALT;
+    if (!cpfSalt) return c.json({ error: 'Serviço temporariamente indisponível.' }, 503);
+
+    const cpfHashV2 = await pbkdf2Cpf(cpfDigits, cpfSalt);
+    const cpfHashV1 = await hmacSha256hex(cpfDigits, cpfSalt);
+
+    const [existingV2, existingV1] = await Promise.all([
+      c.env.MKS_TENANTS.get(`cpf2:${cpfHashV2}`),
+      c.env.MKS_TENANTS.get(`cpf:${cpfHashV1}`),
+    ]);
+    if (existingV2 || existingV1)
+      return c.json({ error: 'Este CPF já possui uma conta cadastrada.' }, 409);
+
+    const existingSub = await c.env.MKS_TENANTS.get(`tenant:${subdomain}`);
+    if (existingSub)
+      return c.json({ error: `O subdomínio "${subdomain}" já está em uso. Escolha outro.` }, 409);
+
+    const { BASE_DOMAIN, RESEND_API_KEY, RESEND_FROM_DOMAIN } = c.env;
+    if (!siteOwns && !RESEND_API_KEY) {
+      return c.json({ error: 'Envio de e-mail indisponível no momento. Tente mais tarde.' }, 503);
+    }
+
+    const familyId = `fam-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const ownerEmailHash = (await sha256hex(email.toLowerCase())).slice(0, 32);
+    const tokenId = randomTokenId();
+
+    // Stub pending — sem D1/Access até o verify
+    const tenant: PendingTenant = {
+      name: nameStr,
+      subdomain,
+      familyId,
+      tier: 1,
+      d1DatabaseId: '',
+      r2Bucket: 'mks-documents',
+      r2Prefix: familyId,
+      accessAppId: '',
+      accessAppAud: '',
+      accessPolicyId: '',
+      ownerEmailHash,
+      ownerEmail: email,
+      cpfHash: cpfHashV2,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      verifyTokenId: tokenId,
+    };
+
+    const verifyRec: VerifyRecord = {
+      subdomain,
+      email: email.toLowerCase(),
+      exp: Math.floor(Date.now() / 1000) + VERIFY_TTL_SECONDS,
+    };
+
+    await Promise.all([
+      c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant)),
+      c.env.MKS_TENANTS.put(`cpf2:${cpfHashV2}`, familyId),
+      c.env.MKS_TENANTS.put(`email:${ownerEmailHash}`, subdomain),
+      c.env.MKS_TENANTS.put(`verify:${tokenId}`, JSON.stringify(verifyRec), {
+        expirationTtl: VERIFY_TTL_SECONDS,
+      }),
+    ]);
+
+    let index: string[] = [];
+    try {
+      index = JSON.parse(await c.env.MKS_TENANTS.get('tenants:index') ?? '[]');
+      if (!Array.isArray(index)) index = [];
+    } catch {
+      index = [];
+    }
+    if (!index.includes(subdomain)) index.push(subdomain);
+    await Promise.all([
+      c.env.MKS_TENANTS.put('tenants:index', JSON.stringify(index)),
+      c.env.MKS_TENANTS.put('tenants:count', String(index.length)),
+    ]);
+
+    // Site MKS envia o e-mail (cadastro@mksbrasil.com) — só reserva + devolve token.
+    if (siteOwns) {
+      return c.json({
+        ok: true,
+        success: true,
+        pending: true,
+        pending_email_verification: true,
+        verification_token: tokenId,
+        message: 'Cadastro reservado. Envie o e-mail de validação pelo site.',
+      }, 202);
+    }
+
+    const verifyUrl = `https://admin.${BASE_DOMAIN}/public/verify?token=${encodeURIComponent(tokenId)}`;
+    c.executionCtx.waitUntil(
+      sendVerificationEmail(RESEND_API_KEY, email, nameStr, verifyUrl, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
+    );
+
+    return c.json({
+      success: true,
+      pending: true,
+      message: 'Verifique seu e-mail para ativar a conta.',
+    }, 201);
+  } catch (e) {
+    console.error('[public/register]', e);
+    return c.json({
+      error: 'Não foi possível concluir o cadastro. Tente novamente em instantes.',
+      detail: e instanceof Error ? e.message : String(e),
+    }, 500);
   }
-  await c.env.MKS_TENANTS.put(rlKey, String(attempts + 1), { expirationTtl: RATE_LIMIT_WINDOW });
+});
 
-  let body: any;
-  try { body = await c.req.json(); } catch {
-    return c.json({ error: 'Corpo da requisição inválido.' }, 400);
+// ── POST /public/confirm-and-provision — site MKS após Turnstile ──────────────
+
+router.post('/public/confirm-and-provision', async (c) => {
+  if (!proxyKeyIsValid(c)) {
+    return c.json({ ok: false, error: 'Canal de cadastro não autorizado.' }, 403);
   }
-  const { name, subdomain, email, cpf, turnstileToken } = body ?? {};
 
-  if (!name || !subdomain || !email || !cpf || !turnstileToken)
-    return c.json({ error: 'Campos obrigatórios: nome, subdomínio, email, CPF e captcha.' }, 400);
+  let body: { token?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Corpo da requisição inválido.' }, 400);
+  }
 
-  const nameStr = String(name).trim();
-  if (nameStr.length < 2 || nameStr.length > 60 || !/^[\p{L}\p{N} .'\-]+$/u.test(nameStr))
-    return c.json({ error: 'Nome: 2-60 caracteres. Use apenas letras, números, espaço, ponto, apóstrofo e hífen.' }, 400);
+  const token = typeof body?.token === 'string' ? body.token.trim() : '';
+  if (token.length < 32) {
+    return c.json({ ok: false, error: 'Token inválido.' }, 400);
+  }
 
-  if (!/^[a-z0-9-]{2,30}$/.test(subdomain))
-    return c.json({ error: 'Subdomínio: 2-30 caracteres, letras minúsculas, números e hífens.' }, 400);
-  if (subdomain.startsWith('-') || subdomain.endsWith('-') || isReservedSubdomain(subdomain))
-    return c.json({ error: `O subdomínio "${subdomain}" não está disponível. Escolha outro.` }, 400);
+  const verifyKey = `verify:${token}`;
+  const raw = await c.env.MKS_TENANTS.get(verifyKey);
+  if (!raw) {
+    return c.json({ ok: false, error: 'Token inválido ou já utilizado.' }, 404);
+  }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
-    return c.json({ error: 'E-mail inválido.' }, 400);
+  await c.env.MKS_TENANTS.delete(verifyKey);
 
-  const turnstileOk = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, turnstileToken, ip);
-  if (!turnstileOk)
-    return c.json({ error: 'Verificação de segurança falhou. Recarregue a página e tente novamente.' }, 400);
+  let rec: VerifyRecord;
+  try {
+    rec = JSON.parse(raw) as VerifyRecord;
+  } catch {
+    return c.json({ ok: false, error: 'Token corrompido.' }, 400);
+  }
 
-  if (!isValidCPF(cpf))
-    return c.json({ error: 'CPF inválido.' }, 400);
+  if (typeof rec.exp !== 'number' || rec.exp < Math.floor(Date.now() / 1000)) {
+    return c.json({ ok: false, error: 'Token expirado. Refaça o cadastro no site.' }, 410);
+  }
 
-  const cpfDigits = cpf.replace(/\D/g, '');
-  const cpfSalt   = c.env.CPF_SALT;
-  if (!cpfSalt) return c.json({ error: 'Serviço temporariamente indisponível.' }, 503);
+  const tenantRaw = await c.env.MKS_TENANTS.get(`tenant:${rec.subdomain}`);
+  if (!tenantRaw) {
+    return c.json({ ok: false, error: 'Conta não encontrada.' }, 404);
+  }
 
-  const cpfHashV2 = await pbkdf2Cpf(cpfDigits, cpfSalt);
-  const cpfHashV1 = await hmacSha256hex(cpfDigits, cpfSalt);
+  const tenant = JSON.parse(tenantRaw) as PendingTenant & { status: string };
+  const loginUrl = `https://${tenant.subdomain}.${c.env.BASE_DOMAIN}`;
 
-  const [existingV2, existingV1] = await Promise.all([
-    c.env.MKS_TENANTS.get(`cpf2:${cpfHashV2}`),
-    c.env.MKS_TENANTS.get(`cpf:${cpfHashV1}`),
-  ]);
-  if (existingV2 || existingV1)
-    return c.json({ error: 'Este CPF já possui uma conta cadastrada.' }, 409);
+  if (tenant.status === 'active') {
+    return c.json({
+      ok: true,
+      success: true,
+      already_completed: true,
+      provisioned: true,
+      login_url: loginUrl,
+      url: loginUrl,
+      message: 'Cadastro já concluído.',
+    });
+  }
 
-  const existingSub = await c.env.MKS_TENANTS.get(`tenant:${subdomain}`);
-  if (existingSub)
-    return c.json({ error: `O subdomínio "${subdomain}" já está em uso. Escolha outro.` }, 409);
+  if (tenant.status !== 'pending') {
+    return c.json({ ok: false, error: `Conta não pode ser ativada (status: ${tenant.status}).` }, 422);
+  }
 
-  const { BASE_DOMAIN, RESEND_API_KEY, RESEND_FROM_DOMAIN } = c.env;
-  const familyId = `fam-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
-  const ownerEmailHash = (await sha256hex(email.toLowerCase())).slice(0, 32);
-  const tokenId = randomTokenId();
+  const result = await activatePending(c.env, { ...tenant, status: 'pending' }, rec.email);
+  if (!result.ok) {
+    return c.json({ ok: false, error: result.error }, result.status as 400 | 500);
+  }
 
-  // Stub pending — sem D1/Access até o verify
-  const tenant: PendingTenant = {
-    name: nameStr,
-    subdomain,
-    familyId,
-    tier: 1,
-    d1DatabaseId: '',
-    r2Bucket: 'mks-documents',
-    r2Prefix: familyId,
-    accessAppId: '',
-    accessAppAud: '',
-    accessPolicyId: '',
-    ownerEmailHash,
-    ownerEmail: email,
-    cpfHash: cpfHashV2,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-    verifyTokenId: tokenId,
-  };
-
-  const verifyRec: VerifyRecord = {
-    subdomain,
-    email: email.toLowerCase(),
-    exp: Math.floor(Date.now() / 1000) + VERIFY_TTL_SECONDS,
-  };
-
-  await Promise.all([
-    c.env.MKS_TENANTS.put(`tenant:${subdomain}`, JSON.stringify(tenant)),
-    c.env.MKS_TENANTS.put(`cpf2:${cpfHashV2}`, familyId),
-    c.env.MKS_TENANTS.put(`email:${ownerEmailHash}`, subdomain),
-    c.env.MKS_TENANTS.put(`verify:${tokenId}`, JSON.stringify(verifyRec), {
-      expirationTtl: VERIFY_TTL_SECONDS,
-    }),
-  ]);
-
-  const index: string[] = JSON.parse(await c.env.MKS_TENANTS.get('tenants:index') ?? '[]');
-  if (!index.includes(subdomain)) index.push(subdomain);
-  await Promise.all([
-    c.env.MKS_TENANTS.put('tenants:index', JSON.stringify(index)),
-    c.env.MKS_TENANTS.put('tenants:count', String(index.length)),
-  ]);
-
-  const verifyUrl = `https://admin.${BASE_DOMAIN}/public/verify?token=${encodeURIComponent(tokenId)}`;
-  c.executionCtx.waitUntil(
-    sendVerificationEmail(RESEND_API_KEY, email, nameStr, verifyUrl, BASE_DOMAIN, RESEND_FROM_DOMAIN || BASE_DOMAIN),
-  );
-
+  const url = `https://${result.subdomain}.${c.env.BASE_DOMAIN}`;
   return c.json({
+    ok: true,
     success: true,
-    pending: true,
-    message: 'Verifique seu e-mail para ativar a conta.',
-  }, 201);
+    provisioned: true,
+    login_url: url,
+    url,
+    message: 'E-mail validado. Ambiente provisionado — acesse com o e-mail informado.',
+  }, 202);
 });
 
 // ── GET /public/verify — página de confirmação (não ativa; evita prefetch) ─────

@@ -36,6 +36,8 @@ export interface Env {
   TURNSTILE_SECRET_KEY: string;
   CPF_SALT:            string;
   APP_SECRET:          string;  // HMAC para tokens de verificação de email
+  /** Proxy key do site mksbrasil.com (X-Signup-Proxy-Key). Vazio = não exige. */
+  SIGNUP_PROXY_KEY?:   string;
   AUTO_CLEANUP?:       string;  // "true" habilita o cron de limpeza de pendentes (destrutivo)
   FINANCE?:            Fetcher; // service binding → mks-finance (API dos tenants)
 }
