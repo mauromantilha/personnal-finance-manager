@@ -25,6 +25,7 @@ import backupRoutes       from './routes/backup';
 import debtRoutes         from './routes/debts';
 import storageRoutes      from './routes/storage';
 import consentRoutes      from './routes/consents';
+import notificationRoutes from './routes/notifications';
 
 const LGPD_CURRENT_VERSION = '2.0';
 
@@ -40,6 +41,8 @@ export interface Env {
   CF_API_TOKEN:       string;
   GROQ_API_KEY:       string;
   RESEND_API_KEY:     string;
+  CF_EMAIL_TOKEN?:    string;
+  AI?:                any;
   ASAAS_API_KEY?:     string;
   ASAAS_WEBHOOK_SECRET?: string;
   ASAAS_ENVIRONMENT?: string;
@@ -272,6 +275,16 @@ app.route('/api', backupRoutes);
 app.route('/api', debtRoutes);
 app.route('/api', storageRoutes);
 app.route('/api', consentRoutes);
+app.route('/api', notificationRoutes);
+
+// ── Global Error Handler: Garante que NENHUM erro 500 saia como texto cru ───
+app.onError((err, c) => {
+  console.error('Unhandled Worker Error:', err);
+  return c.json({
+    error: err?.message || 'Erro interno do servidor',
+    code: 'INTERNAL_SERVER_ERROR',
+  }, 500);
+});
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.all('*', (c) => c.json({ error: 'Rota não encontrada' }, 404));

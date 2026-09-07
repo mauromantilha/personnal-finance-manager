@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
-import { groqChat, classifyMerchant } from '../lib/groq';
+import { classifyMerchant } from '../lib/groq';
+import { executeVisionAI, safeExtractJSON } from '../lib/cf-ai';
 import { r2Put, r2Get } from '../lib/r2';
 import { mapCreditCard, DbCreditCard } from '../lib/mappers';
 import { recalculateBudgets } from '../lib/helpers';
@@ -16,17 +17,75 @@ const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ── GET /api/documents — lista documentos do tenant no R2 ────────────────────
 router.get('/documents', async (c) => {
-  const tenant = c.get('tenant');
-  const prefix = `${tenant.r2Prefix}/documents/`;
-  const listed = await c.env.MKS_DOCUMENTS.list({ prefix, limit: 500 });
-  const docs = listed.objects.map(obj => ({
-    key:        obj.key,
-    name:       obj.key.split('/').pop() ?? obj.key,
-    size:       obj.size,
-    uploadedAt: obj.uploaded.toISOString(),
-  }));
-  docs.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
-  return c.json({ documents: docs });
+  try {
+    const tenant = c.get('tenant');
+    if (!c.env.MKS_DOCUMENTS) {
+      return c.json({ documents: [] });
+    }
+    const prefix = `${tenant.r2Prefix}/documents/`;
+    const listed = await c.env.MKS_DOCUMENTS.list({ prefix, limit: 500 });
+    const docs = (listed.objects || []).map(obj => ({
+      key:        obj.key,
+      name:       obj.key.split('/').pop() ?? obj.key,
+      size:       obj.size,
+      uploadedAt: obj.uploaded.toISOString(),
+    }));
+    docs.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+    return c.json({ documents: docs });
+  } catch (err: any) {
+    console.error('[documents] Erro ao listar documentos:', err);
+    return c.json({ documents: [] });
+  }
+});
+
+// ── POST /api/documents/upload — upload direto de documento ao R2 ─────────────
+router.post('/documents/upload', async (c) => {
+  try {
+    const { base64, mimeType, name } = await c.req.json<any>();
+    if (!base64 || !mimeType) {
+      return c.json({ error: 'base64 e mimeType são obrigatórios.' }, 400);
+    }
+
+    const upload = validateBase64Upload(base64, mimeType);
+    if (!upload.ok) return c.json({ error: upload.error }, upload.status);
+
+    const { buf, mime: realMime } = upload;
+    const tenant = c.get('tenant');
+
+    const quotaErr = await checkQuota(c.env.MKS_TENANTS, tenant.familyId, tenant.storageTierBytes, buf.byteLength);
+    if (quotaErr) {
+      return c.json({
+        error: 'QUOTA_EXCEEDED',
+        code:  'QUOTA_EXCEEDED',
+        usedBytes:  quotaErr.usedBytes,
+        limitBytes: quotaErr.limitBytes,
+        usedFormatted:  formatBytes(quotaErr.usedBytes),
+        limitFormatted: formatBytes(quotaErr.limitBytes),
+        upgradePrice:   STORAGE_UPGRADE_PRICE,
+        upgradeLimitBytes: STORAGE_PAID_BYTES,
+      }, 402);
+    }
+
+    const r2key = buildDocKey(tenant.r2Prefix, realMime);
+    await r2Put(c.env.MKS_DOCUMENTS, r2key, buf.buffer as ArrayBuffer, realMime);
+
+    c.executionCtx.waitUntil(
+      incrementStorage(c.env.MKS_TENANTS, tenant.familyId, buf.byteLength),
+    );
+
+    return c.json({
+      success: true,
+      document: {
+        key: r2key,
+        name: name || (r2key.split('/').pop() ?? r2key),
+        size: buf.byteLength,
+        uploadedAt: new Date().toISOString(),
+      },
+    }, 201);
+  } catch (err: any) {
+    console.error('[documents/upload] Erro:', err);
+    return c.json({ error: 'Falha ao salvar documento no storage: ' + (err.message || 'Erro desconhecido') }, 500);
+  }
 });
 
 // ── DELETE /api/documents/* — remove documento do R2 ─────────────────────────
@@ -50,69 +109,72 @@ router.delete('/documents/*', async (c) => {
   return c.json({ success: true });
 });
 
-// ── POST /api/documents/analyze — Groq Vision ─────────────────────────────────
+// ── POST /api/documents/analyze — Workers AI / Groq Vision ────────────────────
 router.post('/documents/analyze', async (c) => {
-  const { base64, mimeType, documentType } = await c.req.json<any>();
-  if (!documentType)
-    return c.json({ error: 'base64, mimeType e documentType são obrigatórios.' }, 400);
-  if (!['BILL', 'INVOICE'].includes(documentType))
-    return c.json({ error: 'documentType deve ser BILL ou INVOICE.' }, 400);
+  try {
+    const { base64, mimeType, documentType } = await c.req.json<any>();
+    if (!documentType)
+      return c.json({ error: 'base64, mimeType e documentType são obrigatórios.' }, 400);
+    if (!['BILL', 'INVOICE'].includes(documentType))
+      return c.json({ error: 'documentType deve ser BILL ou INVOICE.' }, 400);
 
-  const upload = validateBase64Upload(base64, mimeType);
-  if (!upload.ok) return c.json({ error: upload.error }, upload.status);
+    const upload = validateBase64Upload(base64, mimeType);
+    if (!upload.ok) return c.json({ error: upload.error }, upload.status);
 
-  const { buf, mime: realMime } = upload;
+    const { buf, mime: realMime } = upload;
 
-  // ── Verificação de cota de storage ───────────────────────────────────────────
-  const tenant = c.get('tenant');
-  const quotaErr = await checkQuota(c.env.MKS_TENANTS, tenant.familyId, tenant.storageTierBytes, buf.byteLength);
-  if (quotaErr) {
-    return c.json({
-      error: 'QUOTA_EXCEEDED',
-      code:  'QUOTA_EXCEEDED',
-      usedBytes:  quotaErr.usedBytes,
-      limitBytes: quotaErr.limitBytes,
-      usedFormatted:  formatBytes(quotaErr.usedBytes),
-      limitFormatted: formatBytes(quotaErr.limitBytes),
-      upgradePrice:   STORAGE_UPGRADE_PRICE,
-      upgradeLimitBytes: STORAGE_PAID_BYTES,
-    }, 402);
-  }
+    // ── Verificação de cota de storage ───────────────────────────────────────────
+    const tenant = c.get('tenant');
+    const quotaErr = await checkQuota(c.env.MKS_TENANTS, tenant.familyId, tenant.storageTierBytes, buf.byteLength);
+    if (quotaErr) {
+      return c.json({
+        error: 'QUOTA_EXCEEDED',
+        code:  'QUOTA_EXCEEDED',
+        usedBytes:  quotaErr.usedBytes,
+        limitBytes: quotaErr.limitBytes,
+        usedFormatted:  formatBytes(quotaErr.usedBytes),
+        limitFormatted: formatBytes(quotaErr.limitBytes),
+        upgradePrice:   STORAGE_UPGRADE_PRICE,
+        upgradeLimitBytes: STORAGE_PAID_BYTES,
+      }, 402);
+    }
 
-  const key   = c.env.GROQ_API_KEY;
-  const r2key = buildDocKey(tenant.r2Prefix, realMime);
-  let extracted: Record<string, unknown> = {};
+    const r2key = buildDocKey(tenant.r2Prefix, realMime);
+    let extracted: Record<string, unknown> = {};
 
-  const billPrompt   = `Analise este documento financeiro brasileiro e extraia em JSON: {"description":"nome do serviço","amountInCents":número em centavos,"dueDate":"YYYY-MM-DD","payerName":"string|null","payerDoc":"CPF/CNPJ|null"}. Retorne APENAS o JSON.`;
-  const invoicePrompt = `Analise esta fatura de cartão brasileiro e extraia em JSON: {"dueDate":"YYYY-MM-DD","totalAmountInCents":número em centavos,"lineItems":[{"date":"YYYY-MM-DD","merchant":"string","amountInCents":número}]}. Inclua TODOS os lançamentos. Retorne APENAS o JSON.`;
+    const billPrompt   = `Analise este documento financeiro brasileiro e extraia em JSON: {"description":"nome do serviço","amountInCents":número em centavos,"dueDate":"YYYY-MM-DD","payerName":"string|null","payerDoc":"CPF/CNPJ|null"}. Retorne APENAS o JSON.`;
+    const invoicePrompt = `Analise esta fatura de cartão brasileiro e extraia em JSON: {"dueDate":"YYYY-MM-DD","totalAmountInCents":número em centavos,"lineItems":[{"date":"YYYY-MM-DD","merchant":"string","amountInCents":número}]}. Inclua TODOS os lançamentos. Retorne APENAS o JSON.`;
 
-  if (key) {
     try {
-      const raw = await groqChat(key, 'meta-llama/llama-4-scout-17b-16e-instruct',
-        [{ role: 'user', content: [
-          { type: 'text', text: documentType === 'INVOICE' ? invoicePrompt : billPrompt },
-          { type: 'image_url', image_url: { url: `data:${realMime};base64,${base64}` } },
-        ] }],
-        { temperature: 0.1, max_tokens: 2048 },
+      const raw = await executeVisionAI(
+        c,
+        base64,
+        realMime,
+        documentType === 'INVOICE' ? invoicePrompt : billPrompt,
+        { temperature: 0.1, max_tokens: 2048 }
       );
-      const match = raw.match(/\{[\s\S]*\}/);
-      if (match) extracted = JSON.parse(match[0]);
-    } catch { /* prossegue sem extração */ }
+      extracted = safeExtractJSON(raw, {});
+    } catch (aiErr: any) {
+      console.warn('[documents/analyze] Falha na IA visual, prosseguindo com upload:', aiErr?.message || aiErr);
+    }
+
+    if (documentType === 'INVOICE' && Array.isArray(extracted.lineItems)) {
+      extracted.lineItems = (extracted.lineItems as any[]).map(item => ({
+        ...item, category: classifyMerchant(item.merchant ?? ''),
+      }));
+    }
+
+    await r2Put(c.env.MKS_DOCUMENTS, r2key, buf.buffer as ArrayBuffer, realMime);
+
+    c.executionCtx.waitUntil(
+      incrementStorage(c.env.MKS_TENANTS, tenant.familyId, buf.byteLength),
+    );
+
+    return c.json({ ...extracted, documentKey: r2key });
+  } catch (err: any) {
+    console.error('[documents/analyze] Erro inesperado:', err);
+    return c.json({ error: 'Erro ao processar documento: ' + (err.message || 'Erro interno') }, 500);
   }
-
-  if (documentType === 'INVOICE' && Array.isArray(extracted.lineItems)) {
-    extracted.lineItems = (extracted.lineItems as any[]).map(item => ({
-      ...item, category: classifyMerchant(item.merchant ?? ''),
-    }));
-  }
-
-  await r2Put(c.env.MKS_DOCUMENTS, r2key, buf.buffer as ArrayBuffer, realMime);
-
-  c.executionCtx.waitUntil(
-    incrementStorage(c.env.MKS_TENANTS, tenant.familyId, buf.byteLength),
-  );
-
-  return c.json({ ...extracted, documentKey: r2key });
 });
 
 // ── POST /api/import/invoice — importa linha a linha de fatura ────────────────

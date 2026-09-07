@@ -458,14 +458,19 @@ export default function PredictiveAIModule() {
     try {
       const headers: Record<string, string> = {};
       const groqKey = retryKey ?? sessionStorage.getItem('__userGroqKey') ?? userGroqKey;
-      if (groqKey) headers['X-Groq-Api-Key'] = groqKey;
       const res = await fetch('/api/ai/predictive', { method: 'POST', headers });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        throw new Error(res.ok ? 'Resposta inválida do servidor.' : `Serviço de IA temporariamente indisponível (HTTP ${res.status}).`);
+      }
       if (res.status === 429 || data.error === 'RATE_LIMIT') { setShowKeyPanel(true); return; }
-      if (!res.ok) { setError(data.error || 'Erro na análise.'); return; }
+      if (!res.ok) { setError(data.error || 'Erro na análise financeira.'); return; }
       setResult(data);
     } catch (e: any) {
-      setError(e.message || 'Erro de conexão.');
+      setError(e.message || 'Erro de conexão com o serviço de IA.');
     } finally {
       setLoading(false);
     }

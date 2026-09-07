@@ -14,7 +14,10 @@ import {
   Trash2,
   Filter,
   Mail,
-  MessageSquare
+  MessageSquare,
+  Send,
+  Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import { NotificationAlert } from '../types';
 
@@ -36,6 +39,9 @@ export default function NotificationsModule({
   const [filter, setFilter] = useState<AlertFilter>('all');
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testStatus, setTestStatus] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const unread = alerts.filter(a => !a.isRead).length;
   const warnings = alerts.filter(a => a.type === 'WARNING').length;
@@ -245,24 +251,106 @@ export default function NotificationsModule({
 
           {/* Channels config */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-            <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5 pb-2 border-b border-slate-100">
-              <Mail className="w-4 h-4 text-slate-500" />
-              Canais de Avisos
+            <h3 className="font-semibold text-slate-800 text-sm flex items-center justify-between pb-2 border-b border-slate-100">
+              <span className="flex items-center gap-1.5">
+                <Mail className="w-4 h-4 text-indigo-600" />
+                Canais de Avisos
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                Cloudflare Native
+              </span>
             </h3>
 
             <div className="space-y-3 text-xs">
-              {[
-                { id: 'email_chk', label: 'E-mail (SendGrid)', desc: 'Alertas imediatos por e-mail ao atingir 80% do orçamento ou limite de cartão.' },
-                { id: 'sms_chk', label: 'SMS / WhatsApp (Twilio)', desc: 'Resumos semanais e avisos de segurança.' },
-              ].map(ch => (
-                <div key={ch.id} className="p-3 border border-slate-200 rounded-xl flex items-start gap-2.5">
-                  <input type="checkbox" defaultChecked id={ch.id} className="w-4 h-4 rounded text-indigo-600 border-slate-300 mt-0.5" />
-                  <div>
-                    <label htmlFor={ch.id} className="font-bold text-slate-700 block">{ch.label}</label>
-                    <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{ch.desc}</p>
+              {/* Cloudflare Email Sending */}
+              <div className="p-3 border border-indigo-100 bg-indigo-50/40 rounded-xl space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" defaultChecked id="cf_email_chk" className="w-4 h-4 rounded text-indigo-600 border-slate-300 mt-0.5" />
+                    <label htmlFor="cf_email_chk" className="font-bold text-slate-800 cursor-pointer">
+                      E-mail (Cloudflare Email Sending)
+                    </label>
                   </div>
+                  <span className="text-[9px] font-mono font-semibold text-indigo-600 bg-white border border-indigo-200 px-1.5 py-0.5 rounded">
+                    REST API
+                  </span>
                 </div>
-              ))}
+                <p className="text-[11px] text-slate-500 leading-tight pl-6">
+                  Alertas imediatos e resumos enviados com autenticação via <code className="font-mono text-indigo-700">welcome@financaslivre.com</code>.
+                </p>
+
+                {/* Test Email Section */}
+                <div className="pt-2 pl-6 space-y-2 border-t border-indigo-100/80 mt-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                    Testar Entrega de E-mail
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={testEmail}
+                      onChange={e => setTestEmail(e.target.value)}
+                      placeholder="seu-email@exemplo.com"
+                      className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsSendingTest(true);
+                        setTestStatus(null);
+                        try {
+                          const res = await fetch('/api/notifications/test-email', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ to: testEmail.trim() || undefined }),
+                          });
+                          const raw = await res.text();
+                          let data: any = {};
+                          try { data = raw ? JSON.parse(raw) : {}; } catch { throw new Error(`HTTP ${res.status}`); }
+                          if (!res.ok) throw new Error(data.error || 'Falha ao enviar.');
+                          setTestStatus({ ok: true, msg: `E-mail enviado para ${data.sentTo}!` });
+                        } catch (err: any) {
+                          setTestStatus({ ok: false, msg: err.message || 'Erro no envio.' });
+                        } finally {
+                          setIsSendingTest(false);
+                        }
+                      }}
+                      disabled={isSendingTest}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50 shrink-0"
+                    >
+                      {isSendingTest ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Send className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isSendingTest ? 'Enviando…' : 'Testar'}</span>
+                    </button>
+                  </div>
+
+                  {testStatus && (
+                    <div className={`p-2 rounded-lg text-[11px] flex items-center gap-1.5 ${
+                      testStatus.ok
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-rose-50 text-rose-700 border border-rose-200'
+                    }`}>
+                      {testStatus.ok ? <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                      <span>{testStatus.msg}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* In-app Notification channel */}
+              <div className="p-3 border border-slate-200 rounded-xl flex items-start gap-2.5">
+                <input type="checkbox" defaultChecked id="inapp_chk" className="w-4 h-4 rounded text-indigo-600 border-slate-300 mt-0.5" />
+                <div>
+                  <label htmlFor="inapp_chk" className="font-bold text-slate-700 block cursor-pointer">
+                    Central de Avisos no Painel Web
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                    Notificações em tempo real ao acessar o painel financeiro.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -22,6 +22,7 @@ CF_TEAM_DOMAIN     = "mks-personnal-finance-manager"
 BASE_DOMAIN        = "financaslivre.com"
 
 # Secrets — registrar com: wrangler secret put <NOME>
+# CF_EMAIL_TOKEN
 # CF_API_TOKEN
 # GROQ_API_KEY
 # RESEND_API_KEY
@@ -30,6 +31,9 @@ BASE_DOMAIN        = "financaslivre.com"
 [[r2_buckets]]
 binding     = "MKS_DOCUMENTS"
 bucket_name = "mks-documents"
+
+[ai]
+binding = "AI"
 
 [observability]
 enabled = true

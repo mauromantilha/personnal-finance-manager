@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { FileText, Eye, Download, Trash2, RefreshCw, Image, File, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { FileText, Eye, Download, Trash2, RefreshCw, Image, File, X, UploadCloud, AlertCircle } from 'lucide-react';
+import AIDocumentConsentModal, { hasSavedConsent } from './AIDocumentConsentModal';
 
 interface DocItem {
   key: string;
@@ -40,27 +41,100 @@ function groupByDate(docs: DocItem[]): [string, DocItem[]][] {
 }
 
 export default function DocumentsModule() {
-  const [docs, setDocs]           = useState<DocItem[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [deleting, setDeleting]   = useState<string | null>(null);
-  const [preview, setPreview]     = useState<{ url: string; key: string } | null>(null);
+  const [docs, setDocs]                 = useState<DocItem[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [deleting, setDeleting]         = useState<string | null>(null);
+  const [preview, setPreview]           = useState<{ url: string; key: string } | null>(null);
+  const [uploading, setUploading]       = useState(false);
+  const [uploadError, setUploadError]   = useState<string | null>(null);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [pendingFile, setPendingFile]   = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/documents');
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        setDocs([]);
+        return;
+      }
       if (res.ok) {
-        const data = await res.json();
         setDocs(data.documents ?? []);
       }
     } catch (e) {
-      console.error(e);
+      console.error('[DocumentsModule] Erro ao carregar:', e);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const uploadFile = async (file: File) => {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          const commaIndex = result.indexOf(',');
+          resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      const base64 = await base64Promise;
+
+      const res = await fetch('/api/documents/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base64,
+          mimeType: file.type || 'application/octet-stream',
+          name: file.name,
+        }),
+      });
+
+      const raw = await res.text();
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(`Erro do servidor (${res.status})`);
+      }
+
+      if (!res.ok) {
+        if (data.code === 'QUOTA_EXCEEDED') {
+          throw new Error(`Limite de armazenamento excedido (${data.usedFormatted} de ${data.limitFormatted}).`);
+        }
+        throw new Error(data.error || 'Falha ao salvar documento no storage.');
+      }
+
+      await load();
+    } catch (err: any) {
+      setUploadError(err.message || 'Erro ao enviar documento.');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!hasSavedConsent()) {
+      setPendingFile(file);
+      setShowConsentModal(true);
+    } else {
+      uploadFile(file);
+    }
+  };
 
   const handleDelete = async (key: string) => {
     if (!confirm('Excluir este documento?')) return;
@@ -85,20 +159,53 @@ export default function DocumentsModule() {
 
   return (
     <div className="space-y-6">
+      {/* Hidden file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileSelect}
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Documentos</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Faturas e comprovantes enviados ao sistema, ordenados por data</p>
+          <p className="text-sm text-slate-500 mt-0.5">Faturas, extratos e comprovantes enviados ao sistema</p>
         </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span className="hidden sm:inline">Atualizar</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Atualizar</span>
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm shadow-indigo-100 transition-colors disabled:opacity-50"
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>{uploading ? 'Enviando…' : 'Adicionar Documento'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Upload error banner */}
+      {uploadError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start justify-between gap-3 text-rose-800">
+          <div className="flex items-center gap-2 text-sm">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{uploadError}</span>
+          </div>
+          <button onClick={() => setUploadError(null)} className="text-rose-500 hover:text-rose-700">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -111,10 +218,18 @@ export default function DocumentsModule() {
       ) : docs.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
           <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="font-semibold text-slate-500">Nenhum documento encontrado</p>
-          <p className="text-sm text-slate-400 mt-1">
-            Documentos enviados via análise de faturas (conta de luz, fatura de cartão…) aparecerão aqui.
+          <p className="font-semibold text-slate-700">Nenhum documento encontrado</p>
+          <p className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
+            Você ainda não possui comprovantes ou faturas salvos no seu cofre de documentos.
           </p>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-sm shadow-indigo-100 disabled:opacity-50"
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>{uploading ? 'Enviando…' : 'Enviar Primeiro Documento'}</span>
+          </button>
         </div>
       ) : (
         <div className="space-y-8">
@@ -244,6 +359,24 @@ export default function DocumentsModule() {
           </div>
         </div>
       )}
+
+      {/* Consent Modal */}
+      <AIDocumentConsentModal
+        isOpen={showConsentModal}
+        documentType="GENERAL"
+        onConsent={() => {
+          setShowConsentModal(false);
+          if (pendingFile) {
+            uploadFile(pendingFile);
+            setPendingFile(null);
+          }
+        }}
+        onCancel={() => {
+          setShowConsentModal(false);
+          setPendingFile(null);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }}
+      />
     </div>
   );
 }

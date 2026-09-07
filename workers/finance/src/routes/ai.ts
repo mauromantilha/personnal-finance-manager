@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { groqChat, classifyMerchant, groqAgentCall } from '../lib/groq';
 import type { GroqToolCall } from '../lib/groq';
+import { executeTextAI, executeVisionAI, extractAndParseJSON } from '../lib/cf-ai';
 import { recalculateBudgets } from '../lib/helpers';
 import {
   mapAccount, mapBudget, mapGoal, mapInvestment, mapCreditCard,
@@ -70,7 +71,6 @@ async function safeGroqChat(...args: Parameters<typeof groqChat>): Promise<strin
 // ── POST /api/groq/advisor ────────────────────────────────────────────────────
 router.post('/groq/advisor', async (c) => {
   const db  = c.get('db');
-  const key = resolveGroqKey(c);
   const { message } = await c.req.json<any>();
   if (!message) return c.json({ error: 'Mensagem obrigatória.' }, 400);
   if (containsPersonalData(message)) return c.json({ reply: PRIVACY_BLOCK });
@@ -96,18 +96,14 @@ Contexto financeiro:
 
 Retorne Markdown rico. Máximo 3 parágrafos ou bullet points acionáveis.${PRIVACY_SYSTEM_RULE}`;
 
-  if (!key) {
-    return c.json({ reply: `### Análise MKS\n\nPatrimônio: **${brl(totalBalance)}**.\n\n> Configure GROQ_API_KEY para IA personalizada.` });
-  }
-
   try {
-    const reply = await safeGroqChat(key, 'llama-3.3-70b-versatile',
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: message }],
-      { temperature: 0.7, max_tokens: 1024 });
+    const reply = await executeTextAI(c, [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: message },
+    ], { temperature: 0.7, max_tokens: 1024 });
     return c.json({ reply: reply + DISCLAIMER });
   } catch (e: any) {
-    if (e?.isRateLimit) return c.json({ error: 'RATE_LIMIT', details: 'Limite de requisições Groq atingido. Insira sua chave Groq gratuita para continuar.' }, 429);
-    return c.json({ error: 'Groq error', details: (e as Error).message }, 500);
+    return c.json({ reply: `### Análise MKS\n\nPatrimônio: **${brl(totalBalance)}**.\n\n*Nota: O serviço de consultoria avançada está temporariamente indisponível.*` });
   }
 });
 
@@ -158,7 +154,6 @@ router.post('/groq/categorize', async (c) => {
 // ── POST /api/ai/predictive ───────────────────────────────────────────────────
 router.post('/ai/predictive', async (c) => {
   const db  = c.get('db');
-  const key = resolveGroqKey(c);
   const now = new Date();
 
   await recalculateBudgets(db);
@@ -229,10 +224,6 @@ router.post('/ai/predictive', async (c) => {
     top_categorias_despesa_90dias: topCats.map(r => ({ categoria: r.category, total: brl(r.total), participacao: pct(r.total, prevExpense + monthExpense) })),
   };
 
-  if (!key) {
-    return c.json({ ...noDataResp, insufficient_data: false, resumo_executivo: `Patrimônio: ${brl(netWorth)}. Configure GROQ_API_KEY para análise completa.`, generatedAt: now.toISOString() });
-  }
-
   const systemPrompt = `Você é um Analista Financeiro Sênior e CFP especializado em finanças pessoais no Brasil.
 REGRAS: 1) Baseie TODA análise nos dados JSON. 2) Cite números reais. 3) Responda em Português Brasileiro. 4) Retorne SOMENTE JSON válido conforme a estrutura abaixo.
 
@@ -240,13 +231,46 @@ ESTRUTURA JSON:
 {"resumo_executivo":"string","score_saude":{"valor":0-100,"classificacao":"Excelente|Bom|Regular|Crítico","justificativa":"string"},"alertas":[{"nivel":"CRITICO|ATENCAO|INFO","titulo":"string","descricao":"string","acao_sugerida":"string"}],"analise_gastos":{"resumo":"string","ponto_atencao":"string|null","top_categorias":[{"categoria":"string","valor":"string","avaliacao":"string"}]},"analise_investimentos":{"resumo":"string","diversificacao":"Boa|Média|Fraca|Sem investimentos","pontos":["string"],"sugestoes":["string"]},"recomendacoes":[{"prioridade":1,"titulo":"string","descricao":"string","impacto":"Alto|Médio|Baixo","prazo":"Imediato|30 dias|90 dias|Longo prazo"}],"plano_acao":[{"ordem":1,"acao":"string","motivo":"string"}]}`;
 
   try {
-    const raw  = await safeGroqChat(key, 'llama-3.3-70b-versatile',
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: `Analise:\n${JSON.stringify(context, null, 2)}` }],
-      { temperature: 0.2, max_tokens: 3000, response_format: { type: 'json_object' } });
-    return c.json({ ...JSON.parse(raw), generatedAt: now.toISOString() });
+    const raw = await executeTextAI(c, [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Analise:\n${JSON.stringify(context, null, 2)}` },
+    ], { temperature: 0.2, max_tokens: 3000, json: true });
+
+    const parsed = extractAndParseJSON(raw);
+    return c.json({ ...parsed, generatedAt: now.toISOString() });
   } catch (e: any) {
-    if (e?.isRateLimit) return c.json({ error: 'RATE_LIMIT', details: 'Limite de requisições Groq atingido. Insira sua chave Groq gratuita para continuar.' }, 429);
-    return c.json({ error: 'Erro na análise preditiva.', details: (e as Error).message }, 500);
+    console.error('[Predictive AI] Fallback acionado:', e);
+    const scoreVal = Math.min(100, Math.max(20, Math.round(savingsRate * 1.5 + (netWorth > 0 ? 30 : 0))));
+    return c.json({
+      resumo_executivo: `Diagnóstico baseado nos dados registrados: Patrimônio líquido de ${brl(netWorth)}, com taxa de poupança no mês de ${savingsRate.toFixed(1)}%.`,
+      score_saude: {
+        valor: scoreVal,
+        classificacao: scoreVal >= 75 ? 'Excelente' : scoreVal >= 60 ? 'Bom' : scoreVal >= 40 ? 'Regular' : 'Crítico',
+        justificativa: `Baseado no balanço mensal (${brl(monthIncome - monthExpense)}) e na evolução do patrimônio.`,
+      },
+      alertas: monthExpense > monthIncome
+        ? [{ nivel: 'ATENCAO', titulo: 'Despesas superam receitas', descricao: 'O mês atual está com saldo operacional negativo.', acao_sugerida: 'Reveja os maiores lançamentos do mês.' }]
+        : [{ nivel: 'INFO', titulo: 'Superávit no período', descricao: 'Receitas superam as despesas no mês corrente.', acao_sugerida: 'Mantenha aportes em investimentos ou reserva de emergência.' }],
+      analise_gastos: {
+        resumo: `Total de despesas no mês: ${brl(monthExpense)}.`,
+        ponto_atencao: topCats[0] ? `Maior categoria de despesa recente: ${topCats[0].category} (${brl(topCats[0].total)})` : null,
+        top_categorias: topCats.slice(0, 3).map(tc => ({ categoria: tc.category, valor: brl(tc.total), avaliacao: 'Impacto relevante' })),
+      },
+      analise_investimentos: {
+        resumo: totalInvested > 0 ? `Total investido: ${brl(totalInvested)}.` : 'Nenhum investimento cadastrado.',
+        diversificacao: totalInvested > 0 ? 'Média' : 'Sem investimentos',
+        pontos: totalInvested > 0 ? ['Patrimônio em ativos'] : ['Recomendamos construir reserva de emergência'],
+        sugestoes: ['Manter reserva com liquidez diária (100% CDI)'],
+      },
+      recomendacoes: [
+        { prioridade: 1, titulo: 'Acompanhar orçamentos da semana', descricao: 'Monitore as categorias essenciais para manter o teto mensal.', impacto: 'Alto', prazo: 'Imediato' },
+      ],
+      plano_acao: [
+        { ordem: 1, acao: 'Conferir extrato e categorizar novos lançamentos', motivo: 'Garantir precisão do fluxo de caixa.' },
+      ],
+      generatedAt: now.toISOString(),
+      fallbackMode: true,
+    });
   }
 });
 
@@ -302,11 +326,10 @@ ${summary}${PRIVACY_SYSTEM_RULE}`;
       ...safeHistory,
       { role: 'user' as const, content: message },
     ];
-    const reply = await safeGroqChat(key, 'llama-3.3-70b-versatile', msgs, { temperature: 0.5, max_tokens: 1500 });
+    const reply = await executeTextAI(c, msgs, { temperature: 0.5, max_tokens: 1500 });
     return c.json({ reply: reply + DISCLAIMER });
   } catch (e: any) {
-    if (e?.isRateLimit) return c.json({ error: 'RATE_LIMIT', details: 'Limite de requisições Groq atingido. Insira sua chave Groq gratuita para continuar.' }, 429);
-    return c.json({ error: 'Erro no chat.', details: (e as Error).message }, 500);
+    return c.json({ reply: `Olá! O assistente está operando em modo de contingência no momento. Seu patrimônio atual é de **${brl(netWorth)}** e seu saldo no mês é **${brl(monthIncome - monthExpense)}**.` + DISCLAIMER });
   }
 });
 
@@ -314,7 +337,6 @@ ${summary}${PRIVACY_SYSTEM_RULE}`;
 // Lê comprovante de renda (holerite, recibo, PIX, extrato) com visão IA
 // e retorna dados estruturados para o usuário revisar antes de salvar.
 router.post('/transactions/ai-income-parse', async (c) => {
-  const key  = c.env.GROQ_API_KEY;
   const body = await c.req.json<any>();
   const { base64, mimeType } = body;
 
@@ -344,27 +366,11 @@ Regras:
 - Retorne APENAS o JSON, sem texto adicional, sem markdown.`;
 
   try {
-    const messages: any[] = [{
-      role: 'user',
-      content: [
-        { type: 'text', text: INCOME_SYSTEM },
-        { type: 'image_url', image_url: { url: `data:${upload.mime};base64,${base64}` } },
-      ],
-    }];
-
-    const raw = await safeGroqChat(key, 'meta-llama/llama-4-scout-17b-16e-instruct', messages, {
-      temperature: 0.1, max_tokens: 512,
-    });
-
-    const cleaned = raw.replace(/```json|```/g, '').trim();
-    let data: any;
-    try { data = JSON.parse(cleaned); }
-    catch { return c.json({ error: 'IA retornou formato inválido.', raw }, 422); }
-
-    return c.json(data);
+    const raw = await executeVisionAI(c, INCOME_SYSTEM, base64, upload.mime, { temperature: 0.1, max_tokens: 1024 });
+    const parsed = extractAndParseJSON(raw);
+    return c.json(parsed);
   } catch (e: any) {
-    if (e?.isRateLimit) return c.json({ error: 'RATE_LIMIT' }, 429);
-    return c.json({ error: 'Erro ao processar documento.', details: (e as Error).message }, 500);
+    return c.json({ error: 'Falha ao processar documento de renda.', details: (e as Error).message }, 500);
   }
 });
 
