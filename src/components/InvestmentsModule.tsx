@@ -4,6 +4,8 @@ import { PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, AreaC
 import { Investment, AssetClass, FinancialAccount } from '../types';
 import InvestmentSimulator from './InvestmentSimulator';
 import AIDocumentConsentModal, { hasSavedConsent } from './AIDocumentConsentModal';
+import { B3PredictiveModule } from './B3PredictiveModule';
+import { PrevidenciaSimulator } from './PrevidenciaSimulator';
 
 interface InvestmentsModuleProps {
   investments: Investment[];
@@ -252,8 +254,10 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
           <button key={id} onClick={() => setMainTab(id)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold rounded-t-xl border-b-2 transition-all whitespace-nowrap ${mainTab === id ? activeClass : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
             <Icon className="w-3.5 h-3.5" />{label}
-            {id === 'previdencia' || id === 'bovespa' ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 ml-1">em breve</span>
+            {id === 'previdencia' ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 ml-1">PGBL/VGBL</span>
+            ) : id === 'bovespa' ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 ml-1">Quant & B3</span>
             ) : null}
           </button>
         ))}
@@ -266,51 +270,13 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
 
       {/* ── ABA: Simulação Previdência ────────────────────────────────────────── */}
       {mainTab === 'previdencia' && (
-        <div className="space-y-6">
-          <div className="bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-200 rounded-2xl p-8 text-center">
-            <div className="w-16 h-16 bg-violet-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Shield className="w-8 h-8 text-violet-500" />
-            </div>
-            <h3 className="text-lg font-black text-violet-800 mb-2">Simulação de Previdência Privada</h3>
-            <p className="text-sm text-violet-600 max-w-lg mx-auto mb-4">
-              Compare PGBL vs VGBL, simule benefício fiscal do IR, projete acumulação e renda mensal na aposentadoria considerando tabela progressiva e regressiva.
-            </p>
-            <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-200 text-violet-700 text-xs font-black rounded-full">
-              <Clock className="w-3.5 h-3.5" /> Em desenvolvimento
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { icon: '💼', title: 'PGBL vs VGBL', desc: 'Compare o impacto do benefício fiscal para declarantes do IR completo vs simplificado.' },
-              { icon: '📉', title: 'Tabela Regressiva', desc: 'Simulação com IR regressivo (35% → 10%) para quem investe por mais de 10 anos.' },
-              { icon: '🎯', title: 'Renda na Aposentadoria', desc: 'Calcule quanto você precisa acumular para ter a renda desejada pelo período estimado.' },
-            ].map(f => (
-              <div key={f.title} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-                <div className="text-2xl mb-2">{f.icon}</div>
-                <p className="text-xs font-black text-slate-700 mb-1">{f.title}</p>
-                <p className="text-[11px] text-slate-400 leading-relaxed">{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+        <PrevidenciaSimulator />
       )}
 
       {/* ── ABA: Simulação Bovespa / B3 ───────────────────────────────────────── */}
       {mainTab === 'bovespa' && (
-        <div className="space-y-6">
-          {/* Hero placeholder */}
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-8 text-center">
-            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Building2 className="w-8 h-8 text-amber-500" />
-            </div>
-            <h3 className="text-lg font-black text-amber-800 mb-2">Simulação Bovespa &amp; Integração B3</h3>
-            <p className="text-sm text-amber-600 max-w-lg mx-auto mb-4">
-              Simule carteiras de ações e FIIs com dados históricos, e importe sua posição real via B3 Área do Investidor (API oficial gratuita).
-            </p>
-            <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-200 text-amber-700 text-xs font-black rounded-full">
-              <Clock className="w-3.5 h-3.5" /> Em desenvolvimento
-            </span>
-          </div>
+        <div className="space-y-8">
+          <B3PredictiveModule />
 
           {/* Plano de implementação B3 */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
