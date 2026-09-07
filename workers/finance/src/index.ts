@@ -171,7 +171,7 @@ app.use('/api/*', async (c, next) => {
 // ── Middleware 3: User lookup / first-access creation ─────────────────────────
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  if (path === '/api/webhooks/asaas') return next();
+  if (path === '/api/webhooks/asaas' || path.startsWith('/api/market/')) return next();
 
   const db    = c.get('db');
   const email = c.get('email');
@@ -247,7 +247,7 @@ const LGPD_EXEMPT = new Set([
 ]);
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname.replace(/\/$/, '') || '/';
-  if (LGPD_EXEMPT.has(path)) return next();
+  if (LGPD_EXEMPT.has(path) || path.startsWith('/api/market/')) return next();
   if (!c.get('lgpdOk')) {
     return c.json({ error: 'LGPD não aceita', code: 'LGPD_REQUIRED' }, 403);
   }

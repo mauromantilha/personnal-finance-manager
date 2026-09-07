@@ -13,12 +13,23 @@ export interface AIOptions {
   json?: boolean;
 }
 
-// Modelos do Cloudflare Workers AI
+// Modelos verificados do Cloudflare Workers AI
 export const CF_MODELS = {
-  REASONING: '@cf/meta/llama-3.3-70b-instruct',
+  REASONING: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
   FAST:      '@cf/meta/llama-3.1-8b-instruct',
-  VISION:    '@cf/meta/llama-3.2-11b-vision-instruct',
+  VISION:    '@cf/meta/llama-4-scout-17b-16e-instruct',
 };
+
+function extractReply(result: any): string {
+  if (!result) return '';
+  if (typeof result.response === 'string' && result.response.trim().length > 0) return result.response.trim();
+  if (typeof result.result?.response === 'string' && result.result.response.trim().length > 0) return result.result.response.trim();
+  const choiceMsg = result.choices?.[0]?.message?.content ?? result.result?.choices?.[0]?.message?.content;
+  if (typeof choiceMsg === 'string' && choiceMsg.trim().length > 0) return choiceMsg.trim();
+  const choiceText = result.choices?.[0]?.text ?? result.result?.choices?.[0]?.text;
+  if (typeof choiceText === 'string' && choiceText.trim().length > 0) return choiceText.trim();
+  return '';
+}
 
 /**
  * Executa inferência de texto utilizando Cloudflare Workers AI com fallback automático para Groq.
@@ -56,9 +67,8 @@ export async function executeTextAI(
       };
 
       const result = await c.env.AI.run(model, aiInput) as any;
-      if (result && typeof result.response === 'string' && result.response.trim().length > 0) {
-        return result.response;
-      }
+      const text = extractReply(result);
+      if (text.length > 0) return text;
     } catch (cfErr: any) {
       console.warn(`[Workers AI] Erro no modelo ${model}, tentando fallback:`, cfErr?.message || cfErr);
       // Prossegue para fallback Groq abaixo
@@ -91,10 +101,9 @@ export async function executeVisionAI(
 ): Promise<string> {
   const sanitizedPrompt = maskPII(prompt);
 
-  // 1. Tentar Cloudflare Workers AI com Llama 3.2 Vision
+  // 1. Tentar Cloudflare Workers AI multimodal com Llama 4 Scout
   if (c.env?.AI && typeof c.env.AI.run === 'function') {
     try {
-      // Converte base64 para array de bytes
       const binaryString = atob(base64Image);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
@@ -103,14 +112,13 @@ export async function executeVisionAI(
 
       const aiInput = {
         prompt: sanitizedPrompt,
-        image: [...bytes], // Array de números esperado pelo binding do Workers AI
+        image: [...bytes],
         max_tokens: opts.max_tokens ?? 2048,
       };
 
       const result = await c.env.AI.run(CF_MODELS.VISION, aiInput) as any;
-      if (result && typeof result.response === 'string' && result.response.trim().length > 0) {
-        return result.response;
-      }
+      const text = extractReply(result);
+      if (text.length > 0) return text;
     } catch (cfErr: any) {
       console.warn('[Workers AI Vision] Falha no Llama Vision, tentando fallback:', cfErr?.message || cfErr);
     }
