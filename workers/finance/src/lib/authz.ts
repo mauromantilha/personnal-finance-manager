@@ -6,7 +6,7 @@ type AppContext = Context<{ Bindings: Env; Variables: Variables }>;
 /** Middleware: apenas role owner. */
 export async function requireOwner(c: AppContext, next: Next) {
   const user = c.get('user');
-  if (user.role !== 'owner') {
+  if (!user || user.role !== 'owner') {
     return c.json(
       { error: 'Apenas o owner pode realizar esta ação.', code: 'OWNER_REQUIRED' },
       403,
@@ -15,8 +15,8 @@ export async function requireOwner(c: AppContext, next: Next) {
   return next();
 }
 
-export function isOwner(user: { role: string }): boolean {
-  return user.role === 'owner';
+export function isOwner(user: { role?: string } | null | undefined): boolean {
+  return user?.role === 'owner';
 }
 
 /**

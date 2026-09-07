@@ -27,12 +27,14 @@ async function checkAiRateLimit(cache: KVNamespace, userId: string): Promise<boo
   return true;
 }
 
-router.use('*', async (c, next) => {
-  const userId = c.get('userId');
+const handleAiRateLimit = async (c: any, next: any) => {
+  const userId = c.get('userId') || 'anon';
   const allowed = await checkAiRateLimit(c.env.MKS_CACHE, userId);
   if (!allowed) return c.json({ error: 'RATE_LIMIT', details: 'Limite de 30 requisições de IA por minuto atingido. Aguarde e tente novamente.' }, 429);
   return next();
-});
+};
+router.use('/ai/*', handleAiRateLimit);
+router.use('/groq/*', handleAiRateLimit);
 
 // ── Privacy guardrail ─────────────────────────────────────────────────────────
 const CPF_REGEX = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/;

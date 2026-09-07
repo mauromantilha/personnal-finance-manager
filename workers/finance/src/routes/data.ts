@@ -97,7 +97,7 @@ router.get('/data', async (c) => {
     db.query('SELECT * FROM goals').then(r => r.map(mapGoal)),
     db.query('SELECT * FROM alerts ORDER BY date DESC').then(r => r.map(mapAlert)),
     owner
-      ? db.query('SELECT * FROM (SELECT * FROM chat_history ORDER BY rowid DESC LIMIT 200) ORDER BY rowid ASC').then(r => r.map(mapChat))
+      ? db.query('SELECT * FROM (SELECT * FROM chat_history ORDER BY timestamp DESC LIMIT 200) ORDER BY timestamp ASC').then(r => r.map(mapChat))
       : Promise.resolve([]),
     db.query('SELECT * FROM categories ORDER BY (parent_id IS NOT NULL), parent_id, name').then(r => r.map(mapCategory as any)),
     db.query("SELECT * FROM credit_cards WHERE is_active = 1").then(r => r.map(mapCreditCard as any)),

@@ -13,7 +13,7 @@ const MAX_MEMO_LEN          = 500;
 const FITID_REGEX = /^[A-Za-z0-9_\-.]{1,64}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-router.use('*', requireOwner);
+router.use('/import/*', requireOwner);
 
 function parseAmountCents(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw) && Number.isInteger(raw) && raw > 0 && raw <= 1_000_000_000) {

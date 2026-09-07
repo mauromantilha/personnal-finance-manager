@@ -29,13 +29,11 @@ export interface D1Stmt {
 
 export class D1Client {
   private readonly queryUrl: string;
-  private readonly batchUrl: string;
   private readonly auth: string;
 
   constructor(accountId: string, databaseId: string, apiToken: string) {
     const base    = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}`;
     this.queryUrl = `${base}/query`;
-    this.batchUrl = `${base}/batch`;
     this.auth     = `Bearer ${apiToken}`;
   }
 
@@ -86,27 +84,8 @@ export class D1Client {
 
   async batch(stmts: D1Stmt[]): Promise<void> {
     if (stmts.length === 0) return;
-    const resp = await fetch(this.batchUrl, {
-      method: 'POST',
-      headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ statements: stmts.map(({ sql, params }) => ({ sql, params: params ?? [] })) }),
-    });
-
-    const data = await resp.json() as D1ApiResponse<never>;
-    if (!data.success) {
-      throw new Error(`D1 batch: ${JSON.stringify(data.errors)}`);
-    }
-    const results = data.result ?? [];
-    for (let i = 0; i < results.length; i++) {
-      if (!results[i]?.success) {
-        throw new Error(
-          `D1 batch: statement ${i} falhou — ${JSON.stringify(results[i] ?? data.errors)}`,
-        );
-      }
-    }
-    // Se a API devolver menos itens que enviamos, algo está inconsistente
-    if (results.length > 0 && results.length < stmts.length) {
-      throw new Error(`D1 batch: esperava ${stmts.length} resultados, recebeu ${results.length}`);
+    for (const { sql, params } of stmts) {
+      await this.exec(sql, params ?? []);
     }
   }
 }
