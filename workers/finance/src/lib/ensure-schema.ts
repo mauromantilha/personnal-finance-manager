@@ -58,6 +58,19 @@ export async function ensureTenantSchema(db: D1Client): Promise<void> {
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
+  await db.exec(`CREATE TABLE IF NOT EXISTS consent_audit_log (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    consent_type TEXT NOT NULL,
+    document_type TEXT,
+    disclaimer_version TEXT NOT NULL,
+    disclaimer_text TEXT NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    accepted_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
   await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT NOT NULL PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))

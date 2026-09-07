@@ -61,6 +61,28 @@ export async function execD1(
   }
 }
 
+export async function queryD1<T = Record<string, unknown>>(
+  accountId: string, token: string, dbId: string, sql: string, params: unknown[] = [],
+): Promise<T[]> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${CF}/accounts/${accountId}/d1/database/${dbId}/query`, {
+      method: 'POST',
+      headers: h(token),
+      body: JSON.stringify({ sql, params }),
+      signal: ctrl.signal,
+    });
+    const d = await res.json() as any;
+    if (!d.success || !d.result?.[0]?.success) return [];
+    return (d.result[0].results || []) as T[];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 /** Send multiple statements in a single subrequest using the D1 batch endpoint. */
 export async function execD1Batch(
   accountId: string, token: string, dbId: string, statements: string[],

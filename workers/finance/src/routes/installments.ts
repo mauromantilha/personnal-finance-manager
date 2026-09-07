@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { mapInstallmentGroup, mapCreditCard, DbCreditCard } from '../lib/mappers';
 import { recalculateBudgets } from '../lib/helpers';
+import { addMonthsSafe, splitCentsWithRemainder, computeInvoiceCycle } from '../lib/finance-math';
 import { D1Stmt } from '../lib/d1';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -28,7 +29,8 @@ router.post('/installments', async (c) => {
 
   const total    = parseInt(String(totalInCents), 10);
   const count    = Math.min(parseInt(String(installmentCount), 10), 48);
-  const instAmt  = Math.round(total / count);
+  const instAmounts = splitCentsWithRemainder(total, count);
+  const instAmt  = instAmounts[0];
   const groupId  = `grp-usr-${crypto.randomUUID()}`;
   const baseId   = `tx-inst-${crypto.randomUUID()}`;
 
@@ -43,35 +45,36 @@ router.post('/installments', async (c) => {
     : null;
   const mappedCard = card ? mapCreditCard(card) : null;
 
-  const txBase = new Date(startDate as string);
+  const baseDateStr = String(startDate).split('T')[0];
+  const firstCycle = (isCreditCard && mappedCard)
+    ? computeInvoiceCycle(baseDateStr, mappedCard.billingDay, mappedCard.dueDay)
+    : null;
+
   for (let i = 0; i < count; i++) {
-    const instDate = new Date(txBase);
-    instDate.setMonth(instDate.getMonth() + i);
-    const txDate   = instDate.toISOString().split('T')[0];
+    const txDate   = addMonthsSafe(baseDateStr, i);
+    const curAmt   = instAmounts[i];
     const txId     = `${baseId}-${i + 1}`;
     const desc     = `${description} (${i + 1}/${count})`;
 
-    if (isCreditCard && mappedCard) {
-      const instMonth = `${instDate.getFullYear()}-${String(instDate.getMonth() + 1).padStart(2, '0')}`;
+    if (isCreditCard && mappedCard && firstCycle) {
+      const dueDate   = addMonthsSafe(firstCycle.dueDate, i);
+      const instMonth = dueDate.slice(0, 7);
       const invId     = `inv-${creditCardId}-${instMonth.replace('-', '')}`;
-      const dueYear   = instDate.getMonth() + 1 === 12 ? instDate.getFullYear() + 1 : instDate.getFullYear();
-      const dueMonth  = ((instDate.getMonth() + 1) % 12) + 1;
-      const dueDate   = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(mappedCard.dueDay).padStart(2, '0')}`;
 
       stmts.push({ sql: "INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))", params: [invId, creditCardId, instMonth, dueDate] });
-      stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [instAmt, invId] });
+      stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [curAmt, invId] });
       stmts.push({
         sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id,member_id) VALUES (?,?,?,\'DES\',?,?,NULL,0,?,?,?,?,?,?)',
-        params: [txId, instAmt, txDate, category ?? 'Compras', desc, creditCardId, invId, i + 1, count, groupId, memberId ?? null],
+        params: [txId, curAmt, txDate, category ?? 'Compras', desc, creditCardId, invId, i + 1, count, groupId, memberId ?? null],
       });
     } else {
       stmts.push({
         sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,installment_number,installment_total,installment_group_id,member_id) VALUES (?,?,?,\'DES\',?,?,?,0,?,?,?,?)',
-        params: [txId, instAmt, txDate, category ?? 'Compras', desc, accountId, i + 1, count, groupId, memberId ?? null],
+        params: [txId, curAmt, txDate, category ?? 'Compras', desc, accountId, i + 1, count, groupId, memberId ?? null],
       });
       // Debita só parcelas já vencidas / do dia — futuras entram no saldo quando due
       if (accountId && new Date(txDate + 'T23:59:59') <= new Date()) {
-        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [instAmt, accountId] });
+        stmts.push({ sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [curAmt, accountId] });
       }
     }
   }

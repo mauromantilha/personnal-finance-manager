@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
-import { mapCreditCard, mapInvoice, DbInvoice } from '../lib/mappers';
+import { mapCreditCard, mapInvoice, DbInvoice, DbCreditCard } from '../lib/mappers';
 import { requireOwner } from '../lib/authz';
+import { recalculateBudgets } from '../lib/helpers';
 import { ensureTenantSchema } from '../lib/ensure-schema';
 
 const router = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -124,11 +125,21 @@ router.post('/invoices/:id/pay', requireOwner, async (c) => {
   const account = await db.first('SELECT id FROM accounts WHERE id = ?', [accountId]);
   if (!account) return c.json({ error: 'Conta de pagamento não encontrada.' }, 404);
 
+  const card = await db.first<DbCreditCard>('SELECT * FROM credit_cards WHERE id = ?', [mapped.creditCardId]);
+  const cardName = card?.name || 'Cartão';
   const paidAt = new Date().toISOString();
+  const txId = `tx-usr-${crypto.randomUUID()}`;
+  const todayStr = paidAt.split('T')[0];
+
   await db.batch([
     { sql: "UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?", params: [paidAt, id] },
     { sql: 'UPDATE accounts SET balance_in_cents = balance_in_cents - ? WHERE id = ?', params: [mapped.totalInCents, accountId] },
+    {
+      sql: "INSERT INTO transactions (id, amount_in_cents, date, type, category, description, account_id, credit_card_id, invoice_id, is_synced) VALUES (?, ?, ?, 'DES', 'Pagamento de Fatura', ?, ?, ?, ?, 0)",
+      params: [txId, mapped.totalInCents, todayStr, `Pagamento fatura ${cardName} (${mapped.month})`, accountId, mapped.creditCardId, id],
+    },
   ]);
+  await recalculateBudgets(db);
   return c.json({ success: true });
 });
 

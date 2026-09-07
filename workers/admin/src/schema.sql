@@ -198,6 +198,19 @@ CREATE TABLE IF NOT EXISTS lgpd_aceites (
   accepted_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS consent_audit_log (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  user_email         TEXT NOT NULL,
+  consent_type       TEXT NOT NULL,
+  document_type      TEXT,
+  disclaimer_version TEXT NOT NULL,
+  disclaimer_text    TEXT NOT NULL,
+  ip_address         TEXT,
+  user_agent         TEXT,
+  accepted_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id        TEXT PRIMARY KEY,
   name      TEXT NOT NULL,
@@ -282,6 +295,7 @@ INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0017_income_meta');
 INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0018_remove_demo_seed');
 INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0019_force_purge_demo');
 INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0020_indexes');
+INSERT OR IGNORE INTO schema_migrations (version) VALUES ('0021_consent_audit_log');
 
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_tx_member_date ON transactions(member_id, date);
@@ -290,4 +304,6 @@ CREATE INDEX IF NOT EXISTS idx_tx_credit_card ON transactions(credit_card_id);
 CREATE INDEX IF NOT EXISTS idx_tx_installment_group ON transactions(installment_group_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_card_month ON invoices(credit_card_id, month);
 CREATE INDEX IF NOT EXISTS idx_recurrences_active_dom ON recurrences(is_active, day_of_month);
+CREATE INDEX IF NOT EXISTS idx_consent_user ON consent_audit_log(user_id, accepted_at);
+CREATE INDEX IF NOT EXISTS idx_consent_type ON consent_audit_log(consent_type, accepted_at);
 

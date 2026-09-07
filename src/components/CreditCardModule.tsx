@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { CreditCard as CreditCardIcon, Plus, Trash2, CheckCircle, AlertCircle, Receipt, TrendingUp, ScanLine, X, Upload } from 'lucide-react';
 import { CreditCard, Invoice, FinancialAccount, Transaction } from '../types';
 import { parseMoneyToCents } from './CoreFinanceModule.utils';
+import AIDocumentConsentModal, { hasSavedConsent } from './AIDocumentConsentModal';
 
 interface InvoiceLineItem {
   date: string;
@@ -45,6 +46,8 @@ export default function CreditCardModule({
   const [invoiceResult, setInvoiceResult] = useState<{ imported: number; errors: string[] } | null>(null);
   const invoiceFileRef = useRef<HTMLInputElement>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [pendingInvoiceFile, setPendingInvoiceFile] = useState<File | null>(null);
 
   // Form fields
   const [name, setName] = useState('');
@@ -77,16 +80,13 @@ export default function CreditCardModule({
     setTimeout(() => setStatusMsg(null), 4000);
   };
 
-  const handleFileForInvoice = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !importCardId) return;
-    if (!file.type.startsWith('image/')) { notify('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+  const processInvoiceFile = (file: File) => {
     setAnalyzingInvoice(true);
     notify('IA lendo a fatura…', 'success');
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = (reader.result as string).split(',')[1];
-      const result = await onAnalyzeInvoice(base64, file.type, importCardId);
+      const result = await onAnalyzeInvoice(base64, file.type, importCardId!);
       const items: InvoiceLineItem[] = (result.lineItems || []).map(item => ({ ...item, checked: true }));
       setLineItems(items);
       setAnalyzingInvoice(false);
@@ -95,6 +95,20 @@ export default function CreditCardModule({
     };
     reader.readAsDataURL(file);
     if (invoiceFileRef.current) invoiceFileRef.current.value = '';
+  };
+
+  const handleFileForInvoice = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !importCardId) return;
+    if (!file.type.startsWith('image/')) { notify('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+
+    if (!hasSavedConsent()) {
+      setPendingInvoiceFile(file);
+      setShowConsentModal(true);
+      return;
+    }
+
+    processInvoiceFile(file);
   };
 
   const handleImportConfirm = async () => {
@@ -237,9 +251,13 @@ export default function CreditCardModule({
         {creditCards.map(card => {
           const cardInvoices = invoices.filter(i => i.creditCardId === card.id);
           const currentInv = cardInvoices.find(i => i.month === currentMonth);
-          const usedCents = currentInv?.totalInCents || 0;
-          const availCents = card.limitInCents - usedCents;
-          const usedPct = card.limitInCents > 0 ? Math.min((usedCents / card.limitInCents) * 100, 100) : 0;
+          const currentMonthUsedCents = currentInv?.totalInCents || 0;
+
+          // Limite comprometido = todas as faturas não pagas (mês atual + parcelas futuras + meses anteriores em aberto)
+          const unpaidInvoices = cardInvoices.filter(i => i.status !== 'paid');
+          const totalCommittedCents = unpaidInvoices.reduce((sum, inv) => sum + inv.totalInCents, 0);
+          const availCents = Math.max(0, card.limitInCents - totalCommittedCents);
+          const usedPct = card.limitInCents > 0 ? Math.min(100, (totalCommittedCents / card.limitInCents) * 100) : 0;
           const cardTxs = transactions.filter(t => t.creditCardId === card.id && t.date.startsWith(currentMonth));
 
           return (
@@ -270,16 +288,16 @@ export default function CreditCardModule({
               {/* Usage bar */}
               <div className="px-5 pt-4 pb-2 space-y-2">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-500 font-medium">Utilizado</span>
-                  <span className="font-bold text-slate-700">{fmt(usedCents)} <span className="text-slate-400 font-normal">/ {fmt(card.limitInCents)}</span></span>
+                  <span className="text-slate-500 font-medium">Comprometido Total</span>
+                  <span className="font-bold text-slate-700">{fmt(totalCommittedCents)} <span className="text-slate-400 font-normal">/ {fmt(card.limitInCents)}</span></span>
                 </div>
                 <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                   <div style={{ width: `${usedPct}%`, backgroundColor: card.color }}
                     className={`h-full transition-all ${usedPct >= 90 ? 'bg-rose-500' : ''}`} />
                 </div>
                 <div className="flex justify-between text-[10px] text-slate-400">
-                  <span>{Math.round(usedPct)}% usado</span>
-                  <span className="text-emerald-600 font-semibold">Disponível: {fmt(availCents)}</span>
+                  <span>{Math.round(usedPct)}% do limite usado</span>
+                  <span className="text-emerald-600 font-semibold">Disponível Real: {fmt(availCents)}</span>
                 </div>
               </div>
 
@@ -482,6 +500,23 @@ export default function CreditCardModule({
           </div>
         </div>
       )}
+      {/* Modal de Consentimento de IA e Isenção MKS Brasil */}
+      <AIDocumentConsentModal
+        isOpen={showConsentModal}
+        documentType="INVOICE"
+        onConsent={() => {
+          setShowConsentModal(false);
+          if (pendingInvoiceFile) {
+            processInvoiceFile(pendingInvoiceFile);
+            setPendingInvoiceFile(null);
+          }
+        }}
+        onCancel={() => {
+          setShowConsentModal(false);
+          setPendingInvoiceFile(null);
+          if (invoiceFileRef.current) invoiceFileRef.current.value = '';
+        }}
+      />
     </div>
   );
 }

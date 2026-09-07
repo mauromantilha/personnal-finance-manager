@@ -13,9 +13,13 @@ import { Calculator, ChevronUp, ChevronDown, Info } from 'lucide-react';
 const CDI    = 14.75; // % a.a.
 const SELIC  = 14.75; // % a.a.
 const IPCA   =  5.50; // % a.a. estimado
-const POUPANCA = +(SELIC * 0.70).toFixed(4); // 70% Selic quando Selic > 8,5%
+// Lei nº 12.703/2012:
+// - Selic > 8,5% a.a. -> 0,5% ao mês + TR (~6,17% a.a. + TR)
+// - Selic <= 8,5% a.a. -> 70% da Selic ao ano + TR
+const POUPANCA = SELIC > 8.5 ? 6.17 : +(SELIC * 0.70).toFixed(4);
 
-// ─── Tabela IR Regressiva (IOF nos primeiros 30d desprezado para simplificar) ─
+// ─── Tabela IR Regressiva (Lei nº 11.033/2004, art. 1º) ─────────────────────
+// Alíquotas por dias corridos: até 180d (22,5%), 181-360d (20%), 361-720d (17,5%), >720d (15%)
 function irRate(months: number): number {
   if (months <= 6)  return 0.225;
   if (months <= 12) return 0.200;
@@ -81,7 +85,7 @@ const P: SimProduct[] = [
   // POUPANÇA
   { id: 'poupanca', name: 'Poupança', bank: 'Todos os bancos', type: 'Poupança',
     profiles: ['conservative'],
-    rate: POUPANCA, rateLabel: `70% da Selic = ${POUPANCA.toFixed(2)}% a.a.`,
+    rate: POUPANCA, rateLabel: SELIC > 8.5 ? '0,5% a.m. + TR (~6,17% a.a.)' : `70% da Selic = ${POUPANCA.toFixed(2)}% a.a.`,
     irFree: true, liquidity: 'Diária', minMonths: 0 },
 
   // CDB liquidez diária / curto prazo
@@ -202,9 +206,9 @@ export default function InvestmentSimulator({ monthlyIncomeInCents = 0, institut
       <div className="flex items-start gap-3 p-3.5 bg-amber-50 border border-amber-200 rounded-xl">
         <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
         <p className="text-[11px] text-amber-700 leading-relaxed">
-          <strong>Referências públicas mai/2026:</strong> CDI/Selic {CDI}% a.a. · IPCA estimado {IPCA}% a.a. · Poupança {POUPANCA.toFixed(2)}% a.a.
+          <strong>Referências públicas mai/2026:</strong> CDI/Selic {CDI}% a.a. · IPCA estimado {IPCA}% a.a. · Poupança {POUPANCA.toFixed(2)}% a.a. (Lei nº 12.703/2012).
           Taxas obtidas nos sites das instituições. Simulações são estimativas — rentabilidade passada não garante resultados futuros.
-          IR regressivo aplicado sobre ganhos: 22,5% (até 6m) → 20% (7–12m) → 17,5% (13–24m) → 15% (acima de 24m).
+          IR regressivo (Lei nº 11.033/2004) aplicado sobre ganhos: 22,5% (até 180d) → 20% (181–360d) → 17,5% (361–720d) → 15% (&gt;720d).
         </p>
       </div>
 

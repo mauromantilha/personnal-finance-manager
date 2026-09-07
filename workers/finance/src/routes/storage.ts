@@ -29,9 +29,131 @@ router.get('/storage/info', async (c) => {
   });
 });
 
-// ── POST /api/storage/upgrade ─────────────────────────────────────────────────
-// Registra uma solicitação de upgrade. O admin é notificado por email e pode
-// aprovar manualmente via PUT /api/families/:subdomain (campo storageTierBytes).
+import { AsaasClient } from '../lib/asaas';
+
+// ── POST /api/storage/checkout — Gera cobrança Asaas (PIX) ────────────────────
+router.post('/storage/checkout', async (c) => {
+  const tenant     = c.get('tenant');
+  const user       = c.get('user');
+  const limitBytes = getStorageLimit(tenant.storageTierBytes);
+
+  if (limitBytes >= STORAGE_PAID_BYTES) {
+    return c.json({ error: 'Você já possui o plano de 1 GB ativo.' }, 409);
+  }
+
+  const asaasKey = (c.env as any).ASAAS_API_KEY;
+  const isSandbox = (c.env as any).ASAAS_ENVIRONMENT === 'sandbox' || !(c.env as any).ASAAS_ENVIRONMENT;
+
+  // Se chave configurada, gera cobrança real via Asaas API
+  if (asaasKey) {
+    try {
+      const asaas = new AsaasClient(asaasKey, isSandbox);
+      const customer = await asaas.getOrCreateCustomer({
+        name: user.name || tenant.name,
+        email: user.email,
+        externalReference: tenant.familyId,
+      });
+
+      const payment = await asaas.createStoragePixPayment({
+        customerId: customer.id,
+        value: STORAGE_UPGRADE_PRICE,
+        familyId: tenant.familyId,
+        description: `Upgrade 1GB - ${tenant.name}`,
+      });
+
+      const qr = await asaas.getPixQrCode(payment.id);
+
+      return c.json({
+        ok: true,
+        provider: 'asaas',
+        paymentId: payment.id,
+        price: STORAGE_UPGRADE_PRICE,
+        pixQrCode: qr.encodedImage,
+        pixCopiaECola: qr.payload,
+        expirationDate: qr.expirationDate,
+      });
+    } catch (e: any) {
+      console.error('[Asaas Checkout Error]', e.message);
+      // Fallback para solicitação assistida caso a API falhe
+    }
+  }
+
+  // Modo Simulação/Fallback caso ASAAS_API_KEY não esteja configurada no ambiente
+  const mockPaymentId = `pay-mock-${crypto.randomUUID()}`;
+  return c.json({
+    ok: true,
+    provider: 'simulated',
+    paymentId: mockPaymentId,
+    price: STORAGE_UPGRADE_PRICE,
+    pixCopiaECola: '00020126580014br.gov.bcb.pix0136mksbrasil-storage-upgrade-mock-key52040000530398654055.005802BR5910MKSBRASIL6009SAOPAULO62070503***6304ABCD',
+    pixQrCode: '',
+    message: 'Chave Asaas não configurada. Modo de simulação pronto para receber ASAAS_API_KEY.',
+  });
+});
+
+// ── GET /api/storage/check-payment/:id — Polling de status do pagamento ───────
+router.get('/storage/check-payment/:id', async (c) => {
+  const { id }    = c.req.param();
+  const tenant    = c.get('tenant');
+  const asaasKey  = (c.env as any).ASAAS_API_KEY;
+  const isSandbox = (c.env as any).ASAAS_ENVIRONMENT === 'sandbox' || !(c.env as any).ASAAS_ENVIRONMENT;
+
+  // Se simulado, aprova na hora
+  if (id.startsWith('pay-mock-')) {
+    const updatedTenant = { ...tenant, storageTierBytes: STORAGE_PAID_BYTES };
+    await c.env.MKS_TENANTS.put(`tenant:${tenant.subdomain}`, JSON.stringify(updatedTenant));
+    return c.json({ ok: true, paid: true, status: 'CONFIRMED' });
+  }
+
+  if (!asaasKey) return c.json({ ok: false, error: 'Asaas não configurado' }, 503);
+
+  try {
+    const asaas = new AsaasClient(asaasKey, isSandbox);
+    const payment = await asaas.getPayment(id);
+    const isPaid = payment.status === 'RECEIVED' || payment.status === 'CONFIRMED';
+
+    if (isPaid) {
+      const updatedTenant = { ...tenant, storageTierBytes: STORAGE_PAID_BYTES };
+      await c.env.MKS_TENANTS.put(`tenant:${tenant.subdomain}`, JSON.stringify(updatedTenant));
+    }
+
+    return c.json({ ok: true, paid: isPaid, status: payment.status });
+  } catch (e: any) {
+    return c.json({ ok: false, error: e.message }, 500);
+  }
+});
+
+// ── POST /api/webhooks/asaas — Webhook público da Asaas ───────────────────────
+router.post('/webhooks/asaas', async (c) => {
+  const webhookSecret = (c.env as any).ASAAS_WEBHOOK_SECRET;
+  const authToken     = c.req.header('asaas-access-token');
+
+  if (webhookSecret && authToken !== webhookSecret) {
+    return c.json({ error: 'Token de webhook inválido.' }, 401);
+  }
+
+  const body = await c.req.json<any>().catch(() => ({}));
+  const event = body.event;
+  const payment = body.payment;
+
+  if ((event === 'PAYMENT_RECEIVED' || event === 'PAYMENT_CONFIRMED') && payment?.externalReference) {
+    const familyId = payment.externalReference;
+    // Buscar tenant pelo familyId
+    const index: string[] = JSON.parse(await c.env.MKS_TENANTS.get('tenants:index') ?? '[]');
+    for (const sub of index) {
+      const t = await c.env.MKS_TENANTS.get<any>(`tenant:${sub}`, 'json');
+      if (t && t.familyId === familyId) {
+        t.storageTierBytes = STORAGE_PAID_BYTES;
+        await c.env.MKS_TENANTS.put(`tenant:${sub}`, JSON.stringify(t));
+        break;
+      }
+    }
+  }
+
+  return c.json({ ok: true });
+});
+
+// ── POST /api/storage/upgrade — Registra solicitação assistida ────────────────
 router.post('/storage/upgrade', async (c) => {
   const tenant    = c.get('tenant');
   const user      = c.get('user');

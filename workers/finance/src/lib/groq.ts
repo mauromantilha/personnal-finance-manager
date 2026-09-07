@@ -1,3 +1,5 @@
+import { maskPII } from './pii-masker';
+
 // Groq API — fetch-based (Workers compatible, sem SDK Node.js)
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
@@ -13,16 +15,36 @@ interface GroqOpts {
   response_format?: { type: 'json_object' | 'text' };
 }
 
+function sanitizeMessageContent(content: string | unknown[]): string | unknown[] {
+  if (typeof content === 'string') {
+    return maskPII(content);
+  }
+  if (Array.isArray(content)) {
+    return content.map((part: any) => {
+      if (part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') {
+        return { ...part, text: maskPII(part.text) };
+      }
+      return part;
+    });
+  }
+  return content;
+}
+
 export async function groqChat(
   apiKey: string,
   model: string,
   messages: GroqMessage[],
   opts: GroqOpts = {},
 ): Promise<string> {
+  const sanitizedMessages = messages.map(m => ({
+    ...m,
+    content: sanitizeMessageContent(m.content),
+  }));
+
   const resp = await fetch(`${GROQ_BASE}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, ...opts }),
+    body: JSON.stringify({ model, messages: sanitizedMessages, ...opts }),
   });
 
   if (!resp.ok) {
@@ -60,10 +82,15 @@ export async function groqAgentCall(
   tools: GroqTool[],
   opts: GroqOpts = {},
 ): Promise<{ content: string | null; tool_calls: GroqToolCall[] | null }> {
+  const sanitizedMessages = messages.map(m => ({
+    ...m,
+    content: m.content ? (sanitizeMessageContent(m.content) as string) : m.content,
+  }));
+
   const resp = await fetch(`${GROQ_BASE}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, tools, tool_choice: 'auto', ...opts }),
+    body: JSON.stringify({ model, messages: sanitizedMessages, tools, tool_choice: 'auto', ...opts }),
   });
   if (!resp.ok) {
     const err = await resp.text();

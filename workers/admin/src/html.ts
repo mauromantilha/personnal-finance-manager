@@ -561,9 +561,10 @@ export function adminHtml(baseDomain: string, nonce: string): string { return /*
       <button class="m-x" id="modal-close">×</button>
     </div>
     <div class="mbdy">
-      <div class="ig" id="m-info"></div>
       <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:9px;">Banco de Dados D1</div>
       <div id="m-stats"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.7px;margin:16px 0 9px;">📜 Auditoria de Consentimentos & Isenção de IA (LGPD)</div>
+      <div id="m-consents" style="max-height:220px;overflow-y:auto;"></div>
     </div>
     <div class="mftr">
       <a id="m-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sec" style="font-size:11px;padding:5px 10px;">↗ Abrir Site</a>
@@ -1367,6 +1368,7 @@ async function openModal(sub) {
     igItem('D1 Database',   '<span class="mono" style="font-size:10px;color:var(--t2);">' + esc((modalTenant.d1DatabaseId || '').slice(0,20) + (modalTenant.d1DatabaseId ? '…' : '—')) + '</span>');
 
   loadModalStats(sub);
+  loadModalConsents(sub);
 }
 
 function igItem(label, val) {
@@ -1402,6 +1404,40 @@ async function loadModalStats(sub) {
       + '</div>';
   });
   el('m-stats').innerHTML = statsGrid + counters + '</div>';
+}
+
+async function loadModalConsents(sub) {
+  var container = el('m-consents');
+  if (!container) return;
+  container.innerHTML = spinner('Buscando logs de consentimento…');
+  var data = await api('GET', '/families/' + sub + '/consents', null, 25000);
+  if (data.error || !data.consents) {
+    container.innerHTML = '<div style="font-size:11px;color:var(--t3);padding:8px 0;">Nenhum consentimento registrado ou tabela não criada ainda.</div>';
+    return;
+  }
+  var list = data.consents || [];
+  if (!list.length) {
+    container.innerHTML = '<div style="font-size:11px;color:var(--t3);padding:8px 0;">Nenhum registro de consentimento para leitura de IA encontrado.</div>';
+    return;
+  }
+  var rows = list.map(function(c) {
+    var dt = c.accepted_at ? new Date(c.accepted_at).toLocaleString('pt-BR') : '—';
+    var user = esc(c.user_email || c.user_id || '—');
+    var type = esc(c.document_type || c.consent_type || 'IA');
+    var ip = esc(c.ip_address || '—');
+    return '<tr style="font-size:11px;border-bottom:1px solid var(--bdr);">'
+      + '<td style="padding:6px 8px;white-space:nowrap;color:var(--t2);">' + dt + '</td>'
+      + '<td style="padding:6px 8px;font-weight:600;color:var(--t1);">' + user + '</td>'
+      + '<td style="padding:6px 8px;"><span class="badge" style="background:rgba(14,201,126,.15);color:#0ec97e;font-size:10px;">' + type + '</span></td>'
+      + '<td style="padding:6px 8px;font-family:monospace;color:var(--t3);font-size:10px;">' + ip + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;"><button class="btn btn-sec" style="font-size:10px;padding:2px 7px;" onclick="alert(\'Snapshot do Termo Aceito:\\n\\n\' + decodeURIComponent(\'' + encodeURIComponent(c.disclaimer_text || '') + '\'))">Ver Termo</button></td>'
+      + '</tr>';
+  }).join('');
+  container.innerHTML = '<div style="border:1px solid var(--bdr);border-radius:6px;background:var(--surf);overflow-x:auto;">'
+    + '<table style="width:100%;border-collapse:collapse;">'
+    + '<thead><tr style="font-size:10px;color:var(--t3);text-align:left;border-bottom:1px solid var(--bdr);background:rgba(0,0,0,.03);">'
+    + '<th style="padding:6px 8px;">Data/Hora</th><th style="padding:6px 8px;">Usuário</th><th style="padding:6px 8px;">Tipo</th><th style="padding:6px 8px;">IP</th><th style="padding:6px 8px;text-align:right;">Prova</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
 function closeModal() {

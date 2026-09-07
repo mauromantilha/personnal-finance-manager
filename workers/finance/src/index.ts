@@ -24,6 +24,7 @@ import importerRoutes     from './routes/importers';
 import backupRoutes       from './routes/backup';
 import debtRoutes         from './routes/debts';
 import storageRoutes      from './routes/storage';
+import consentRoutes      from './routes/consents';
 
 const LGPD_CURRENT_VERSION = '2.0';
 
@@ -39,6 +40,9 @@ export interface Env {
   CF_API_TOKEN:       string;
   GROQ_API_KEY:       string;
   RESEND_API_KEY:     string;
+  ASAAS_API_KEY?:     string;
+  ASAAS_WEBHOOK_SECRET?: string;
+  ASAAS_ENVIRONMENT?: string;
 }
 
 // ── Tenant (lido do KV MKS_TENANTS) ──────────────────────────────────────────
@@ -90,6 +94,9 @@ app.use('*', async (c, next) => {
 // Bloqueia POST/PUT/PATCH/DELETE forjados por <form> em outro site.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === '/api/webhooks/asaas') return next();
+
   if (MUTATING.has(c.req.method)) {
     const xrw = c.req.header('X-Requested-With');
     if (xrw !== 'fetch') {
@@ -135,6 +142,9 @@ app.get('/api/health', (c) => {
 
 // ── Middleware 2: CF Access JWT verification ───────────────────────────────────
 app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === '/api/webhooks/asaas') return next();
+
   const jwt = c.req.header('Cf-Access-Jwt-Assertion')
             ?? getCookie(c, 'CF_Authorization');
 
@@ -157,6 +167,9 @@ app.use('/api/*', async (c, next) => {
 
 // ── Middleware 3: User lookup / first-access creation ─────────────────────────
 app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === '/api/webhooks/asaas') return next();
+
   const db    = c.get('db');
   const email = c.get('email');
 
@@ -227,6 +240,7 @@ const LGPD_EXEMPT = new Set([
   '/api/auth/status',
   '/api/lgpd/accept',
   '/api/health',
+  '/api/webhooks/asaas',
 ]);
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname.replace(/\/$/, '') || '/';
@@ -257,6 +271,7 @@ app.route('/api', importerRoutes);
 app.route('/api', backupRoutes);
 app.route('/api', debtRoutes);
 app.route('/api', storageRoutes);
+app.route('/api', consentRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.all('*', (c) => c.json({ error: 'Rota não encontrada' }, 404));

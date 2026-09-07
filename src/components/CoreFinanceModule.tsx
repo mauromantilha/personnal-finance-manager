@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { FinancialAccount, Transaction, AccountType, TransactionType, Category, CreditCard, FamilyMember } from '../types';
 import { FALLBACK_CATS, formatBRL, parseCsvPreview, computePeriodBounds, parseMoneyToCents, type PeriodFilter } from './CoreFinanceModule.utils';
+import AIDocumentConsentModal, { hasSavedConsent } from './AIDocumentConsentModal';
 
 interface CoreFinanceModuleProps {
   accounts: FinancialAccount[];
@@ -118,6 +119,8 @@ export default function CoreFinanceModule({
   const [pendingDocKey, setPendingDocKey] = useState<string | null>(null);
   const [viewDocKey, setViewDocKey] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [pendingAIFile, setPendingAIFile] = useState<{ file: File; type: 'expense' | 'income' } | null>(null);
 
   // ── CSV import state ────────────────────────────────────────────────────────
   const [showImport, setShowImport] = useState(false);
@@ -258,25 +261,38 @@ export default function CoreFinanceModule({
   };
 
   // ── AI document handler ─────────────────────────────────────────────────────
-  const handleFileForAI = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { fb('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+  const executeFileForAI = (file: File) => {
     setAiLoading(true);
     fb('Lendo documento com IA…', 'success');
     const reader = new FileReader();
     reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      const result = await onAnalyzeDocument(base64, file.type);
-      if (result.description) setTxDesc(result.description);
-      if (result.amountInCents) setTxAmount((result.amountInCents / 100).toFixed(2).replace('.', ','));
-      if (result.dueDate) setTxDate(result.dueDate);
-      if (result.documentKey) setPendingDocKey(result.documentKey);
-      setAiLoading(false);
-      fb('IA extraiu os dados! Revise e confirme.', 'success');
+      try {
+        const base64 = (reader.result as string).split(',')[1];
+        const result = await onAnalyzeDocument(base64, file.type);
+        if (result.description) setTxDesc(result.description);
+        if (result.amountInCents) setTxAmount((result.amountInCents / 100).toFixed(2).replace('.', ','));
+        if (result.dueDate) setTxDate(result.dueDate);
+        if (result.documentKey) setPendingDocKey(result.documentKey);
+        fb('IA extraiu os dados! Revise e confirme.', 'success');
+      } finally {
+        setAiLoading(false);
+      }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleFileForAI = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { fb('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
     if (fileInputRef.current) fileInputRef.current.value = '';
+
+    if (!hasSavedConsent()) {
+      setPendingAIFile({ file, type: 'expense' });
+      setShowConsentModal(true);
+      return;
+    }
+    executeFileForAI(file);
   };
 
   // ── Transaction handlers ────────────────────────────────────────────────────
@@ -338,10 +354,7 @@ export default function CoreFinanceModule({
     else fb('Erro ao registrar receita.', 'error');
   };
 
-  const handleIncomeAIFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { fb('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
+  const executeIncomeAIFile = (file: File) => {
     setIncomeAiState('loading');
     setIncomeAiError('');
     const reader = new FileReader();
@@ -368,7 +381,20 @@ export default function CoreFinanceModule({
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleIncomeAIFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { fb('Use uma imagem (JPG, PNG, WEBP).', 'error'); return; }
     if (incomeFileRef.current) incomeFileRef.current.value = '';
+
+    if (!hasSavedConsent()) {
+      setPendingAIFile({ file, type: 'income' });
+      setShowConsentModal(true);
+      return;
+    }
+    executeIncomeAIFile(file);
   };
 
   const handleCreateTaxEntry = async (e: { preventDefault(): void }) => {
@@ -1450,6 +1476,24 @@ export default function CoreFinanceModule({
           </div>
         </div>
       )}
+
+      {/* AI Document consent & disclaimer modal */}
+      <AIDocumentConsentModal
+        isOpen={showConsentModal}
+        documentType="BILL"
+        onConsent={() => {
+          setShowConsentModal(false);
+          if (pendingAIFile) {
+            if (pendingAIFile.type === 'expense') executeFileForAI(pendingAIFile.file);
+            else executeIncomeAIFile(pendingAIFile.file);
+            setPendingAIFile(null);
+          }
+        }}
+        onCancel={() => {
+          setShowConsentModal(false);
+          setPendingAIFile(null);
+        }}
+      />
     </div>
   );
 }

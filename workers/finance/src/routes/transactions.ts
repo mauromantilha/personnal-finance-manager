@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../index';
 import { mapTransaction, mapCreditCard, DbTransaction, DbCreditCard } from '../lib/mappers';
 import { recalculateBudgets, checkBudgetThresholds } from '../lib/helpers';
+import { addMonthsSafe, splitCentsWithRemainder, computeInvoiceCycle } from '../lib/finance-math';
 import { D1Stmt } from '../lib/d1';
 
 const VALID_TYPES = ['REC', 'DES', 'TRANS'];
@@ -59,27 +60,26 @@ router.post('/transactions', async (c) => {
       const card = await db.first<DbCreditCard>('SELECT * FROM credit_cards WHERE id = ?', [creditCardId]);
       if (!card) return c.json({ error: 'Cartão não encontrado.' }, 404);
       const mapped = mapCreditCard(card);
-      const txDate = new Date(date as string);
+      const baseDateStr = String(date).split('T')[0];
+      const firstCycle = computeInvoiceCycle(baseDateStr, mapped.billingDay, mapped.dueDay);
+      const instAmounts = splitCentsWithRemainder(amount, numInstallments);
 
       for (let i = 0; i < numInstallments; i++) {
-        const instDate = new Date(txDate);
-        instDate.setMonth(instDate.getMonth() + i);
-        const instMonth = `${instDate.getFullYear()}-${String(instDate.getMonth() + 1).padStart(2, '0')}`;
-        const instAmount = Math.round(amount / numInstallments);
+        const instDate = addMonthsSafe(baseDateStr, i);
+        const instAmount = instAmounts[i];
 
-        const invId = `inv-${creditCardId}-${instMonth.replace('-', '')}`;
-        const dueYear  = instDate.getMonth() + 1 === 12 ? instDate.getFullYear() + 1 : instDate.getFullYear();
-        const dueMonth = ((instDate.getMonth() + 1) % 12) + 1;
-        const dueDate  = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(mapped.dueDay).padStart(2, '0')}`;
+        const instDueDate = addMonthsSafe(firstCycle.dueDate, i);
+        const instMonth   = instDueDate.slice(0, 7);
+        const invId       = `inv-${creditCardId}-${instMonth.replace('-', '')}`;
 
-        stmts.push({ sql: "INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))", params: [invId, creditCardId, instMonth, dueDate] });
+        stmts.push({ sql: "INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))", params: [invId, creditCardId, instMonth, instDueDate] });
         stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [instAmount, invId] });
 
         const txId = numInstallments > 1 ? `${baseId}-${i + 1}` : baseId;
         const desc = numInstallments > 1 ? `${description} (${i + 1}/${numInstallments})` : description;
         stmts.push({
           sql: 'INSERT INTO transactions (id,amount_in_cents,date,type,category,description,account_id,is_synced,credit_card_id,invoice_id,installment_number,installment_total,installment_group_id,document_key,member_id,income_type,payer,profession) VALUES (?,?,?,?,?,?,NULL,0,?,?,?,?,?,?,?,?,?,?)',
-          params: [txId, instAmount, instDate.toISOString().split('T')[0], type, category, desc,
+          params: [txId, instAmount, instDate, type, category, desc,
             creditCardId, invId,
             numInstallments > 1 ? i + 1 : null,
             numInstallments > 1 ? numInstallments : null,

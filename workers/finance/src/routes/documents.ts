@@ -4,6 +4,7 @@ import { groqChat, classifyMerchant } from '../lib/groq';
 import { r2Put, r2Get } from '../lib/r2';
 import { mapCreditCard, DbCreditCard } from '../lib/mappers';
 import { recalculateBudgets } from '../lib/helpers';
+import { computeInvoiceCycle } from '../lib/finance-math';
 import { D1Stmt } from '../lib/d1';
 import { checkQuota, incrementStorage, decrementStorage, formatBytes, STORAGE_UPGRADE_PRICE, STORAGE_PAID_BYTES } from '../lib/storage';
 import { validateBase64Upload } from '../lib/upload';
@@ -135,12 +136,11 @@ router.post('/import/invoice', async (c) => {
     const amount = Math.round(Number(amountInCents));
     if (isNaN(amount) || amount <= 0) { errors.push(`Valor inválido: ${amountInCents}`); continue; }
 
-    const txDate   = new Date(date as string);
-    const month    = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
-    const invId    = `inv-${creditCardId}-${month.replace('-', '')}`;
-    const dueYear  = txDate.getMonth() + 1 === 12 ? txDate.getFullYear() + 1 : txDate.getFullYear();
-    const dueMonth = ((txDate.getMonth() + 1) % 12) + 1;
-    const dueDate  = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(mapped.dueDay).padStart(2, '0')}`;
+    const txDateStr = String(date).split('T')[0];
+    const cycle = computeInvoiceCycle(txDateStr, mapped.billingDay, mapped.dueDay);
+    const month = cycle.invoiceMonth;
+    const dueDate = cycle.dueDate;
+    const invId = `inv-${creditCardId}-${month.replace('-', '')}`;
 
     stmts.push({ sql: "INSERT OR IGNORE INTO invoices (id,credit_card_id,month,total_in_cents,status,due_date,created_at) VALUES (?,?,?,0,'open',?,datetime('now'))", params: [invId, creditCardId, month, dueDate] });
     stmts.push({ sql: 'UPDATE invoices SET total_in_cents = total_in_cents + ? WHERE id = ?', params: [amount, invId] });

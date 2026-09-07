@@ -40,6 +40,38 @@ router.get('/families/:subdomain', async (c) => {
   return c.json({ tenant });
 });
 
+// GET /api/families/:subdomain/consents — Auditoria de consentimentos para proteção da MKS Brasil
+router.get('/families/:subdomain/consents', async (c) => {
+  const { subdomain } = c.req.param();
+  const tenant = await c.env.MKS_TENANTS.get<Tenant>(`tenant:${subdomain}`, 'json');
+  if (!tenant) return c.json({ error: 'Família não encontrada.' }, 404);
+  if (!tenant.d1DatabaseId) return c.json({ consents: [] });
+
+  const { queryD1 } = await import('../lib/cf-api');
+  try {
+    const rows = await queryD1<{
+      id: string;
+      user_id: string;
+      user_email: string;
+      consent_type: string;
+      document_type: string | null;
+      disclaimer_version: string;
+      disclaimer_text: string;
+      ip_address: string | null;
+      user_agent: string | null;
+      accepted_at: string;
+    }>(
+      c.env.CF_ACCOUNT_ID,
+      c.env.CF_API_TOKEN,
+      tenant.d1DatabaseId,
+      'SELECT * FROM consent_audit_log ORDER BY accepted_at DESC LIMIT 100',
+    );
+    return c.json({ consents: rows });
+  } catch (e: any) {
+    return c.json({ consents: [], error: e.message });
+  }
+});
+
 // PUT /api/families/:subdomain
 router.put('/families/:subdomain', async (c) => {
   const { subdomain } = c.req.param();

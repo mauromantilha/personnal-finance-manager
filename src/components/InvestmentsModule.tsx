@@ -3,6 +3,7 @@ import { TrendingUp, Plus, Pencil, Trash2, CheckCircle, AlertCircle, X, Check, B
 import { PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Investment, AssetClass, FinancialAccount } from '../types';
 import InvestmentSimulator from './InvestmentSimulator';
+import AIDocumentConsentModal, { hasSavedConsent } from './AIDocumentConsentModal';
 
 interface InvestmentsModuleProps {
   investments: Investment[];
@@ -69,6 +70,8 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
   const [aiDrafts, setAiDrafts] = useState<AIDraft[]>([]);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiInstitution, setAiInstitution] = useState('');
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [pendingAIFile, setPendingAIFile] = useState<File | null>(null);
 
   // Form state
   const [fName, setFName] = useState('');
@@ -91,7 +94,7 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
   const updateDraft = (id: string, patch: Partial<AIDraft>) =>
     setAiDrafts(prev => prev.map(d => d._id === id ? { ...d, ...patch } : d));
 
-  const handleAIFileSelect = async (file: File) => {
+  const executeAIFileSelect = async (file: File) => {
     setAiState('loading');
     setAiError(null);
     try {
@@ -128,6 +131,15 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
       setAiError(e.message ?? 'Erro inesperado');
       setAiState('idle');
     }
+  };
+
+  const handleAIFileSelect = async (file: File) => {
+    if (!hasSavedConsent()) {
+      setPendingAIFile(file);
+      setShowConsentModal(true);
+      return;
+    }
+    executeAIFileSelect(file);
   };
 
   const handleSaveAIDrafts = async () => {
@@ -996,6 +1008,23 @@ export default function InvestmentsModule({ investments, accounts, monthlyIncome
           )}
         </div>
       )}
+
+      {/* Modal de Consentimento de IA e Isenção MKS Brasil */}
+      <AIDocumentConsentModal
+        isOpen={showConsentModal}
+        documentType="INVESTMENT_STATEMENT"
+        onConsent={() => {
+          setShowConsentModal(false);
+          if (pendingAIFile) {
+            executeAIFileSelect(pendingAIFile);
+            setPendingAIFile(null);
+          }
+        }}
+        onCancel={() => {
+          setShowConsentModal(false);
+          setPendingAIFile(null);
+        }}
+      />
     </div>
   );
 }
