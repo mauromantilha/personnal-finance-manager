@@ -772,33 +772,33 @@ export default function App() {
       )}
 
       {/* Sidebar — full height from top */}
-      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-emerald-100 text-emerald-950 border-r border-emerald-200 flex flex-col fixed lg:static h-screen z-40 transition-all duration-200 lg:translate-x-0 ${
+      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-gradient-to-b from-[#0F172A] via-[#131E35] to-[#1E293B] text-slate-100 border-r border-slate-800/80 flex flex-col fixed lg:static h-screen z-40 transition-all duration-200 lg:translate-x-0 shadow-2xl lg:shadow-none ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
 
         {/* Branding */}
-        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-5'} py-4 border-b border-emerald-200/80 shrink-0`}>
+        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-5'} py-4 border-b border-slate-800/80 shrink-0`}>
           {sidebarCollapsed ? (
             <button
               onClick={() => setSidebarCollapsed(v => !v)}
-              className="hidden lg:flex p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-200/70 rounded-lg transition-all"
+              className="hidden lg:flex p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors"
               title="Expandir sidebar"
             >
               <Menu className="w-5 h-5" />
             </button>
           ) : (
             <>
-              <span className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white text-base font-black shadow-sm shrink-0">F</span>
+              <span className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white text-base font-black shadow-md shadow-blue-500/20 shrink-0">F</span>
               <div className="flex-1 min-w-0">
-                <p className="font-black text-sm text-emerald-950 leading-tight">Finanças Livre</p>
-                <p className="text-[10px] text-emerald-700/70 leading-tight">Gestão financeira inteligente</p>
+                <p className="font-bold text-sm text-white leading-tight tracking-tight">Finanças Livre</p>
+                <p className="text-[10px] text-slate-400 leading-tight font-medium">Gestão financeira inteligente</p>
               </div>
-              <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-emerald-600 hover:text-emerald-900 rounded-md hover:bg-emerald-200/70 shrink-0">
+              <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-md transition-colors shrink-0">
                 <X className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setSidebarCollapsed(v => !v)}
-                className="hidden lg:flex p-1 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-200/70 rounded-lg transition-all shrink-0"
+                className="hidden lg:flex p-1 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors shrink-0"
                 title="Recolher sidebar"
               >
                 <Menu className="w-5 h-5" />
@@ -807,7 +807,7 @@ export default function App() {
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-3 space-y-0.5 px-2">
+        <nav className="flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-3 space-y-1 px-2.5">
               {sidebarNavItems.map(item => {
                 const Icon = item.icon;
                 const isSelected = activeTab === item.id;
@@ -819,20 +819,20 @@ export default function App() {
                       setSidebarOpen(false);
                     }}
                     title={sidebarCollapsed ? item.label : undefined}
-                    className={`w-full flex items-center ${
+                    className={`group w-full flex items-center ${
                       sidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'
-                    } py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all ${
+                    } py-2.5 rounded-xl text-xs tracking-wide transition-all ${
                       isSelected 
-                        ? 'bg-emerald-600 text-white shadow-sm' 
-                        : 'text-emerald-800/80 hover:text-emerald-950 hover:bg-emerald-200/60'
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-900/30 font-semibold' 
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 font-medium'
                     }`}
                   >
                     <div className={`flex items-center ${sidebarCollapsed ? '' : 'gap-3'}`}>
-                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : 'text-emerald-700'}`} />
+                      <Icon className={`w-4 h-4 shrink-0 transition-colors ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
                       {!sidebarCollapsed && <span>{item.label}</span>}
                     </div>
                     {!sidebarCollapsed && item.badge !== undefined && item.badge > 0 && (
-                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-extrabold ${isSelected ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-600'}`}>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-extrabold ${isSelected ? 'bg-white/25 text-white' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
                         {item.badge}
                       </span>
                     )}
@@ -842,15 +842,17 @@ export default function App() {
         </nav>
 
         {/* Sidebar footer */}
-        <div className={`pt-3 border-t border-emerald-200/80 shrink-0 ${sidebarCollapsed ? 'px-2 pb-3 space-y-1' : 'px-5 pb-5 space-y-3'}`}>
+        <div className={`pt-3 border-t border-slate-800/80 shrink-0 ${sidebarCollapsed ? 'px-2 pb-3 space-y-1' : 'px-4 pb-4 space-y-2.5'}`}>
             {!sidebarCollapsed && (
               <>
-                <div className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-emerald-600" /> Cloudflare Workers
+                <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1.5 px-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"></span>
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Cloudflare Workers</span>
                 </div>
                 <button 
                   onClick={handleResetDB}
-                  className="w-full text-left text-[10px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-lg transition-all uppercase tracking-widest"
+                  className="w-full text-left text-[10px] font-bold text-slate-400 hover:text-rose-400 hover:bg-rose-950/25 px-2.5 py-1.5 rounded-lg transition-colors uppercase tracking-wider"
                 >
                   Limpar Todos os Dados
                 </button>
